@@ -1,0 +1,48 @@
+[project]
+name = "audiobook"
+version = "0.1.0"
+description = "Локальный TTS-пайплайн аудиокниги с клонированием голоса (Mac dev -> Windows prod)"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "torch>=2.3",
+    "torchaudio>=2.3",
+    "coqui-tts[codec]>=0.24", # community-форк Coqui, XTTS-v2; [codec] -> torchcodec для аудио-IO на torch>=2.9
+    # coqui-tts объявляет transformers>=4.57 без потолка, но его код импортирует
+    # isin_mps_friendly, вырезанный в transformers 5.0 -> держим на ветке 4.x.
+    "transformers>=4.57,<5",
+    "ruaccent>=1.5",          # ударения и омографы
+    "faster-whisper>=1.0",    # QC: CTranslate2, CPU int8, без сборки
+    "soundfile>=0.12",
+    "numpy>=1.26,<2.0",       # coqui-tts пока не дружит с numpy 2
+    "pyyaml>=6.0",
+    "pyloudnorm>=0.1",        # проверка LUFS в тестах
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
+
+[project.scripts]
+audiobook = "audiobook.__main__:main"
+
+# --- torch: на Windows берём CPU-wheel с индекса PyTorch, на macOS arm64 — обычный PyPI (там уже MPS) ---
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'win32'" }]
+torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'win32'" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: интеграционные тесты с реальными моделями (RUN_SLOW=1)"]
+timeout = 600
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audiobook"]
