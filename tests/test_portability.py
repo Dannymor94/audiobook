@@ -62,10 +62,12 @@ def test_main_guards_spawn():
 
 
 def test_ffmpeg_lookup_prefers_bin(monkeypatch, tmp_path):
+    import sys
     from audiobook import paths
     monkeypatch.setattr(paths, "BIN", tmp_path)
-    (tmp_path / "ffmpeg").touch()
-    assert paths.ffmpeg() == tmp_path / "ffmpeg"
+    exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    (tmp_path / exe).touch()
+    assert paths.ffmpeg() == tmp_path / exe
 
 
 def test_config_loads_utf8():
