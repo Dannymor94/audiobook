@@ -7,8 +7,7 @@ dependencies = [
     "torch>=2.3",
     "torchaudio>=2.3",
     "coqui-tts[codec]>=0.24", # community-форк Coqui, XTTS-v2; [codec] -> torchcodec для аудио-IO на torch>=2.9
-    # coqui-tts объявляет transformers>=4.57 без потолка, но его код импортирует
-    # isin_mps_friendly, вырезанный в transformers 5.0 -> держим на ветке 4.x.
+    # coqui-tts 0.27.5 calls isin_mps_friendly removed in transformers 5.0; hold at <5
     "transformers>=4.57,<5",
     "ruaccent>=1.5",          # ударения и омографы
     "faster-whisper>=1.0",    # QC: CTranslate2, CPU int8, без сборки

@@ -46,6 +46,13 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
     except Exception as e:  # noqa: BLE001
         r.check("torch импортируется", False, str(e))
 
+    try:
+        import torchcodec
+        # torchcodec ships its own bundled ffmpeg; it is independent from bin/ffmpeg.
+        r.info("torchcodec ffmpeg", f"major {torchcodec.ffmpeg_major_version} (bundled, не зависит от bin/ffmpeg)")
+    except Exception as e:  # noqa: BLE001
+        r.check("torchcodec импортируется", False, str(e))
+
     if not no_models:
         r.check("models/tts (XTTS-v2)", any((paths.MODELS / "tts").rglob("model.pth")), "скопировать models/ с флешки")
         r.check("models/ruaccent", (paths.MODELS / "ruaccent").exists(), "скопировать models/")

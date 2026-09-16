@@ -32,8 +32,28 @@ def test_no_string_path_joins():
 
 
 def test_no_hardcoded_home_cache():
-    bad = [p.name for p in PY_FILES if "~/.cache" in _read(p) or "expanduser" in _read(p)]
+    """Fires on code lines only; comments documenting ~/ are allowed."""
+    bad = []
+    for p in PY_FILES:
+        for line in _read(p).splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if "~/.cache" in line or "expanduser" in line:
+                bad.append(f"{p.name}: {line.strip()!r}")
     assert not bad, f"обращение к домашнему кэшу: {bad}"
+
+
+def test_no_hardcoded_home_cache_positive():
+    """Greptest must fire on real expanduser/~/.cache in code, not only in comments."""
+    def _check(src: str) -> list[str]:
+        return [
+            ln for ln in src.splitlines()
+            if not ln.lstrip().startswith("#")
+            and ("~/.cache" in ln or "expanduser" in ln)
+        ]
+
+    assert _check("# expanduser / ~/.cache mentioned in a comment\n") == []
+    assert _check("path = os.path.expanduser('~/.cache')\n") != []
 
 
 def test_main_guards_spawn():
