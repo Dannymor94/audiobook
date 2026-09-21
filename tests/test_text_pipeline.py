@@ -851,6 +851,50 @@ def test_synthesize_flags_cap_saturation(monkeypatch):
     assert stub.last_kw["max_new_tokens"] == mnt
 
 
+def test_qc_normalizer_folds_representation_noise():
+    """The CER normalizer folds only representation noise, applied to both sides."""
+    from audiobook.qc import normalize_for_cer
+
+    # stress marks (combining acute + RUAccent '+'), ё→е, case, punctuation
+    assert normalize_for_cer("О́тзывы!") == normalize_for_cer("отзывы")
+    assert normalize_for_cer("подмо+га") == normalize_for_cer("подмога")
+    assert normalize_for_cer("Ёлка, ель…") == "елка ель"
+    assert normalize_for_cer("  двойные   пробелы  ") == "двойные пробелы"
+    # й must NOT be folded to и (its breve is not a stress mark)
+    assert normalize_for_cer("мой") != normalize_for_cer("мои")
+
+
+def test_qc_cer_clean_pairs_zero(  ):
+    """Zero false positives: clean transcript vs text is 0.0 CER even with the
+    kinds of surface differences whisper produces (case, punctuation, ё, stress)."""
+    from audiobook.qc import cer
+
+    assert cer("Отзывы", "отзывы") == 0.0
+    assert cer("Я наконец поняла, почему.", "я наконец поняла почему") == 0.0
+    assert cer("Всё хорошо", "все хорошо") == 0.0
+    # a real error registers, and is a fraction of the reference length
+    e = cer("привет мир", "привет мор")
+    assert 0.0 < e < 0.2
+
+
+def test_qc_cer_unifies_number_forms():
+    """Digit vs word representation of a number must not fail a chunk: whisper's
+    '50%' / '13' align with the text's 'пятьдесят процентов' / 'тринадцать'."""
+    from audiobook.qc import cer, normalize_for_cer
+
+    assert "пятьдесят процентов" in normalize_for_cer("на 50%")
+    assert cer("на пятьдесят процентов", "на 50%") == 0.0
+    assert cer("сто процентов", "100%") == 0.0
+    assert cer("тринадцать глава", "13 глава") == 0.0
+
+
+def test_qc_cer_symmetric_on_stress():
+    """Reference carrying a respelling-style acute still scores 0 vs plain hyp."""
+    from audiobook.qc import cer
+
+    assert cer("сло́во", "слово") == 0.0
+
+
 def test_synth_offline_no_download(monkeypatch, tmp_path):
     """HF_HUB_OFFLINE=1 + empty models/ → load_model raises a clear
     FileNotFoundError from the local-snapshot lookup, before any network or

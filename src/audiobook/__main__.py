@@ -47,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "synth":
         from .synth import run as synth
         return synth(load_config(), a.section)
+    if a.cmd == "qc":
+        from .qc import run as qc
+        return qc(load_config(), a.section)
     if a.cmd == "assemble":
         from .assemble import run as assemble
         return assemble(load_config(), a.section)
