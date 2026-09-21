@@ -1,11 +1,38 @@
-# Всё, что влияет на звук, — здесь. Хеш чанка = sha1(text + этот файл).
+# Всё, что влияет на звук, — здесь. Хеш чанка = sha1(text + модель + seed +
+# temperature + language + хеш файла латентов + переозвучка из text/pronounce.yaml,
+# если сработала на этом чанке). Ударения-фиксы правятся в pronounce.yaml, не тут.
 model:
-  name: xtts_v2
+  name: qwen3_tts                 # Qwen3-TTS-12Hz-0.6B-Base (Apache 2.0)
   language: ru
-  seed: 42
-  temperature: 0.65
+  seed: 42                        # база; фактический seed чанка = seed_for_chunk(hash)
+  temperature: 0.9               # валидированное значение Qwen (0.65 было под XTTS)
+  # Qwen тоже обрезает хвост чанка без sentinel. Дописывается только к чанкам без
+  # финальной пунктуации (589 из 5127). Текст на . ! ? … : ; » сам даёт стоп-сигнал.
+  # Не входит в хеш чанка.
+  sentinel: " ."
+  # ё сохраняется (Qwen читает ё верно); ударения "+" не используются (ломают Qwen).
 reference:
-  path: ref/isaev_ref.wav        # 24 kHz mono, 10-20 c, чистая нейтральная речь
+  path: ref/isaev_ref.wav        # 24 kHz mono, 15 c; = ref/candidates/01.wav
+  # sha1 файла ref/isaev_ref.latents.pt — входит в хеш каждого чанка.
+  latents_sha1: 78247ffee16cb125177f17f373ade9eb22e9abb7
+render:
+  # Per-chunk length cap. Qwen open-end generation can run away (never emit a
+  # stop); identical (text, seed) even renders differently in-process vs the
+  # spawn worker, so a runaway cannot be tuned away by seed. Instead cap the
+  # codec-token budget by chunk length: a runaway then saturates the budget in
+  # seconds and is retried with the next seed, cheaply. audio_ms =
+  # (base_ms + chars·ms_per_char)·margin, tokens = audio_ms·12/1000 (12 Hz codec).
+  # Kept generously above real speech so a legit chunk is never truncated.
+  cap_base_ms: 3000        # fixed per-chunk overhead (silence + sentinel)
+  cap_ms_per_char: 100     # generous ceiling; real Russian speech is ~60–80
+  cap_margin: 1.5
+  # A runaway recurs on the same deterministic seed, so a capped generation
+  # retries with derived alternate seeds (base+1, base+2, …) up to this many
+  # times. Each retry is cheap now (cap, not timeout), so keep a deep budget.
+  timeout_retries: 6
+  # Last-resort wall-clock guard only. The length cap ends runaways first; this
+  # catches a true hang (no tokens at all). A capped generation is far quicker.
+  chunk_timeout_s: 120
 pauses_ms:
   sentence: 350
   paragraph: 900
