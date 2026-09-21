@@ -1,0 +1,535 @@
+{
+  "nn": "25",
+  "slug": "glava_18_koleso_balansa_rentgen_tvoej_du",
+  "heading": "Глава 18. Колесо баланса: рентген твоей души",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Глава 18. Колесо баланса: рентген твоей души",
+      "sha1": "430b76601d5753a211a7533ff04c7116be48aeff",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "heading",
+      "text": "Механика и психика",
+      "sha1": "d8129f3e8e92e1992be06994c6db12d194505815",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Знаешь, чем хороша механика? Там всё просто. Если в двигателе что-то застучало, можно открыть капот, посмотреть и понять: вот здесь проблема.",
+      "sha1": "d8463f7ab3d9c9a3bc5b1e0884725763770d2488",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Как увидеть невидимое? Как заглянуть под капот своей души?",
+      "sha1": "ee610b91892bfbfaa12ab82cb68d98d55fb684a6",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Для этого есть одно гениальное изобретение. Оно называется Колесо баланса.",
+      "sha1": "62171893dfb97400772bd629e3183f12efb85eac",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "heading",
+      "text": "Что это такое",
+      "sha1": "6b38d6dfcfe660b884b2489df3aef6ab272a6990",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "figure_caption",
+      "text": "Рисунок 14. Колесо баланса — рентген твоей души.",
+      "sha1": "b42007c1e0557c7de44a62dd0d24b579cae6be46",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Колесо баланса — это простая круговая диаграмма, разделённая на сектора. Каждый сектор — это важная сфера жизни. Обычно их восемь:",
+      "sha1": "90ef4b2c31f0a15c22d5b7e1dad92cc1c73f3660",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Здоровье и тело — энергия, самочувствие, спорт, сон, питание.",
+      "sha1": "467fa4a6ba0280d78520bcfa18b61b76c284c43e",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Отношения — партнёр, семья, дети, друзья, близость.",
+      "sha1": "a546cb54a568357030190cd4deab46780975dadc",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Деньги и финансы — доход, накопления, уверенность в завтрашнем дне.",
+      "sha1": "eb015eeed68e536c1b3e8393275a649896c5f47e",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Работа и карьера — профессиональная реализация, интерес к делу, признание.",
+      "sha1": "7b4b0aa27cd08027492f4748a60448bfebcd7ef6",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Личностный рост — развитие, обучение, психотерапия, новые навыки.",
+      "sha1": "f45e4096d310a09a67fc364ff9541021df8e5858",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Отдых и досуг — хобби, восстановление, путешествия, радость.",
+      "sha1": "448618dd272272812699ce9292297b2179ce326d",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дом и быт — пространство, уют, порядок, комфорт.",
+      "sha1": "f7d4ce211dcdc79ca4ea9f3e827913219bf2ab94",
+      "pause_ms": null
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Духовность и смыслы — вера, ценности, ощущение, что живёшь не зря.",
+      "sha1": "f3fb3f92bb7b25018d9b27b571d3c1a917ff5192",
+      "pause_ms": null
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты берёшь ручку, лист бумаги и оцениваешь каждую сферу по шкале от 1 до 10. Где 1 — полный провал, «всё очень плохо», а 10 — «я счастлив и всё идеально». Потом соединяешь отметки линией. И смотришь на то, что получилось.",
+      "sha1": "8489cb8f926c1e93cf9634ae445f3366f86594a1",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "У большинства людей это колесо похоже на разбитое велосипедное колесо. Один сектор торчит вверх (обычно работа), другой провалился вниз (обычно здоровье или отдых). Оно не катится. Оно трясётся, скрипит и разваливается на ходу.",
+      "sha1": "0ac4e3b460ad6b55a3cac241bbff405a49c43bed",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "heading",
+      "text": "Что на самом деле показывает Колесо баланса",
+      "sha1": "e66e4e6ce98b56ed5db63afb6b26410910dc1a6c",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Помнишь Лену? Ту самую бизнесвумен с депрессией? У неё было идеальное колесо. Все сектора — 8 или 9. Идеальная картинка. Коуч года.",
+      "sha1": "df720fba55a6cf409e5bf31c87b134837cb7a370",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Но Лена пришла ко мне с депрессией. Она просыпалась утром и не хотела жить. Как это возможно? У неё же всё есть!",
+      "sha1": "44446c25de4fa9c86d259b2c906ac53e41f1076c",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А вот как. Лена была классическим Железным человеком в маске Идеальности. Её колесо было идеальным не потому, что она была счастлива, а потому что она должна была быть идеальной. Она впахивала как лошадь, чтобы поддерживать эту картинку. Она боялась, что если хоть один сектор просядет — весь мир рухнет.",
+      "sha1": "68f9fe7b4ea071d77a4e3dd8b638c60f7b11dc5d",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Её колесо баланса было не отражением счастья, а отражением титанических усилий маски.",
+      "sha1": "2d32e192fe33079c946cdfb4e50389176b0a1112",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Провалы в колесе — это карта зон напряжения»",
+      "sha1": "5be7ba69159e66176d031585f9ca8cd00a47370f",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Низкая оценка в какой-то сфере не доказывает наличие травмы. Она показывает, где сейчас есть неудовлетворённость, напряжение или дефицит ресурса. Причину мы исследуем дальше, а не угадываем по одной цифре.",
+      "sha1": "9a0299171eb7fb3e4178e28317706990a8c72642",
+      "pause_ms": null
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Вот главный секрет.",
+      "sha1": "0c5edba0e7e5e64384cbdc29a4f65e292b3f8136",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Провал в любой сфере жизни — это не твоя лень и не твоя глупость. Это защита.",
+      "sha1": "31f6b29434a854b066e4a127c08ef036c67e1ad1",
+      "pause_ms": null
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты не развиваешь отношения не потому, что ты «не создан для семьи». А потому что твой Внутренний Ребёнок когда-то обжётся и решил: лучше быть одному.",
+      "sha1": "d3af61466972e8be7c247c30a52f0c58c4fbe225",
+      "pause_ms": null
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты не зарабатываешь деньги не потому, что ты «ленивый». А потому что в детстве тебе внушили: «деньги — это грязь», и твой Внутренний Ребёнок боится наказания.",
+      "sha1": "d877648769361ed021f89c227e947deeda5a1af8",
+      "pause_ms": null
+    },
+    {
+      "id": 30,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты не занимаешься здоровьем не потому, что тебе «лень». А потому что твоё тело когда-то стало источником боли и стыда, и ты решил: лучше его не чувствовать.",
+      "sha1": "1afbe1adf955fc71abaa79b3ae394f9c890c9b35",
+      "pause_ms": null
+    },
+    {
+      "id": 31,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Понимаешь? Каждая проваленная сфера — это дверь в подвал, где сидит твоя травма и твоё болевое тело.",
+      "sha1": "c46a615621e940061ae7057c72795ace6fa73d35",
+      "pause_ms": null
+    },
+    {
+      "id": 32,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как делать колесо правильно",
+      "sha1": "54e4c8a2ed9828daf363f27438689c986f544156",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 33,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Возьми лист бумаги. Нарисуй круг, раздели на 8 частей. Подпиши их.",
+      "sha1": "cd1eb2f5a910360fbca4f55845043a83a7efebec",
+      "pause_ms": null
+    },
+    {
+      "id": 34,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Теперь самое важное. Оцени каждую сферу дважды.",
+      "sha1": "8709594b01ad36fb51b6ba15bcaa1d909d92a468",
+      "pause_ms": null
+    },
+    {
+      "id": 35,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Первый проход: «Витрина».",
+      "sha1": "0dc65f7ac29085f93a6015b8985416d595faa7f5",
+      "pause_ms": null
+    },
+    {
+      "id": 36,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Оцени так, как ты думаешь, как должно быть, как ты показываешь миру. Поставь оценку автоматически, первой мыслью.",
+      "sha1": "b8ca31ea1ef36fd21009fe61cc6d7f39d493b5ee",
+      "pause_ms": null
+    },
+    {
+      "id": 37,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Второй проход: «Правда».",
+      "sha1": "f5f4f9313405f095ab2e402a973e69b4559597db",
+      "pause_ms": null
+    },
+    {
+      "id": 38,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А теперь закрой глаза, положи руку на сердце и спроси себя: «А как на самом деле? Честно? Без вранья, без долженствований, без оглядки на соседей?»",
+      "sha1": "a530024bfe93638db349eb2c88cfac27b375a5c0",
+      "pause_ms": null
+    },
+    {
+      "id": 39,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Поставь вторую оценку — ту, что идёт из живота, из тела.",
+      "sha1": "fd10b21dbbe1b8acccb78f585936913759c14200",
+      "pause_ms": null
+    },
+    {
+      "id": 40,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Соедини вторые оценки линией. И посмотри на то, что получилось.",
+      "sha1": "3d61ccfbf2a55035f36d5a080536eb5bb75f595f",
+      "pause_ms": null
+    },
+    {
+      "id": 41,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Вот теперь у тебя есть карта.",
+      "sha1": "88bbf563da71adb0ff46cdc6fe45b92c1b8c0964",
+      "pause_ms": null
+    },
+    {
+      "id": 42,
+      "global_id": null,
+      "type": "heading",
+      "text": "Что делать с этой картой",
+      "sha1": "85e994d84c07d34ff1f917347c5ee5cd5c421012",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 43,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты увидишь провалы. Может быть, один, может быть, несколько. Не пугайся. Помни: это не приговор, это указатели.",
+      "sha1": "711150527baca7fc2a2da0f472058d7f9b2686eb",
+      "pause_ms": null
+    },
+    {
+      "id": 44,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Теперь для каждого провала (там, где оценка 5 и ниже) задай себе эти вопросы. Запиши ответы.",
+      "sha1": "84ad4bc59956d8cf55d27bc9aa2cbbfcd55430bc",
+      "pause_ms": null
+    },
+    {
+      "id": 45,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Что я чувствую, когда думаю об этой сфере? Страх, стыд, вину, злость, пустоту, безнадёжность? Не думай, просто чувствуй.",
+      "sha1": "5e3101c88b6c5eb8b9cdff281a63377a1ab8bb7e",
+      "pause_ms": null
+    },
+    {
+      "id": 46,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая моя часть активна, когда я думаю об этом? Это плачет Внутренний Ребёнок? Это злится Внутренний Подросток?",
+      "sha1": "75f81e79d12f9327f24983443b81b44e799bde44",
+      "pause_ms": null
+    },
+    {
+      "id": 47,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Что говорит Внутренний Подросток об этой сфере? Какие у него автоматические мысли? «Я никогда не смогу столько зарабатывать», «все мужики козлы», «я не достоин любви»?",
+      "sha1": "348c3744094e9ced0aa63f327dff3b3284812ee2",
+      "pause_ms": null
+    },
+    {
+      "id": 48,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чего на самом деле хочет Внутренний Ребёнок в этой сфере? Под страхом «я никогда не заработаю» лежит желание безопасности. Под страхом «меня бросят» лежит желание любви. Найди это желание. Это твой дар, спрятанный в боли.",
+      "sha1": "cf3dff426160191966df28c13d742cef5e14718a",
+      "pause_ms": null
+    },
+    {
+      "id": 49,
+      "global_id": null,
+      "type": "heading",
+      "text": "Пример из жизни (Лена)",
+      "sha1": "18fc473d33bd579c6c7a098dec66a1eb439136a0",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 50,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Лена сделала колесо. Первый проход (витрина): все 8 и 9.",
+      "sha1": "48de7e20d61c9d9804da068be42cdead15d23230",
+      "pause_ms": null
+    },
+    {
+      "id": 51,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Второй проход (правда): здоровье — 5, отдых — 4, отношения — 3, духовность — 2.",
+      "sha1": "3f29d5f75f4ea1607ad8cdafc8c9cb432f1087ef",
+      "pause_ms": null
+    },
+    {
+      "id": 52,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Она посмотрела на провалы и заплакала. Не от отчаяния. От облегчения. Потому что впервые за много лет она увидела правду.",
+      "sha1": "3d1ef11c818ce0eebe2ba464124f0bc5dbb5d3cb",
+      "pause_ms": null
+    },
+    {
+      "id": 53,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Отношения — 3. Она не любила мужа, она боялась его потерять.",
+      "sha1": "81480d7261fe912d39f8fc616a84a20a55f50a66",
+      "pause_ms": null
+    },
+    {
+      "id": 54,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Здоровье — 5. Она не чувствовала своего тела, она его эксплуатировала.",
+      "sha1": "0d241752a151e82e89cf998b721e7ae7212a0493",
+      "pause_ms": null
+    },
+    {
+      "id": 55,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Духовность — 2. У неё не было смысла, только «надо».",
+      "sha1": "bd797fa80410512e1d3b9fddac3ad4dec0d46a33",
+      "pause_ms": null
+    },
+    {
+      "id": 56,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Это было больно. Но это было честно. И это стало началом исцеления.",
+      "sha1": "37d2db55229e5efd9dc2b38cb20190beda10c2f7",
+      "pause_ms": null
+    },
+    {
+      "id": 57,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Сделай Колесо прямо сейчас – не откладывай. Даже грубые оценки дадут карту. Перечитай Главу 5 (Древо боли) для каждого провала.",
+      "sha1": "f751e59dec73c0dcffb5c829667912c5a1657130",
+      "pause_ms": null
+    },
+    {
+      "id": 58,
+      "global_id": null,
+      "type": "heading",
+      "text": "Главное, что нужно помнить",
+      "sha1": "4f4e8ad9591e77392e600923c290436f9950c667",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 59,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Колесо баланса — это рентген. Оно показывает, где болит, даже если ты научился не чувствовать.",
+      "sha1": "56ac8ca6a8d87641b01ec12a8d84fcaa58add04e",
+      "pause_ms": null
+    },
+    {
+      "id": 60,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Провалы в колесе — это не слабость. Это двери в подвал, где живут травмы.",
+      "sha1": "798991f821c23513c64b129aa78b3d61189b139c",
+      "pause_ms": null
+    },
+    {
+      "id": 61,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Оценивай дважды: «витрина» и «правда». Разрыв между ними покажет, где ты обманываешь себя.",
+      "sha1": "bf44888f770fa82522dcf3fb53c159b7ec74d91d",
+      "pause_ms": null
+    },
+    {
+      "id": 62,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· За каждым провалом стоит Внутренний Ребёнок, который чего-то боится или чего-то хочет.",
+      "sha1": "08b4663a67149328999b0fe57104696201ef34f7",
+      "pause_ms": null
+    },
+    {
+      "id": 63,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Найди это желание — это твой дар, спрятанный в боли.",
+      "sha1": "d89e1989cfe8357dd3078ffad3e7b1bafc67922c",
+      "pause_ms": null
+    },
+    {
+      "id": 64,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Колесо — это не приговор. Это карта. Теперь ты знаешь, куда идти.",
+      "sha1": "d2f4ded10ac5fabcab17b2ad4b90bad420b1e9d2",
+      "pause_ms": null
+    }
+  ]
+}

@@ -1,0 +1,271 @@
+{
+  "nn": "50",
+  "slug": "prilozhenie_3_kratkaya_karta_masok",
+  "heading": "Приложение 3. Краткая карта масок",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Приложение 3. Краткая карта масок",
+      "sha1": "16e94245ebaf052477816f1d51adaa626a62ba17",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Здесь собрано самое главное о каждой маске: какой запрет её создал, что помогает исцеляться и какой дар открывается, когда маска снята.",
+      "sha1": "43723d246b0bb494f6f02b0e3ff669c309ec36c4",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска БЕГЛЕЦ (Невидимка)",
+      "sha1": "e3b73b8ff66b13c0756b4d9abe7e01383dd14ef2",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Не живи», «не будь собой», «не мешай», «будь тише».",
+      "sha1": "4d42ac22fed6299fd89b94daf917780389fea019",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Нежность к себе. Заземление в теле. Возвращение в ощущения через дыхание, прикосновения, внимание к ступням.",
+      "sha1": "523efd3e44e7921b098c6be7ddfedb3de7a42a7c",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Сердечность. Ты создаёшь пространство, где другим тепло, уютно и безопасно. Твоё присутствие становится мягкой опорой, а не исчезновением.",
+      "sha1": "04adadade7009c7749193d265fab0721f44a369f",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска ЗАВИСИМЫЙ (Цепляющийся)",
+      "sha1": "7ccb8023cc43a65e9969838f04ed0dccf1b834b0",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Не расти», «не будь отдельным», «без меня ты пропадёшь».",
+      "sha1": "5e6e2892e11e92a565aeb7676eb3b3da0b47a5b0",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Прощение себя. Опора внутри себя. Умение быть одному с удовольствием, без паники.",
+      "sha1": "07473f5c9b6f437df6cf3abeb282129783515ae5",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Сила. Ты становишься опорой для себя и других. Ты стоишь на своих ногах и можешь вести за собой легко, без надрыва.",
+      "sha1": "1d54f3d30e12dcf6093e21d6ebb1e6caaa953f62",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска МАЗОХИСТ (Вечный страдалец)",
+      "sha1": "bd3167f2455c8f587aff66c5fc0a9267301e34ef",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Не чувствуй», «не хочу», «стыдно», «ты плохой».",
+      "sha1": "32c20f50536f647c7cdd38d291ec757243809e11",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Юмор. Принятие себя и своих желаний. Говорить «нет», занимать место, не извиняться за своё существование.",
+      "sha1": "99d8e7d032b7eec0926f7415a7a0f6ea60cc6767",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Принятие. Ты умеешь принимать себя и других любыми — без осуждения, без условий. Твой юмор становится целительным.",
+      "sha1": "a0b78581559517f4edefcec817ce52f74b7321e1",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска КОНТРОЛИРУЮЩИЙ (Генерал)",
+      "sha1": "241f8e9f7b47451db4ff4c57b61954d2569f045c",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Не доверяй», «все обманут», «если не ты — никто».",
+      "sha1": "022232e10f9fd4cf20ffb490b7ed98cc4399c5f4",
+      "pause_ms": null
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Расслабление. Мягкость. Делегирование. Разрешить миру быть несовершенным, а себе — не знать всего.",
+      "sha1": "9920c70e58a933bf34b93aed6a18e2e311242e50",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Вдохновение. Ты зажигаешь других, а не управляешь ими. Твоя энергия становится направляющей, а не давящей.",
+      "sha1": "414b3e881a7e7ec2b9aeb47760aa9a4b6deff01f",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска ЖЕЛЕЗНЫЙ ЧЕЛОВЕК (Ригидный)",
+      "sha1": "c3b92ddc7b123806a81524fe9f810defb5741406",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Будь совершенным», «не ошибайся», «любовь надо заслужить».",
+      "sha1": "c08477d1eb5c702faac5b9c081c0432794b37bd2",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Честность с собой. Право на ошибку. Сознательная неидеальность. Позволять себе быть уязвимым.",
+      "sha1": "95b40fa064024bf6aecc18db655ebcedc3f4c919",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Творчество. Ты создаёшь новое, не тратя энергию на удержание брони. Идеальность становится качеством, а не клеткой.",
+      "sha1": "938c6b3555754920ffb87cc2f4e5411fcafdd121",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "heading",
+      "text": "Маска СТРАННИК (Философ)",
+      "sha1": "e02a8a5170e9e5b7555974ec0255bf7b1c5fa6f2",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Запрет (родительский голос): «Не принадлежи», «ты не отсюда», «не будь как все».",
+      "sha1": "124210f0dbc77e37374c7e16d0a1328a5ffab223",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ключ исцеления: Забота о теле. Приземление. Быт. Простые дела с вниманием. Возвращение в «здесь и сейчас» через физические ощущения.",
+      "sha1": "88f9c63916a22ce4e5d7f8e12b62aea00c2f2053",
+      "pause_ms": null
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар: Мудрость. Ты видишь глубже других и становишься проводником, наставником. Твоя глубина не уводит от реальности, а служит ей.",
+      "sha1": "53e17b9fcb0bca4f237e54ae850b7562f38caaca",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как пользоваться этой картой",
+      "sha1": "d5e1e7a3764de1a9d1dcc12fd8f54aeb96ee8a83",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "1. Найди свою маску (или две основные). Какая вызывает самое сильное чувство узнавания?",
+      "sha1": "570b2ebf62509014e854c26453f2403ed5c13d89",
+      "pause_ms": null
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "2. Запомни свой запрет. Это голос, который ты носишь внутри. Когда он звучит — ты надеваешь маску.",
+      "sha1": "f5d2390e9b8ddf2f990848598f676ab1d5b6cbe9",
+      "pause_ms": null
+    },
+    {
+      "id": 30,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "3. Вспомни свой ключ исцеления. Это твой путь к свободе. Начинай с малого, шаг за шагом.",
+      "sha1": "99fd2970bcce6defe9d2881acc4dd2f8371ccc7d",
+      "pause_ms": null
+    },
+    {
+      "id": 31,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "4. Помни о своём даре. Он уже есть внутри тебя. Когда маска уходит — он приходит. Не сразу, но приходит.",
+      "sha1": "2c4d2262eea24f9c7b4dfa634f381c81b36dc6cf",
+      "pause_ms": null
+    }
+  ]
+}

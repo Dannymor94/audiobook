@@ -1,0 +1,121 @@
+{
+  "nn": "55",
+  "slug": "spisok_literatury_i_istochnikov",
+  "heading": "Список литературы и источников",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Список литературы и источников",
+      "sha1": "9e07256900d0a41673ea9dbabd64ec15e1bb0ce5",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Шадрин К. А. «Священная книга инстинктологии». — Основная классификация инстинктов, использованная в Главе 1.",
+      "sha1": "b231b1886258c783fcebc2abe1a436e9b128ea70",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Менячихин Ю. Материалы тренингов по внутреннему Подростку. — Концепция подросткового кризиса, длящегося во взрослом возрасте.",
+      "sha1": "89b459039f5d18ce121d538915cc45c1fa5b3a8a",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Гроф С. Области человеческого бессознательного. — Перинатальные матрицы (Глава 5, Древо боли).",
+      "sha1": "3a788086291c463408bbcc9dc493643086900eec",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Боулби Дж. Привязанность. — Теория привязанности (Глава 25).",
+      "sha1": "216f3a8d3220a4cdac9fb68c1cbc18aa2975b60c",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Эйнсворт М. Типы привязанности (эксперимент «Незнакомая ситуация»).",
+      "sha1": "e53ecee5b94f8beb483f8aab978eb4098a0cedc1",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Юнг К. Г. Психология бессознательного. — Тень, архетипы.",
+      "sha1": "5292d1ef312fa708a84f68dc74049159bcf87985",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Берн Э. Игры, в которые играют люди. — Транзактный анализ, сценарии.",
+      "sha1": "19cdceef091d61661cf451251d631ea473b9b2d8",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ялом И. Экзистенциальная психотерапия. — Четыре данности (смерть, одиночество, свобода, бессмысленность).",
+      "sha1": "fa55f700271a8905912c774d01c948b632951812",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Кэмпбелл Дж. Тысячеликий герой. — Путь героя (Глава 32).",
+      "sha1": "13c3e36b4b2017cc8dfec75642ba264a53fd4e0a",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Хеллингер Б. Системные расстановки. — Родовые сценарии (Глава 5).",
+      "sha1": "0f8c287c02251c5faa53bcacf59ba49ec1694ae7",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Бурбо Л. Пять травм, которые мешают быть самим собой. (Глава 3)",
+      "sha1": "457c518ea6549006b899c7b6782e73858cbca7a4",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Толле Э. Сила момента сейчас. (Главы 4, 5 и 16)",
+      "sha1": "b21df1f8a6c5e9a132bfe46dadcc6d6eec43ee27",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Некоторые источники были переработаны и объединены в авторскую систему «Древа боли».",
+      "sha1": "e9c0bfc28b1deedb60885303b28592a1b1447f02",
+      "pause_ms": null
+    }
+  ]
+}

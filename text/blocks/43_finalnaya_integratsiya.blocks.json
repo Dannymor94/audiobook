@@ -1,0 +1,215 @@
+{
+  "nn": "43",
+  "slug": "finalnaya_integratsiya",
+  "heading": "Финальная интеграция",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Финальная интеграция",
+      "sha1": "b1c2370e6748511d5a628050ecdd54582724d41f",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Глава закончилась. Но твоя работа с собой — нет.",
+      "sha1": "dae826eb84549a93782b1c2ec45cb5ff91c1f08e",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Всё, что было до этого, — карта. Теперь важно не поселиться на карте, а вернуться в жизнь.",
+      "sha1": "f758e9c35ac4fd1e15e00c9888700ab40eed1f0a",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "heading",
+      "text": "«Жизнь после теории»",
+      "sha1": "ea13e7e8cff74e0b56919e35d16dc3d8b5d03443",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты прочитал сотни страниц. Освоил десяток практик. Наверное, устал.",
+      "sha1": "01d7cebdf44a98f171f2f6d4238a42b701bd01e6",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Теперь — самое важное.",
+      "sha1": "f3b334270c72d470854577b23cdb870d24cede89",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Тебе не нужно постоянно анализировать себя. Не нужно каждую эмоцию раскладывать на маски, а каждую мысль проверять на когнитивные искажения. Это сделает жизнь невыносимой.",
+      "sha1": "bc892c8d32e9b074b83dc374ef69760eda17a319",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Достаточно иногда.",
+      "sha1": "55d6a2ffda05411b32932e30b8d897b96b7712a6",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Иногда заметить волну — и просто выдохнуть.",
+      "sha1": "f586d2e7c00ae12b361b08e173cb75536bc077af",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Иногда сделать паузу вместо автоматической реакции.",
+      "sha1": "40d8e80f178ac36da0c5624fdf9117179b0290e9",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Иногда сказать себе «Я тебя чувствую».",
+      "sha1": "80deadbc4fa4ac1d17c0755b60dea1c7bc9baf7f",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Иногда вспомнить, что у тебя есть Взрослый.",
+      "sha1": "e5dc4cb8481e519bcfe0ef949df0d2e405560131",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Исцеление заканчивается там, где начинается простая жизнь.",
+      "sha1": "cb0d3a922db8ab97a78af2b9d1653d26c5f538e9",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Там, где ты просто идёшь, дышишь, любишь, ошибаешься, радуешься, грустишь. Не спасаешь себя — а живёшь.",
+      "sha1": "6b98325568384ef81d4da7376776d0bfda6bfa95",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Эта книга — не инструкция по эксплуатации. Это тренажёр. Тренажёр не нужен, когда ты уже умеешь ездить. Иногда полезно вернуться и покачать нейронные связи, но большую часть времени ты просто живёшь.",
+      "sha1": "488cfc74e80f641931283ab7d537d257f535c940",
+      "pause_ms": null
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как понять, что ты уже не нуждаешься в теории?",
+      "sha1": "1b1f0e2eae1feb7e238fb00c57c327566e87e8c5",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты замечаешь автоматизмы, но не застреваешь в них.",
+      "sha1": "f14ada52ff89ee151636cca6291b79246918c79a",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты можешь быть в контакте с собой, не включая «внутреннего психолога».",
+      "sha1": "8fb3efc6b6f5c61f5f8550766fa8a7ac138d6bc4",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты ошибаешься и не разбираешь каждую ошибку на части.",
+      "sha1": "605cf95324bc9e5c359bee77b01cdd0a6fdc53ed",
+      "pause_ms": null
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ты чаще выбираешь, чем реагируешь.",
+      "sha1": "eb3d910c55c2df80e1c20514d54dd76c88aaeb78",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если это так — закрой книгу. Иди гулять. Поговори с другом. Сделай то, что давно откладывал. Книга никуда не денется. Она будет ждать, если захочешь вернуться.",
+      "sha1": "c452696e97c94060be18c1203c52b9eeff5e2b30",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "heading",
+      "text": "А если тебе кажется, что ты ничего не понял и ничего не изменилось?",
+      "sha1": "337332919a66181837f65df42a32cf7b3be85b22",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Вспомни, с чего начинал. Вспомни, какие фразы раньше вызывали у тебя панику, а теперь — нет. Изменения часто незаметны, пока не оглянешься назад.",
+      "sha1": "379002f545a2a08074f2f84552a5ee88dc75911c",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "И даже если ты забыл 90% материала — достаточно того, что ты теперь знаешь: ты не марионетка. У тебя есть Взрослый. Ты можешь выбирать.",
+      "sha1": "c332a3557bcb0d4a0b2b0406310333ade4be4ae0",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Этого уже достаточно, чтобы жить иначе.",
+      "sha1": "ee10f2837e691b5928f1d3544da73a1aa333209c",
+      "pause_ms": null
+    }
+  ]
+}

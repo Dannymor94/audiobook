@@ -1,0 +1,675 @@
+{
+  "nn": "52",
+  "slug": "lichnost_za_2_minuty",
+  "heading": "Личность за 2 минуты",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Личность за 2 минуты",
+      "sha1": "3a7d4cf0f301efdc87a2c5fd45bde99b16937424",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чтобы понять, почему ты реагируешь именно так, не нужно разбирать всю свою жизнь. Посмотри на свою систему как на последовательность.",
+      "sha1": "835d1915fb0847414648f3ce8ff2f4c124e7640c",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "heading",
+      "text": "1. ИНСТИНКТЫ — что во мне есть от природы",
+      "sha1": "b4cc49b651b3151e7ecee1188ae32c766d5565ad",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Это базовая энергия и естественные потребности: безопасность, близость, интерес к жизни, признание, влияние, исследование нового.",
+      "sha1": "75ffc96f727bf9311168863503c2e35b0913938d",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Инстинкт не является проблемой. Проблема возникает тогда, когда его энергия подавляется, искажается или начинает управлять тобой автоматически.",
+      "sha1": "96a8211edd70b1d7fdf59ec4522670cb7d964496",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "heading",
+      "text": "2. РОДИТЕЛЬСКИЕ ПРОГРАММЫ — чему меня научили",
+      "sha1": "040c72503c742144f6f5d9d4be5c783f32969401",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В детстве ты слышал и считывал правила:",
+      "sha1": "4011069b5b7bd0942ed39d4107858e524d345060",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": 107,
+      "type": "flow",
+      "text": "«не злись» → «будь хорошим» → «не нуждайся» → «будь сильным» → «не доверяй» → «не высовывайся».",
+      "sha1": "47ed6c0243566a1a2f973a293c901e194919a42a",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Так естественная энергия сталкивается с запретом.",
+      "sha1": "48828ec8032a7a3f1db0650b71cf5f07900df966",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты не перестаёшь чувствовать. Ты учишься по-другому обращаться со своими чувствами и потребностями.",
+      "sha1": "375d78b4c8296d84c2f32fb1b5c083412261eeaa",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "heading",
+      "text": "3. ВНУТРЕННИЙ КОНФЛИКТ — между тем, что я чувствую, и тем, каким мне «можно» быть",
+      "sha1": "f19355f066114327612dc5ffb521fd83ac7ced80",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Внутри возникает противоречие:",
+      "sha1": "8a0000baed094571b97ed73f4893155375badae6",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "«Я хочу — но нельзя». «Я злюсь — но нельзя показывать». «Мне нужна близость — но опасно зависеть». «Я боюсь — но должен быть сильным».",
+      "sha1": "4ab330e02903385c06984d66d45158d31949384c",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Напряжение накапливается.",
+      "sha1": "b6ca1d6ec17c842ef7d5b992536eebadbb5e64c9",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "heading",
+      "text": "4. ПОДРОСТОК — как я учусь справляться",
+      "sha1": "448f7bcf84a9e946b2785502e2c08997dd5d12a1",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Психика ищет способ выжить в этом конфликте и сохранить отношения с другими.",
+      "sha1": "1e12e7193c5bf47a3113b7496caa7fa8d80b8b4d",
+      "pause_ms": null
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Возникают привычные стратегии:",
+      "sha1": "a7b9ac8340630de613d54abf304a450b24c0de8d",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "убежать, прицепиться, терпеть, контролировать, стать железным, уйти в одиночество.",
+      "sha1": "9ff4491c54edef0e0e74a351fd7c1256a3a42689",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "heading",
+      "text": "5. МАСКА — моя привычная стратегия защиты",
+      "sha1": "44cd6c5705e8b24b1cb0e833fe502623e3c9d83b",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Стратегия постепенно становится автоматической.",
+      "sha1": "a6750bf0b53fcebcd77ee21e96e68eff44e2d29f",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Так появляются шесть масок:",
+      "sha1": "295fce06cbd0d199dd612a76962831350ee85748",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Беглец — «лучше уйти, чем снова быть отвергнутым».",
+      "sha1": "8b29ac99b014c58218d28bcda6f0c14f22b5bfd1",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Зависимый — «не оставляй меня».",
+      "sha1": "3abc636475f9071b96a828ba5b1f19855b325798",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Мазохист — «я потерплю, лишь бы не потерять отношения».",
+      "sha1": "053e4574f7053ed9f38801cfc50333b1c705c723",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Контролирующий — «если я всё проконтролирую, со мной ничего не случится».",
+      "sha1": "411f3adc5085a7325a3d2d5544348d50a089db1a",
+      "pause_ms": null
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Железный человек — «мне никто не нужен, я справлюсь сам».",
+      "sha1": "0a567b5448c4c16ade4b55e5e22b02d9ed9c4ab7",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Странник — «лучше держаться на расстоянии и не привязываться».",
+      "sha1": "cc16a7665a818bab21a1344b42ac97203b1d1bd4",
+      "pause_ms": null
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Маска — не твой характер и не твоя поломка.",
+      "sha1": "f4a2d5eec40273c5d5853a6f13add9866ef9ad77",
+      "pause_ms": null
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Когда-то она помогла тебе приспособиться.",
+      "sha1": "1991b3dc3c73a86c05d457f4b2307c314d7375bd",
+      "pause_ms": null
+    },
+    {
+      "id": 30,
+      "global_id": null,
+      "type": "heading",
+      "text": "6. БОЛЕВОЕ ТЕЛО — что продолжает жить внутри",
+      "sha1": "f0c779557a0f293326095db51e576f1b33af0511",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 31,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Старый опыт не исчезает только потому, что событие закончилось.",
+      "sha1": "8d0b6ea312a0006b19c613a7d5aa0e026512e170",
+      "pause_ms": null
+    },
+    {
+      "id": 32,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Он может сохраняться как:",
+      "sha1": "2df3543062654770be52585495d0919e4b662803",
+      "pause_ms": null
+    },
+    {
+      "id": 33,
+      "global_id": 108,
+      "type": "flow",
+      "text": "телесное напряжение → страх → стыд → злость → одиночество → ощущение угрозы.",
+      "sha1": "6eaf64229295aa398fd7fedc9dd596cdf3772ef3",
+      "pause_ms": null
+    },
+    {
+      "id": 34,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Когда происходит триггер, старый сценарий включается снова.",
+      "sha1": "71b3e0affd7e2309e55866204b1360ce2400881a",
+      "pause_ms": null
+    },
+    {
+      "id": 35,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты реагируешь не только на то, что происходит сейчас, но и на то, что это напоминает твоей психике.",
+      "sha1": "a6d64e604028ee8461894ae94ce09ef76197ce52",
+      "pause_ms": null
+    },
+    {
+      "id": 36,
+      "global_id": null,
+      "type": "heading",
+      "text": "7. ТРИГГЕР — момент, когда сценарий включается",
+      "sha1": "cb14825c0b60a7e7a3ed5c9bd818a17b93e27028",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 37,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Что-то происходит.",
+      "sha1": "0f5356c18cde2dae42da2b455b780819a9acea4c",
+      "pause_ms": null
+    },
+    {
+      "id": 38,
+      "global_id": 109,
+      "type": "flow",
+      "text": "Событие → тело реагирует → появляется чувство → включается знакомая мысль → маска берёт управление.",
+      "sha1": "5680f8ab2164ada7d617df012ed7736374302f1b",
+      "pause_ms": null
+    },
+    {
+      "id": 39,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Здесь находится важнейшая точка свободы:",
+      "sha1": "2158e7fc07e51382a575eefb59ac81a54254260d",
+      "pause_ms": null
+    },
+    {
+      "id": 40,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "ПАУЗА.",
+      "sha1": "1dacaf9ae2983aa3d49b4970be714a929b770128",
+      "pause_ms": null
+    },
+    {
+      "id": 41,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Между стимулом и реакцией появляется возможность заметить происходящее.",
+      "sha1": "fc1015829bff6c791cbdfa1f243c66319f78c90e",
+      "pause_ms": null
+    },
+    {
+      "id": 42,
+      "global_id": null,
+      "type": "heading",
+      "text": "8. ВЗРОСЛЫЙ — тот, кто возвращает управление",
+      "sha1": "a5c80649a253e4b0a17efdd7a0a1fc1449278a31",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 43,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Взрослый не уничтожает чувства и не борется с маской.",
+      "sha1": "c831ff8c1798bf121d802bc202c03269ce18938b",
+      "pause_ms": null
+    },
+    {
+      "id": 44,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Он:",
+      "sha1": "977074adf844d2b1f2634ca6afe15bffbaeed208",
+      "pause_ms": null
+    },
+    {
+      "id": 45,
+      "global_id": 110,
+      "type": "flow",
+      "text": "замечает → чувствует → выдерживает → отделяет прошлое от настоящего → проверяет факты → выбирает действие.",
+      "sha1": "8260e2cdcd597373a60cdf09b61d033907c439d3",
+      "pause_ms": null
+    },
+    {
+      "id": 46,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Главный вопрос Взрослого:",
+      "sha1": "3dbdc0c063ffd2e2fcf4c8c1c5f9a430ba60205a",
+      "pause_ms": null
+    },
+    {
+      "id": 47,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "«Что происходит со мной сейчас — и что я выбираю сделать с этим?»",
+      "sha1": "cc945265e6d257c8ed37bcf68f8fd31d9061fd15",
+      "pause_ms": null
+    },
+    {
+      "id": 48,
+      "global_id": null,
+      "type": "heading",
+      "text": "9. ОСВОБОЖДЕНИЕ ЭНЕРГИИ — маска больше не управляет",
+      "sha1": "4c57deb1b9940b35d8a585b3fd5d93efaa31b3f5",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 49,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Когда ты перестаёшь автоматически следовать старому сценарию, тебе больше не нужно тратить столько сил на защиту.",
+      "sha1": "f51d98769e82b182ccee756ef15c111dcddae6fe",
+      "pause_ms": null
+    },
+    {
+      "id": 50,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Энергия, которая раньше уходила на:",
+      "sha1": "d0e3c51ca6ec0cde56fe1a6f634eb570d73e69fe",
+      "pause_ms": null
+    },
+    {
+      "id": 51,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "бегство, зависимость, терпение, контроль, броню или отстранение,",
+      "sha1": "c650c5ced7fae8492517ed820c69cd96196b8ac2",
+      "pause_ms": null
+    },
+    {
+      "id": 52,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "становится доступной для жизни.",
+      "sha1": "35252b5c9f2510db7f3442d859b7ed556a6f176b",
+      "pause_ms": null
+    },
+    {
+      "id": 53,
+      "global_id": null,
+      "type": "heading",
+      "text": "10. ДАР — сила, которая была спрятана за маской",
+      "sha1": "2b144a73f98d6c2857e174a4a4edc6ab59be8e9c",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 54,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "За каждой маской есть не только боль, но и ресурс.",
+      "sha1": "95c06e45966c1b3dc0a71f0480721c39d57ca158",
+      "pause_ms": null
+    },
+    {
+      "id": 55,
+      "global_id": 111,
+      "type": "flow",
+      "text": "Беглец → Сердечность",
+      "sha1": "82d7c8338cfd987b6c19329e614e45db990a201f",
+      "pause_ms": null
+    },
+    {
+      "id": 56,
+      "global_id": 112,
+      "type": "flow",
+      "text": "Зависимый → Сила",
+      "sha1": "aeb9023d04247a733f6d98e8d28b75ec963b186f",
+      "pause_ms": null
+    },
+    {
+      "id": 57,
+      "global_id": 113,
+      "type": "flow",
+      "text": "Мазохист → Принятие",
+      "sha1": "dcdc8e5008187184a3b5aafb98803f0f1933ccc5",
+      "pause_ms": null
+    },
+    {
+      "id": 58,
+      "global_id": 114,
+      "type": "flow",
+      "text": "Контролирующий → Вдохновение",
+      "sha1": "acc2a7087c18992e93a775e284ffcf870ff6704f",
+      "pause_ms": null
+    },
+    {
+      "id": 59,
+      "global_id": 115,
+      "type": "flow",
+      "text": "Железный человек → Творчество",
+      "sha1": "7c4c86406385b67b48ec05645d211e77bc7737d5",
+      "pause_ms": null
+    },
+    {
+      "id": 60,
+      "global_id": 116,
+      "type": "flow",
+      "text": "Странник → Мудрость",
+      "sha1": "fb26920fe28dc4f0b04a7c2845ad1cf1930ae338",
+      "pause_ms": null
+    },
+    {
+      "id": 61,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Дар — это не новая личность.",
+      "sha1": "9b64331df9089758d3db30ee66313384377cae12",
+      "pause_ms": null
+    },
+    {
+      "id": 62,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Это освобождённая энергия, которой ты больше не позволяешь управлять собой из страха.",
+      "sha1": "367b20f9ea478fce83cbd028e7d5cad35bbd4860",
+      "pause_ms": null
+    },
+    {
+      "id": 63,
+      "global_id": null,
+      "type": "heading",
+      "text": "11. МУДРЕЦ — способность видеть всю систему",
+      "sha1": "82db34c1817f48310914b3989835c7353d85e818",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 64,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Мудрец понимает:",
+      "sha1": "bad55c95e5fa331d540e0c483f20e9cb1ff1b8bf",
+      "pause_ms": null
+    },
+    {
+      "id": 65,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "«Со мной ничего не было фундаментально не так. Я приспосабливался так, как умел».",
+      "sha1": "1e9f506658ff1be77efb4fc5df65e8257227f1f5",
+      "pause_ms": null
+    },
+    {
+      "id": 66,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Он видит свои инстинкты, программы, маски, боль и защитные стратегии — но больше не отождествляет себя с ними.",
+      "sha1": "964ebf10fdf6fab1a2de8a4e57add768788687bf",
+      "pause_ms": null
+    },
+    {
+      "id": 67,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Он может использовать их энергию осознанно.",
+      "sha1": "35cb888f60ab4942ade053b1c6d7d8b53c1c0b2e",
+      "pause_ms": null
+    },
+    {
+      "id": 68,
+      "global_id": null,
+      "type": "heading",
+      "text": "Вся система в одной цепочке",
+      "sha1": "04fdbb1e9b1b004766e00482adfd248bb1481e25",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 69,
+      "global_id": 117,
+      "type": "prose_with_arrow",
+      "text": "ИНСТИНКТЫ → естественная энергия и потребности → РОДИТЕЛЬСКИЕ ПРОГРАММЫ → «так нельзя» / «надо быть другим» → ВНУТРЕННИЙ КОНФЛИКТ → ПОДРОСТОК ищет способ справиться → МАСКА становится защитной стратегией → БОЛЕВОЕ ТЕЛО хранит непрожитый опыт → ТРИГГЕР запускает старый сценарий → ПАУЗА создаёт пространство выбора → ВЗРОСЛЫЙ возвращает управление → ОСВОБОЖДЕНИЕ ЭНЕРГИИ → ДАР → МУДРЕЦ.",
+      "sha1": "f990c10508108ed5899ad6825570364874c66621",
+      "pause_ms": null
+    },
+    {
+      "id": 70,
+      "global_id": null,
+      "type": "heading",
+      "text": "Главная мысль",
+      "sha1": "54fd2707e86b36d3e23a9a09feed0ac12b8c45cc",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 71,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты не поломан.",
+      "sha1": "c0202677cd856950e3cfa241e74c8384d431ba66",
+      "pause_ms": null
+    },
+    {
+      "id": 72,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты приспособился.",
+      "sha1": "318ae40a15f04b30a58dba716c99844b752e369b",
+      "pause_ms": null
+    },
+    {
+      "id": 73,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Твои реакции когда-то помогали тебе справляться с тем, что было слишком трудно.",
+      "sha1": "440d4c71407691f713fd6b4f40971ba8185d35bf",
+      "pause_ms": null
+    },
+    {
+      "id": 74,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Теперь ты можешь увидеть эту систему, перестать автоматически жить по старому сценарию и вернуть себе то, что всегда было твоим: свою энергию, силу, чувствительность, свободу выбора и способность жить из себя, а не из страха.",
+      "sha1": "931544cdba88401b939d45d60726866bc34385a0",
+      "pause_ms": null
+    },
+    {
+      "id": 75,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Скоро выйдет дополненная версия этой книги.",
+      "sha1": "6a86c708185fb619084ebee8892badd4bdab3742",
+      "pause_ms": null
+    },
+    {
+      "id": 76,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В ней ты увидишь не просто маски и болевое тело. Ты увидишь всю архитектуру человека.",
+      "sha1": "4616be7c924ca89a393dd6053c7648d0cfb529ec",
+      "pause_ms": null
+    },
+    {
+      "id": 77,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Биологию, психологию и сознание — в одной книге.",
+      "sha1": "1888c3c780bc258315b4efef70599c00ec99d730",
+      "pause_ms": null
+    },
+    {
+      "id": 78,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "От инстинктов — до дара. От тела — до мудреца.",
+      "sha1": "7f14553ae05d452d5d65ef458be94560c99ace34",
+      "pause_ms": null
+    },
+    {
+      "id": 79,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если эта книга дала тебе понимание себя — новая версия даст тебе видение себя целиком.",
+      "sha1": "f1a3a7dbb95dc0b2ef8239058be5a65db95663cd",
+      "pause_ms": null
+    },
+    {
+      "id": 80,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Следи за выходом. Это будет глубокое и цельное погружение.",
+      "sha1": "16138127ac101a517981a4a9306ed05634185cb6",
+      "pause_ms": null
+    }
+  ]
+}

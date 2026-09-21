@@ -1,0 +1,517 @@
+{
+  "nn": "49",
+  "slug": "prilozhenie_2_polnaya_karta_emotsij_chuv",
+  "heading": "Приложение 2. Полная карта эмоций, чувств и их искажений",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Приложение 2. Полная карта эмоций, чувств и их искажений",
+      "sha1": "3bb454cc677d2ff59bc9b6cb5ce0d7e67ff10ac8",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Эта карта поможет тебе не путаться, когда накрывает сложное чувство. Ты сможешь быстро найти его корень — в теле, в инстинкте, в маске.",
+      "sha1": "6ccb325538d25e683b8329d65af701296f33557d",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как пользоваться этой картой",
+      "sha1": "d5e1e7a3764de1a9d1dcc12fd8f54aeb96ee8a83",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Когда ты чувствуешь что-то сильное и непонятное — спроси себя: «Это пришло мгновенно, как удар в тело?» Если да — это эмоция, сигнал телесного интеллекта. Дыши в это место (Глава 12).",
+      "sha1": "0482d71cf8480db25de46bf2ea12904461157648",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если же ты прокручиваешь это в голове уже несколько часов или дней — это чувство. Тогда спроси: «Какая эмоция под ним? Чего я боюсь? На что я злюсь?»",
+      "sha1": "d6b4adc97dabdad97dee4b046a74ff9380ca316d",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкт САМОСОХРАНЕНИЯ",
+      "sha1": "da5d0aa0abd2fb13ab6819c9edc36f0b6ad27f1e",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Страх.",
+      "sha1": "f011fbb652858de79352efc697e51a42277cea96",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Холод, замирание, сердцебиение, дрожь, желание сжаться или убежать.",
+      "sha1": "5eb2078bf00f4f52f7e9cce031423bfa7c5ebeb4",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Тревога, ужас, паника, фобия, навязчивые страхи.",
+      "sha1": "47b71804a15a068fd2798fb874312c81641cb6cd",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Беглец.",
+      "sha1": "068776c4e972655349becc52aed50228e14e2615",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Паника от незначительного риска. Начальник не поздоровался — и ты уже думаешь, что тебя уволят.",
+      "sha1": "3055612243b10e3b4212133fe660aa69533024c1",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкт АГРЕССИИ",
+      "sha1": "eca19c6ef6347d41fc412e4fb9057349e657f8ce",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Злость, гнев.",
+      "sha1": "cc596101d47243873e56cdabc699ca2736b6a828",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Жар в теле, сжатые челюсти, сжатые кулаки, напряжение в плечах, желание ударить или крикнуть.",
+      "sha1": "c3d724907a8d2c92e5562e35f287c651a89439d0",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Обида, раздражение, ярость, негодование, желание отомстить.",
+      "sha1": "ab648ae5bbe690a1fdf38453bf520567ac6718d9",
+      "pause_ms": null
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Контролирующий, Железный человек.",
+      "sha1": "7df013bdbd9f9777ba89c8477b961f4066f19f5f",
+      "pause_ms": null
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Взрыв гнева на мелочь — ребёнок разбросал фломастеры, а ты орёшь так, будто случилась катастрофа.",
+      "sha1": "eb3ecd8f0cc2a6a85d0cb7390f9e421a7e4081d5",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкт ПРИВЯЗАННОСТИ (размножение)",
+      "sha1": "6c67427a4a680cf01d6387b87eeeba9d4f481874",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Печаль, грусть, тоска.",
+      "sha1": "89a45459217c51e229a84e93a44e877d262b30c1",
+      "pause_ms": null
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Тяжесть в груди, ком в горле, желание плакать, пустота внутри.",
+      "sha1": "f95684405dea04b1ca483e36bc83ade0611341a4",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Горе, депрессия, апатия, чувство утраты, безнадёжность.",
+      "sha1": "cef53ff6dca2881d6f257da5fb71681ba182b1cc",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Мазохист.",
+      "sha1": "f2d276831f231f648ed1f2e554524c8521704e41",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Застревание в горе, жалость к себе, ощущение, что «жизнь кончена».",
+      "sha1": "98a335e8b90de06ac504f68c1bdab51fc3c7d976",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкты РАЗМНОЖЕНИЕ + ПОЗНАНИЕ",
+      "sha1": "cbecb398e55724eacedc5cddbabf39775a78b58d",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Радость, восторг, лёгкость.",
+      "sha1": "24712b93be405157ef0f230bf924e19ec1e3edbf",
+      "pause_ms": null
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Тепло, расслабление, лёгкость в теле, желание улыбаться.",
+      "sha1": "ba5f1f09ce922c090a027b6f69b0e7810cd6ea90",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Вдохновение, любовь, надежда, эйфория, счастье.",
+      "sha1": "ffa28ee7fe61f293a5a5d57b5d738ecc4643fb13",
+      "pause_ms": null
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Зависимый.",
+      "sha1": "db8f15829f13a30d1fe777cb508997dfdfbbbc26",
+      "pause_ms": null
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Зависимость от «дозы» счастья — ты боишься, что радость кончится, и поэтому не можешь наслаждаться моментом.",
+      "sha1": "e7b474122ce64cc244a87185370f000750a11511",
+      "pause_ms": null
+    },
+    {
+      "id": 30,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкт ПОЗНАНИЯ",
+      "sha1": "98da9e8454e077493b05b802a96380b9cff6ecc2",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 31,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Удивление, любопытство.",
+      "sha1": "3aa8cfd25e967fc370a9ecdd36b978378fe24652",
+      "pause_ms": null
+    },
+    {
+      "id": 32,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Расширение в груди, подъём, краткая остановка дыхания, прилив интереса.",
+      "sha1": "a1292e1da96346f7764633b57623ff78e7649b28",
+      "pause_ms": null
+    },
+    {
+      "id": 33,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Интерес, изумление, шок, одержимость идеей.",
+      "sha1": "1a3e3a2a6f7b334c36940cdaf7224226c710d6c2",
+      "pause_ms": null
+    },
+    {
+      "id": 34,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Странник.",
+      "sha1": "2b8bbbea91b3096e650bdf9ccec80327a5825b08",
+      "pause_ms": null
+    },
+    {
+      "id": 35,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Уход в абстракции, потеря связи с реальностью — ты так увлекаешься идеей, что перестаёшь чувствовать тело.",
+      "sha1": "839cbeb29b2c9774451b3d7d596bce5f4217e622",
+      "pause_ms": null
+    },
+    {
+      "id": 36,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкты ЕДА + БЕЗОПАСНОСТЬ",
+      "sha1": "920965754b814a75bc08467c8203154c08b5cafd",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 37,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Отвращение, брезгливость.",
+      "sha1": "c99a9502bd581413782fe04d0e1d0ab437d6d8e6",
+      "pause_ms": null
+    },
+    {
+      "id": 38,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Сжатие в желудке, тошнота, желание отодвинуться, отстраниться.",
+      "sha1": "ee7e3d51e0773df716a1470e623a11bc012ae80e",
+      "pause_ms": null
+    },
+    {
+      "id": 39,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Презрение, неприятие, отторжение.",
+      "sha1": "458b95c016e8836e27054e0d15c0322a13ed4d78",
+      "pause_ms": null
+    },
+    {
+      "id": 40,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Железный человек.",
+      "sha1": "0d98ad4b4c71de79a4914fd04f2843713350f639",
+      "pause_ms": null
+    },
+    {
+      "id": 41,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Неприятие себя или других из-за несовершенства — перфекционизм, который не даёт дышать.",
+      "sha1": "095960c50ba3d73372e658d278837ee7336b2df9",
+      "pause_ms": null
+    },
+    {
+      "id": 42,
+      "global_id": null,
+      "type": "heading",
+      "text": "Инстинкт ПОЗНАНИЯ (углублённый)",
+      "sha1": "9e16ca273cd58f817053899d77eb45788ccdab43",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 43,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Базовые эмоции: Интерес, вовлечённость.",
+      "sha1": "eeff1a1f5e56826add8e47cf0e22219226ff559c",
+      "pause_ms": null
+    },
+    {
+      "id": 44,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Телесное ощущение: Лёгкое притяжение, напряжение внимания, желание подойти ближе, узнать больше.",
+      "sha1": "dd61bd8d80ba828357e394105fe865a73b296429",
+      "pause_ms": null
+    },
+    {
+      "id": 45,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Чувства (после интерпретации умом): Исследовательский азарт, увлечённость, одержимость, страсть.",
+      "sha1": "c1b7ca79d936a798b539be7a4e6f8f48554ecc20",
+      "pause_ms": null
+    },
+    {
+      "id": 46,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Какая маска искажает: Странник.",
+      "sha1": "2b8bbbea91b3096e650bdf9ccec80327a5825b08",
+      "pause_ms": null
+    },
+    {
+      "id": 47,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Пример искажения: Одержимость идеей, потеря контакта с телом — ты живёшь в голове, забывая о еде, сне, близких.",
+      "sha1": "e7207efa98c3385e2327f8d5c03217a4bfa18120",
+      "pause_ms": null
+    },
+    {
+      "id": 48,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как рождаются сложные чувства из смеси эмоций",
+      "sha1": "82d2389fbfe9bcc698ffc1c5895a50ab986c382e",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 49,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Некоторые чувства — это не одна эмоция, а смесь нескольких. Вот карта:",
+      "sha1": "2471c1d3f506cd1ca344d1ef3b10df4515ac673e",
+      "pause_ms": null
+    },
+    {
+      "id": 50,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Вина = страх наказания + злость на себя.",
+      "sha1": "a4fb9ec62a27899a44ba8e5fffb790b0a8100849",
+      "pause_ms": null
+    },
+    {
+      "id": 51,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Стыд = страх отвержения + злость на себя за то, что ты такой.",
+      "sha1": "f40eb1107b8e87a3f1de3f51218dc15f2a81ec34",
+      "pause_ms": null
+    },
+    {
+      "id": 52,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Зависть = злость на того, у кого есть + печаль о том, чего нет у тебя.",
+      "sha1": "1094457d255012bb14b0560fecc6b5d3f054685c",
+      "pause_ms": null
+    },
+    {
+      "id": 53,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Ревность = страх потери + злость на соперника + печаль.",
+      "sha1": "a35d1d0fba5a200f39cf5d469559397cddb47511",
+      "pause_ms": null
+    },
+    {
+      "id": 54,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Надежда = радость от возможности + интерес к будущему.",
+      "sha1": "327ddec8de0b9e4afdde62e46e147c90c65a3b39",
+      "pause_ms": null
+    },
+    {
+      "id": 55,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Разочарование = удивление от несовпадения + печаль.",
+      "sha1": "30f5fe9e7313fd6e89d181649f92488d7e0754d0",
+      "pause_ms": null
+    },
+    {
+      "id": 56,
+      "global_id": null,
+      "type": "heading",
+      "text": "Что делать, когда накрывает сложное чувство",
+      "sha1": "e3a5170570af29705231af95ef18edcba589e932",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 57,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Когда тебя накрывает вина, стыд, ревность или зависть, найди его в списке выше. Разложи его на базовые эмоции. Например, стыд — это страх отвержения и злость на себя.",
+      "sha1": "cf919eec1695ba548f3b319479829e7d2fe7af09",
+      "pause_ms": null
+    },
+    {
+      "id": 58,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Затем найди эти эмоции в верхней части карты и вспомни их телесные сигналы.",
+      "sha1": "b3968cc4abaac787de14a8adb8592adc0916d474",
+      "pause_ms": null
+    },
+    {
+      "id": 59,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Вернись в тело. Почувствуй сигнал — например, холод в руках или сжатые челюсти. Не корми его мыслями. Просто дыши в это место 30–60 секунд.",
+      "sha1": "c127ff339737b223638dc4fa08fa85545fd05048",
+      "pause_ms": null
+    },
+    {
+      "id": 60,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Эмоция, которую не кормят мыслями, живёт около 90 секунд. Она придёт и уйдёт. Ты просто позволишь ей быть.",
+      "sha1": "a9b87dc7146daee1c6b32002621c50cc36211586",
+      "pause_ms": null
+    },
+    {
+      "id": 61,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Это и есть работа Взрослого.",
+      "sha1": "e7bbdd92d4b2a80395e3c07dd84a826700bda868",
+      "pause_ms": null
+    }
+  ]
+}

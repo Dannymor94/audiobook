@@ -1,0 +1,253 @@
+{
+  "nn": "51",
+  "slug": "kak_tantsuyut_maski_polnaya_kartina",
+  "heading": "Как танцуют маски (полная картина)",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как танцуют маски (полная картина)",
+      "sha1": "eb765da9f4c3caa196644cf4c8ea07dd7924a688",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В книге (Глава 26) приведены основные пары. Здесь — полное описание всех 36 комбинаций (без сокращений). Читай и узнавай свои привычные сценарии в отношениях.",
+      "sha1": "d240d2f7082e629a51c81974b19608f34804ca3b",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "heading",
+      "text": "Беглец + …",
+      "sha1": "189fe0bc7ca1657cef81ec870d1d4a613599fb4d",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Беглец: два одиночества, холодная стабильность, близости нет, конфликтов тоже нет. Пусто.",
+      "sha1": "ab150106fbbb1cdd8958fec78053a33c600fdbb6",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Зависимый: «Кошка-мышка» — он убегает, она догоняет. Чем ближе она, тем дальше он. Оба страдают.",
+      "sha1": "007cb1aefa27d965484e975e4c9ed61307696df8",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Мазохист: он исчезает, она страдает, пытается его «спасти» своим страданием.",
+      "sha1": "3f1688cff02f8b0e7657b44ae8714a562d109fde",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Контролирующий: он убегает от её контроля, она усиливает контроль. Замкнутый круг.",
+      "sha1": "cf11d77680d307dea18f4d7d55d5eef1df3ea88b",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Железный человек: он невидимка, она идеальна. Внешняя гармония, внутри — одиночество.",
+      "sha1": "96780e61c0be3cc291298fdb73a6f103ce77a37e",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: оба уходят — один в пустоту, другой в мысли. Тишина и глубокая отстранённость.",
+      "sha1": "6389fcf8a5ae55b642385de5be562b34fc15114b",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "heading",
+      "text": "Зависимый + …",
+      "sha1": "9239fc259c939358aa99e4a32edeb198c1a4107e",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Зависимый: два тонущих цепляются друг за друга, тянут на дно. Без друг друга не могут, вместе несчастны.",
+      "sha1": "cf03ab7b4208a040683a498bd63331e7b056beba",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Мазохист: она цепляется, он страдает и винит себя. Жалость и вина вместо любви.",
+      "sha1": "63bb23a028b282b3dd5635c2d0212d37b62ea57b",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Контролирующий: идеальная ловушка: она терпит, потому что боится одиночества, он контролирует, потому что боится, что она уйдёт.",
+      "sha1": "65b8734484c6dba79374f6708e0a7dfaae0e2f8b",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Железный человек: он спасает, она цепляется. Он выгорает, она не взрослеет.",
+      "sha1": "35d89308082b761e1473c9a662e0c8d3cae8640d",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: она хочет близости, он уходит в мысли. Она чувствует себя брошенной, он — задавленным.",
+      "sha1": "7793551393245b01d736e3423e08958d743f26f3",
+      "pause_ms": null
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "heading",
+      "text": "Мазохист + …",
+      "sha1": "993bcfd7a9baa8abb3a09dfc4a04211d42c35c1e",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Мазохист: конкурс жертв — кто больше страдает, тот и «прав».",
+      "sha1": "457d4e1d7ee743cfd9dc77398bcb089edbafca3a",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Контролирующий: классика абьюза: он унижает, она терпит. Оба питают своё болевое тело.",
+      "sha1": "c1c6f60193a7ccd1c18d0821310508ef25dc3dc9",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Железный человек: он спасает «бедную жертву», она страдает и обесценивает себя. Никто не доволен.",
+      "sha1": "5b019da4ee46616a98f70fbfd3fed855d2699921",
+      "pause_ms": null
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: она страдает, он не замечает (или считает это философией). Два одиночества.",
+      "sha1": "5f8939b439277e99cc988358a155ac7ed2f09cfb",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "heading",
+      "text": "Контролирующий + …",
+      "sha1": "ac2655d2657d332cce02625b0bd79f9a2871efa8",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Контролирующий: битва за власть, постоянные конфликты. Кто кого переконтролирует.",
+      "sha1": "e3c5cc2735a96e67e5d057ff605bb0365e5bc74e",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Железный человек: борьба за главенство, кто «правильнее» и «идеальнее». Оба выгорают.",
+      "sha1": "d1160d2b94a9b7e9d90cecee4254fa64bcd4a103",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: она контролирует, он уходит в мысли. Она злится, он отстраняется.",
+      "sha1": "d0562a6c0671cf91896f17f9edcdc2cdc00ac056",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "heading",
+      "text": "Железный человек + …",
+      "sha1": "86325afce5afd7a2d86795a3e07f357824329767",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Железный человек: гонка за идеалом — соревнование, а не любовь. Много достижений, мало тепла.",
+      "sha1": "94997791a240cf29c88d4fbb26e4da83026400f7",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: она требует идеальности и включённости, он уходит в абстракции. Она разочарована, он не понят.",
+      "sha1": "2353f217d084618905ee174e0a66c99d014045f8",
+      "pause_ms": null
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "heading",
+      "text": "Странник + …",
+      "sha1": "5896a862676d230f26bbabbee16ba0e71a8365f2",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· + Странник: два философа в параллельных мирах. Холодно и пусто, зато никто никому не мешает.",
+      "sha1": "5d99530fbd834619a8b9d3793df41c4b9b8677c5",
+      "pause_ms": null
+    }
+  ]
+}

@@ -1,0 +1,791 @@
+{
+  "nn": "48",
+  "slug": "prilozhenie_1_karta_geroya_bystraya_samo",
+  "heading": "Приложение 1. Карта героя (быстрая самопроверка)",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Приложение 1. Карта героя (быстрая самопроверка)",
+      "sha1": "3b713fd2c91350c0dbef3a9efbcb3bfbe0a1a0b7",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "heading",
+      "text": "Как пользоваться",
+      "sha1": "7013b69dabb6636f6c0f8a1fb53aaea937eef58b",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ответь на вопросы каждого раздела. Подсчитай баллы или отметь наиболее частые варианты. В конце ты найдёшь перечень глав книги, которые стоит прочитать в первую очередь.",
+      "sha1": "0260e7b84c59e5795faac498b0ea4f1910bd4cb6",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если захочешь более глубокой, персонализированной диагностики — на сайте «Древо жизни» доступна расширенная версия «Карты героя» (40 вопросов, автоматический разбор, PDF-отчёт и рекомендации). Ссылка — в конце этого раздела.",
+      "sha1": "33c617079c5fcb86ca8fd72fbb79193578ad102b",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "heading",
+      "text": "1. Какая твоя ведущая маска?",
+      "sha1": "c49f32a14673d40b19167c11f70d8c17ba437e1a",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Выбирай тот вариант, который наиболее честно описывает твои обычные реакции. Считай, сколько раз выбрал каждую букву (А, Б, В, Г, Д, Е).",
+      "sha1": "2b2e4e7c9e90174755da7ed646ccb96e79c8d4f7",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "1. В стрессовой ситуации я чаще всего:",
+      "sha1": "d2dc350967ac108897ed82f1214615de9d9d8384",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Исчезаю, ухожу в фантазии, не чувствую тело.",
+      "sha1": "6dd6d9688d2587206d98b6a7ce691f6615b44130",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) Начинаю цепляться за человека, боюсь остаться один.",
+      "sha1": "0e5a0a56292e14b91b75942e8c35461e15397a82",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Виню себя, чувствую стыд и вину.",
+      "sha1": "02a12d0b4575f918cdba391ffc721a93f6388273",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Беру всё под контроль, злюсь, проверяю.",
+      "sha1": "a1cba8777ccbda81211b01bd7ec6fa944702e8b6",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Д) Требую от себя идеальности, боюсь ошибки.",
+      "sha1": "a547eedf3e818aaef2fa24c78d27a7da948b6548",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Е) Отстраняюсь, ухожу в мысли, теряю контакт с реальностью.",
+      "sha1": "e74029efb9971f83823c51d5f574d05ebcc607e5",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "2. Что мне труднее всего выносить в отношениях?",
+      "sha1": "d05ad6a1de836ee046233c503f11b77b9f5bc07c",
+      "pause_ms": null
+    },
+    {
+      "id": 15,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Когда меня «видят», требуют проявления.",
+      "sha1": "a10d6b691021054c539cd9956c9e1d1b5835dde4",
+      "pause_ms": null
+    },
+    {
+      "id": 16,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) Молчание партнёра, угроза расставания.",
+      "sha1": "18cfd6572b063d02eb8b0a67e398fddd819f4c35",
+      "pause_ms": null
+    },
+    {
+      "id": 17,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Критику и осуждение.",
+      "sha1": "7762dbccd28bce45a973bc38d22b35d2b14b3b43",
+      "pause_ms": null
+    },
+    {
+      "id": 18,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Хаос, непредсказуемость.",
+      "sha1": "72180e0a2e40a2a7986d069ba40ca9596f20d098",
+      "pause_ms": null
+    },
+    {
+      "id": 19,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Д) Мои собственные ошибки и несовершенства.",
+      "sha1": "e21035a9e0bab64dc1f8209a7f8e4998cafaa6af",
+      "pause_ms": null
+    },
+    {
+      "id": 20,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Е) Эмоциональные требования, бытовую суету.",
+      "sha1": "5b7f4b2b9fa1fed2d363ae0ef622f22c6043bdd1",
+      "pause_ms": null
+    },
+    {
+      "id": 21,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "3. В детстве мне часто говорили (или я чувствовал):",
+      "sha1": "5a0ec975c53afab64d5a59ff02e83aab04139862",
+      "pause_ms": null
+    },
+    {
+      "id": 22,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) «Не мешай», «будь тише» (или просто не замечали).",
+      "sha1": "9ed899342d74ba7b232282c1fb51db8af3c87b39",
+      "pause_ms": null
+    },
+    {
+      "id": 23,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) «Ты хороший, когда послушный», «не буду с тобой дружить».",
+      "sha1": "9b27ce15a0fc6e1b969492a8e4a04bfb89c993b2",
+      "pause_ms": null
+    },
+    {
+      "id": 24,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) «Фу, как не стыдно», «ты меня позоришь».",
+      "sha1": "a53df8e3ce850e3609d5ac528672fdbcd6de7b2e",
+      "pause_ms": null
+    },
+    {
+      "id": 25,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) «Всё должно быть по плану», «никому нельзя доверять».",
+      "sha1": "3244fb4440bc9386e28c78d164c34323249c2d5d",
+      "pause_ms": null
+    },
+    {
+      "id": 26,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Д) «Будь лучшим», «не ошибайся».",
+      "sha1": "be17ac61564785c2b82d8e5617ef50314fa545fa",
+      "pause_ms": null
+    },
+    {
+      "id": 27,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Е) «Не витай в облаках», «спустись на землю».",
+      "sha1": "c7e9f2d406ccc35eebc4a89500ae6aa697671b82",
+      "pause_ms": null
+    },
+    {
+      "id": 28,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "4. Моё тело в стрессе:",
+      "sha1": "0fa7de96a337399bba5545afd0ac97de96efccfe",
+      "pause_ms": null
+    },
+    {
+      "id": 29,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Становится лёгким или застывает, я его почти не чувствую.",
+      "sha1": "aaea802d25cf9a84dd2a0ffdcbfc2d3f30923b54",
+      "pause_ms": null
+    },
+    {
+      "id": 30,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) Напрягается живот, появляется пустота.",
+      "sha1": "3b93b765528f25a4b643097c205a5958c09d6742",
+      "pause_ms": null
+    },
+    {
+      "id": 31,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Напряжены шея и горло, ком в горле.",
+      "sha1": "bc420ff0d0cedd49e37f556f25a843c9ef5d9ce9",
+      "pause_ms": null
+    },
+    {
+      "id": 32,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Челюсти сжаты, кулаки напряжены.",
+      "sha1": "beef2376e1b1cbf815fd77d9e0e962d2ca131ed3",
+      "pause_ms": null
+    },
+    {
+      "id": 33,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Д) Спина прямая, плечи напряжены, тело как струна.",
+      "sha1": "44fc9eadc164c64b9d8f7315dbedba83ae9ae6bd",
+      "pause_ms": null
+    },
+    {
+      "id": 34,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Е) Я почти не чувствую тело, движения неловкие.",
+      "sha1": "4e2c261ccd54ff4b00c69fc0bfa03311df66f313",
+      "pause_ms": null
+    },
+    {
+      "id": 35,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Результат: какая буква чаще всего?",
+      "sha1": "b6387709923c0675f2244ef0a104ae9cb90ecbab",
+      "pause_ms": null
+    },
+    {
+      "id": 36,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· А — Беглец",
+      "sha1": "f0eaa743a2b3ec01aa0b876376ea58fdacc89ecf",
+      "pause_ms": null
+    },
+    {
+      "id": 37,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Б — Зависимый",
+      "sha1": "f238ce183e97bc6965db2530c34e9cbe3317f43e",
+      "pause_ms": null
+    },
+    {
+      "id": 38,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· В — Мазохист",
+      "sha1": "23d332b70fdb39b4248040b509d88e405c8009be",
+      "pause_ms": null
+    },
+    {
+      "id": 39,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Г — Контролирующий",
+      "sha1": "ac49bc5c72bd4adad137c8468bfb586f70450112",
+      "pause_ms": null
+    },
+    {
+      "id": 40,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Д — Железный человек",
+      "sha1": "67670e494463e4688b6ff9372c12322e6eff1f84",
+      "pause_ms": null
+    },
+    {
+      "id": 41,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Е — Странник",
+      "sha1": "e798b4b762fcd5d36134872fff35bc74dd6363a3",
+      "pause_ms": null
+    },
+    {
+      "id": 42,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если две буквы повторяются одинаково часто — читай главы для обеих масок.",
+      "sha1": "1d6bfcb759e998d927b327dab835a530fc6fdc2c",
+      "pause_ms": null
+    },
+    {
+      "id": 43,
+      "global_id": null,
+      "type": "heading",
+      "text": "2. Уровень болевого тела",
+      "sha1": "4b5833cd0403d8821143cb7a9ea95d4cea3f3805",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 44,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Оцени каждое утверждение: 0 (никогда), 1 (иногда), 2 (часто), 3 (почти всегда).",
+      "sha1": "da236815fc62e7bc315f423a3d138722c3914341",
+      "pause_ms": null
+    },
+    {
+      "id": 45,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Я прокручиваю в голове старые обиды, ссоры, неприятности.",
+      "sha1": "86fb9e8c4afb61e4824b01a068468b25c9fd72ca",
+      "pause_ms": null
+    },
+    {
+      "id": 46,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Я жалею себя, чувствую себя жертвой.",
+      "sha1": "a5d787071d5f10859d2e0dc940097c53fcb06641",
+      "pause_ms": null
+    },
+    {
+      "id": 47,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Меня накрывают сильные эмоции, которые я не могу контролировать.",
+      "sha1": "53be5b9644039e7c03a4546aa2395ffb89cedc5d",
+      "pause_ms": null
+    },
+    {
+      "id": 48,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Мои реакции слишком сильны для ситуации.",
+      "sha1": "990ae821f2f16f80b31dc95c37c53f17a895be60",
+      "pause_ms": null
+    },
+    {
+      "id": 49,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "У меня есть хронические зажимы в теле (шея, плечи, челюсть, живот).",
+      "sha1": "903ac5665e73d1f62ef7fc8a0bb5a43b5604d6e7",
+      "pause_ms": null
+    },
+    {
+      "id": 50,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Я использую еду, алкоголь, телефон, сериалы или скандалы, чтобы не чувствовать.",
+      "sha1": "71b1971052b8a58f67fba0b1c4bd565a8ac602ba",
+      "pause_ms": null
+    },
+    {
+      "id": 51,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Сложи баллы.",
+      "sha1": "d65b85e2070b436106c0402e1b5b228f2b05c40d",
+      "pause_ms": null
+    },
+    {
+      "id": 52,
+      "global_id": 101,
+      "type": "flow",
+      "text": "· 0–4 — болевое тело спит → профилактика (Главы 16, 34).",
+      "sha1": "bc609dcd34ce7ccd6c7b08ba1b15e0c52ca5b4e6",
+      "pause_ms": null
+    },
+    {
+      "id": 53,
+      "global_id": 102,
+      "type": "flow",
+      "text": "· 5–10 — просыпается → Главы 12, 16.",
+      "sha1": "e85d8255a87a3b7e8c7679a323ebbe9fe09fe3dd",
+      "pause_ms": null
+    },
+    {
+      "id": 54,
+      "global_id": 103,
+      "type": "flow",
+      "text": "· 11–18 — активно → Главы 12, 13, 14, 15, 16, 33 (желательно с опорой на специалиста).",
+      "sha1": "67bfd61e234b2df2e6b0c73f57e84843b7c88d9b",
+      "pause_ms": null
+    },
+    {
+      "id": 55,
+      "global_id": null,
+      "type": "heading",
+      "text": "3. Тип привязанности",
+      "sha1": "3c123b4d6cd629431240bc8a6ded130dfa0ea94e",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 56,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Выбери один ответ на каждый вопрос.",
+      "sha1": "776427db7669a4150f2ae1893865c7ac588f90bb",
+      "pause_ms": null
+    },
+    {
+      "id": 57,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "1. Когда партнёр долго не отвечает, я:",
+      "sha1": "c3b79827abd95a8b11cc36c2e2b3dc6bba2bd048",
+      "pause_ms": null
+    },
+    {
+      "id": 58,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Паникую, звоню, требую ответа.",
+      "sha1": "2fcf2eefa7da32d8cfbe2d2e377f09caaa3669b9",
+      "pause_ms": null
+    },
+    {
+      "id": 59,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) «Ну и ладно, мне и так хорошо».",
+      "sha1": "e1d3716cdc463a6ce1a61666d68095c94b9318ab",
+      "pause_ms": null
+    },
+    {
+      "id": 60,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Злюсь, обвиняю, хочу наказать.",
+      "sha1": "151e0c2c6096c186598c8b6fefa2a74feeb804fe",
+      "pause_ms": null
+    },
+    {
+      "id": 61,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Спокойно жду, занимаюсь своими делами.",
+      "sha1": "82894fa60e88fb2f8b680ec5555b6d32739ba492",
+      "pause_ms": null
+    },
+    {
+      "id": 62,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "2. В одиночестве я чувствую:",
+      "sha1": "41efbb1015ea2766d5765589ddcb2aca81363892",
+      "pause_ms": null
+    },
+    {
+      "id": 63,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Пытку, тревогу, пустоту.",
+      "sha1": "627619d374072d02a2cf12bbc83d953dff705e07",
+      "pause_ms": null
+    },
+    {
+      "id": 64,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) Облегчение, безопасность.",
+      "sha1": "29da4abfa0c83626ee44824112d2a91b14148f8e",
+      "pause_ms": null
+    },
+    {
+      "id": 65,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Тоску, злость, брошенность.",
+      "sha1": "7ca60d23cfd81a0f25e99bd468f80b05e23bd2f0",
+      "pause_ms": null
+    },
+    {
+      "id": 66,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Нормально, иногда приятно, иногда скучно.",
+      "sha1": "f47a8727ee7bd8421f1b60b9eec21fc3cebf7f53",
+      "pause_ms": null
+    },
+    {
+      "id": 67,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "3. В отношениях я боюсь:",
+      "sha1": "65a5989418c8f43e356945a3d33befc861286364",
+      "pause_ms": null
+    },
+    {
+      "id": 68,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "А) Что меня бросят.",
+      "sha1": "95699d59ae56b9a566193d19a49ac91d17aafa4b",
+      "pause_ms": null
+    },
+    {
+      "id": 69,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Б) Что меня поглотят, растворят.",
+      "sha1": "010f24bdc35f56c6b1559fa298d047e124dcdc4c",
+      "pause_ms": null
+    },
+    {
+      "id": 70,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В) Предательства, удара в спину.",
+      "sha1": "fc604d6be964fb37237bce263abeddbba7e7e893",
+      "pause_ms": null
+    },
+    {
+      "id": 71,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Г) Ничего из этого.",
+      "sha1": "cf3af30ca558f579a1117b50f467686d2690d51b",
+      "pause_ms": null
+    },
+    {
+      "id": 72,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Результат:",
+      "sha1": "1b728e06d2f115828a8b59f403b5ea52a4425c27",
+      "pause_ms": null
+    },
+    {
+      "id": 73,
+      "global_id": 104,
+      "type": "flow",
+      "text": "· большинство А — тревожный тип (Зависимый) → Глава 25.",
+      "sha1": "4238fab360fa656c985a6ec1e99b8e079179f615",
+      "pause_ms": null
+    },
+    {
+      "id": 74,
+      "global_id": 105,
+      "type": "flow",
+      "text": "· большинство Б — избегающий тип (Беглец, Странник) → Глава 25.",
+      "sha1": "6e52bafeeafbaade52709348e7bb9b1a0692610a",
+      "pause_ms": null
+    },
+    {
+      "id": 75,
+      "global_id": 106,
+      "type": "flow",
+      "text": "· большинство В — дезорганизованный тип (Контролирующий, Железный, Мазохист) → Глава 25.",
+      "sha1": "e893ba45430db8ce5dc4df1709d3a97c55f5f574",
+      "pause_ms": null
+    },
+    {
+      "id": 76,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· большинство Г — надёжный тип.",
+      "sha1": "8180386729d60343eeb6d9c3ee82bc2dbfc7c1e8",
+      "pause_ms": null
+    },
+    {
+      "id": 77,
+      "global_id": null,
+      "type": "heading",
+      "text": "Твои главы для первоочередного чтения",
+      "sha1": "7cd2486eccf2ff5c9ba1d65da2dbb90b68cc822f",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 78,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Беглец: 3, 6, 8, 12, 13, 15, 23, 24.",
+      "sha1": "8eefe41353d0d48008fa93facc3483b9cc7b5009",
+      "pause_ms": null
+    },
+    {
+      "id": 79,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Зависимый: 3, 6, 8, 12, 13, 14, 23, 24.",
+      "sha1": "4b5966564a1e716f483076482b1154866b9d3645",
+      "pause_ms": null
+    },
+    {
+      "id": 80,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Мазохист: 3, 6, 8, 12, 13, 14, 15, 23.",
+      "sha1": "3169fee9ea3dc2528c4ec5458e18485355cac15f",
+      "pause_ms": null
+    },
+    {
+      "id": 81,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Контролирующий: 3, 6, 8, 12, 13, 14, 21, 23.",
+      "sha1": "0a672cac2ca9afcef807857470e7c9e7b7915953",
+      "pause_ms": null
+    },
+    {
+      "id": 82,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Железный человек: 3, 6, 8, 12, 13, 14, 15, 23.",
+      "sha1": "56da531826457d398f3efe0be4b3350ccda7e555",
+      "pause_ms": null
+    },
+    {
+      "id": 83,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Странник: 3, 6, 8, 12, 13, 15, 23, 24.",
+      "sha1": "8b85c0081534660f0c260656af6011233a4baeb7",
+      "pause_ms": null
+    },
+    {
+      "id": 84,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если ты чувствуешь сильную эмоцию и не понимаешь, что это — вернись к Главе 4, раздел «Эмоциональная механика». Там ты найдёшь карту: от сигнала телесного интеллекта до чувства.",
+      "sha1": "2a4fd19a58aa8a65b6272af702a32c82dc446444",
+      "pause_ms": null
+    },
+    {
+      "id": 85,
+      "global_id": null,
+      "type": "heading",
+      "text": "Быстрый тест: эмоция или чувство?",
+      "sha1": "e7322e6ddc21698264daee50779a13c47f7b45ce",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 86,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Если ты чувствуешь что-то и не можешь понять, что именно — задай себе два вопроса.",
+      "sha1": "33da6f2d1cc5083946ced54136c846c4c073b742",
+      "pause_ms": null
+    },
+    {
+      "id": 87,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Первый: «Это случилось в теле мгновенно, как удар?» Если да — это эмоция, сигнал телесного интеллекта. Вернись в тело, дыши в это место (Глава 12).",
+      "sha1": "2e026813423f0d5172c31429f208db7cb3ef26c0",
+      "pause_ms": null
+    },
+    {
+      "id": 88,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Второй: «Я прокручиваю это в голове уже несколько часов или дней?» Если да — это чувство. Спроси: «Какая эмоция под ним? Чего я боюсь? На что я злюсь?» (Глава 4, Глава 17).",
+      "sha1": "0a86d32855bbdf60174bc84fc9811504b261eb0e",
+      "pause_ms": null
+    },
+    {
+      "id": 89,
+      "global_id": null,
+      "type": "heading",
+      "text": "Хочешь глубже? Расширенная версия на сайте",
+      "sha1": "da2d701f5dd15b0c98bda280be58f0fe40f7f7fb",
+      "pause_ms": null,
+      "heading_level": 2,
+      "pause_after_ms": 900
+    },
+    {
+      "id": 90,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Эта быстрая диагностика даёт общее направление. Если ты хочешь:",
+      "sha1": "a8de42b0e2573a9b922fd95ea45aaa74ef716d94",
+      "pause_ms": null
+    },
+    {
+      "id": 91,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· точнее определить свою маску и второстепенные роли,",
+      "sha1": "b747e7f89ef0eac3537ad37e554e1e6967d5dd86",
+      "pause_ms": null
+    },
+    {
+      "id": 92,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· узнать процентное соотношение всех шести масок,",
+      "sha1": "96aa907b1b0f818fae5980ead3c5b38624af0f77",
+      "pause_ms": null
+    },
+    {
+      "id": 93,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· получить развёрнутый отчёт по болевому телу, ограничивающим убеждениям и типу привязанности,",
+      "sha1": "7b09f30344df0174b3f212bf70f079cc66c60754",
+      "pause_ms": null
+    },
+    {
+      "id": 94,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· а также персональные рекомендации по главам и практикам —",
+      "sha1": "4db94e1a21c3c281ec0eb77df751fca82b2cb792",
+      "pause_ms": null
+    },
+    {
+      "id": 95,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "переходи на сайт «Древо жизни»: isaev.vnedrum.ru",
+      "sha1": "34ab559494646cd2254153c3c07f23bf14c7976b",
+      "pause_ms": null
+    },
+    {
+      "id": 96,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "На сайте доступна расширенная «Карта героя» (40 вопросов, автоподсчёт, PDF-отчёт). Также можно заказать более подробную расшифровку «Индивидуальную карту личности» с рекомендациями от автора (платно). Это позволит тебе получить ещё более точную карту своей личности и пути исцеления.",
+      "sha1": "13d1e5291a7fdad2fb97ebff39ce1273a3ee609e",
+      "pause_ms": null
+    }
+  ]
+}

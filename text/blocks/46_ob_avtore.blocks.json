@@ -1,0 +1,121 @@
+{
+  "nn": "46",
+  "slug": "ob_avtore",
+  "heading": "Об авторе",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Об авторе",
+      "sha1": "bd27d3e4e698e6e7e731739f546536d6f2285edb",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Александр Исаев — практикующий психолог, автор метода интегральной психологии взросления «Древо жизни» и книги «Ты не поломан».",
+      "sha1": "c85bf416e3b2704c1d536ba98b3fd0eacdd38579",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Более 15 лет он работает с людьми, которые устали от повторяющихся сценариев, тревоги, выгорания, сложностей в отношениях и ощущения: «Со мной что-то не так».",
+      "sha1": "d1fffdb23d1e1c32873a1037ef68a041cade2ed6",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Его подход объединяет работу с телом, эмоциями и мышлением, исследование масок и травматического опыта, регуляцию нервной системы и возвращение человеку его внутренней силы и дара.",
+      "sha1": "35fb025e75e427fba404cc65f6f0805b76c5c939",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Александр проводит:",
+      "sha1": "d1f8652dfe4944453fe3d74b264ea86a55c1ce3e",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "индивидуальные консультации — очно и онлайн;",
+      "sha1": "e0a02d1d794750deea321fbdcb759ff9f6252705",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "пятидневные ретриты в горах и на море — глубокая работа с телом, масками и внутренними сценариями в малых группах;",
+      "sha1": "18fd0252ce2bc1ff8894150dd116fb13a8d5e047",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "онлайн-программы — для тех, кто хочет проходить этот путь постепенно, в своём ритме.",
+      "sha1": "6b259788faacbc24c702ab22614d56f925e47cd2",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "В своей работе Александр не обещает быстрого счастья и не предлагает универсальных рецептов. Его задача — помочь человеку увидеть, что стоит за привычными реакциями, понять себя и постепенно вернуть способность выбирать, чувствовать и жить не из старых защит, а из себя.",
+      "sha1": "3321117f02bb65b10f713674a8657108b4927e32",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Ты не поломан. Возможно, тебе просто нужно снова увидеть себя.",
+      "sha1": "c40bbbe403d4b09839f10289e744ec3d63ec5106",
+      "pause_ms": null
+    },
+    {
+      "id": 11,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Связаться со мной можно по телефону и в мессенджерах: 8 918 534 03 11",
+      "sha1": "81ce46bf2bacb1c86f725417610bccf7bff79ab9",
+      "pause_ms": null
+    },
+    {
+      "id": 12,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "E-mail: aisaev20@mail.ru",
+      "sha1": "7c9202f28224b1215ad0b35fe8483e5353be2e5b",
+      "pause_ms": null
+    },
+    {
+      "id": 13,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Сайт: isaev.vnedrum.ru",
+      "sha1": "c6316da753be28ef2c52ab71277fd338c15ddb71",
+      "pause_ms": null
+    },
+    {
+      "id": 14,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Конец книги",
+      "sha1": "07ac3e80b7433dac0e87d0f35ddd0143cb75d99d",
+      "pause_ms": null
+    }
+  ]
+}

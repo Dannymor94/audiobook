@@ -1,0 +1,89 @@
+{
+  "nn": "45",
+  "slug": "pismo_sebe_praktika",
+  "heading": "Письмо себе (практика)",
+  "blocks": [
+    {
+      "id": 1,
+      "global_id": null,
+      "type": "heading",
+      "text": "Письмо себе (практика)",
+      "sha1": "59691899e4d8cf6ac32dd9b4bfbb06c0165ec963",
+      "pause_ms": null,
+      "heading_level": 1,
+      "pause_after_ms": 1500
+    },
+    {
+      "id": 2,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Это упражнение можно сделать в самом конце работы с книгой, когда ты уже определил свою маску, встретился с Внутренним Ребёнком и почувствовал свой дар.",
+      "sha1": "2e5201c3185ee135a250569c883380c32f8b5f9c",
+      "pause_ms": null
+    },
+    {
+      "id": 3,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "По возможности закрой глаза, сделай несколько глубоких вдохов. Представь, что ты прошёл ещё несколько лет вперёд. Тот ты — уже умудрённый опытом, снявший маски, живущий из своего дара. Он знает, какие трудности были, как ты справлялся, что помогло. Напиши письмо от него — себе сегодняшнему.",
+      "sha1": "6c37da9ef625a75f8880900f170ba87f9105f442",
+      "pause_ms": null
+    },
+    {
+      "id": 4,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Начни так: «Привет, это я из будущего. Я знаю, что сейчас тебе…»",
+      "sha1": "42d295dc9ccb59360df2fadca46cf80592ac561f",
+      "pause_ms": null
+    },
+    {
+      "id": 5,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Напиши:",
+      "sha1": "25affcdd037a374a9e3644141ac8913dd766f9df",
+      "pause_ms": null
+    },
+    {
+      "id": 6,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Что было самым трудным на твоём пути.",
+      "sha1": "a04fb7e6f70b2a0cf0b4c715037297caf178b817",
+      "pause_ms": null
+    },
+    {
+      "id": 7,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Что помогло не сдаться.",
+      "sha1": "256ad30eb5833ef8c66b91c85eb3c7ce5057a9e0",
+      "pause_ms": null
+    },
+    {
+      "id": 8,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Какие качества в тебе (твой дар) стали твоей опорой.",
+      "sha1": "e242029a891943ec7cf7dcb6dd9cc6a93548beef",
+      "pause_ms": null
+    },
+    {
+      "id": 9,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "· Какое напутствие ты хотел бы себе дать.",
+      "sha1": "396e40f994c4f526f69a2c798b0bf3c4e71adf01",
+      "pause_ms": null
+    },
+    {
+      "id": 10,
+      "global_id": null,
+      "type": "paragraph",
+      "text": "Сложи письмо. Храни его в книге. Открой через год.",
+      "sha1": "3d685b3e94ecc755453e08bd7bd9a4ee93d6ad76",
+      "pause_ms": null
+    }
+  ]
+}
