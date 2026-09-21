@@ -1,10 +1,22 @@
+# Secrets
 .env
+
+# Python env / caches
 .venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Heavy, machine-local assets (never committed; a move is a folder copy)
 models/
 bin/
 ref/
 cache/
 out/
-__pycache__/
-*.pyc
-.pytest_cache/
+
+# The manuscript source stays out of git; the processed text layer
+# (chNN.txt/.norm/.acc, read_rules.yaml, pronounce.yaml) is committed.
+text/*.docx
+
+# macOS cruft
+.DS_Store

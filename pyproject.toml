@@ -6,16 +6,18 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "torch>=2.3",
     "torchaudio>=2.3",
-    "coqui-tts[codec]>=0.24", # community-форк Coqui, XTTS-v2; [codec] -> torchcodec для аудио-IO на torch>=2.9
-    # coqui-tts 0.27.5 calls isin_mps_friendly removed in transformers 5.0; hold at <5
+    "qwen-tts>=0.1.1",        # Qwen3-TTS-12Hz-0.6B-Base (Apache 2.0); bundles the modeling code
+    # qwen-tts 0.1.1 pins transformers==4.57.3; the range keeps that satisfiable.
     "transformers>=4.57,<5",
-    "ruaccent>=1.5",          # ударения и омографы
+    "ruaccent>=1.5",          # ударения и омографы (out of the render path; text-prep tooling only)
     "faster-whisper>=1.0",    # QC: CTranslate2, CPU int8, без сборки
     "soundfile>=0.12",
-    "numpy>=1.26,<2.0",       # coqui-tts пока не дружит с numpy 2
+    "numpy>=1.26,<2.0",       # librosa/numba (via qwen-tts) still prefer numpy<2
     "pyyaml>=6.0",
     "pyloudnorm>=0.1",        # проверка LUFS в тестах
     "python-dotenv>=1.0",
+    "python-docx>=1.2.0",
+    "num2words>=0.5.14",
 ]
 
 [project.optional-dependencies]
