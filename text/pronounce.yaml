@@ -1,0 +1,18 @@
+# Pronunciation dictionary — stress/reading fixes for the TTS model.
+#
+# key = exact source string as it appears in the chunk (after normalization),
+# value = respelling fed to the model instead. Whole-word match, longest first.
+#
+# Applied right before synthesis; it does NOT edit .norm.txt or the book.
+# An entry that fires is part of the affected chunk's hash, so after editing
+# this file run `./run.sh chunk` to re-queue the touched chunks (nothing else
+# re-renders). Confirm every entry BY EAR — duration/whisper cannot verify stress.
+#
+# House rule for stress (confirmed by ear, see PROJECT.md §5.5): Qwen responds
+# to a DOUBLED STRESSED VOWEL — "Оотзывы" for stress on the first О. Acute marks
+# (U+0301) are ignored, the RUAccent "+" mark garbles output, and hyphens,
+# spaces or caps are all worse. The sentinel (config.model.sentinel) already
+# trims the drawn-out tail the doubling adds (2.56s → 1.52s), so no extra
+# handling is needed. Every entry here must be confirmed by ear.
+
+"Отзывы": "Оотзывы"
