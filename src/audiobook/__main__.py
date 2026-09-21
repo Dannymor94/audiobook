@@ -19,9 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("doctor", help="проверка окружения")
     d.add_argument("--no-models", action="store_true", help="не проверять веса (CI)")
     sub.add_parser("bench", help="RTF на 5 чанках")
+    sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
+    sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
+    sub.add_parser("chunk", help="чанкинг всех разделов → out/sections/NN/manifest.jsonl")
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
+        s.add_argument("--section", type=str, default=None,
+                       help="имя секции out/sections/<section> (обязательно для рендера)")
     a = p.parse_args(argv)
 
     if a.cmd == "doctor":
@@ -30,6 +35,24 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "bench":
         from .bench import run as bench
         return bench(load_config())
+    if a.cmd == "pick-ref":
+        from .pick_ref import run as pick_ref
+        return pick_ref(load_config())
+    if a.cmd == "chunk":
+        from .chunker import run as chunk
+        return chunk(load_config())
+    if a.cmd == "calibrate":
+        from .calibrate import run as calibrate
+        return calibrate(load_config())
+    if a.cmd == "synth":
+        from .synth import run as synth
+        return synth(load_config(), a.section)
+    if a.cmd == "assemble":
+        from .assemble import run as assemble
+        return assemble(load_config(), a.section)
+    if a.cmd == "master":
+        from .master import run as master
+        return master(load_config(), a.section)
     print(f"{a.cmd}: не реализовано в каркасе", file=sys.stderr)
     return 2
 

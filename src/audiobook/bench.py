@@ -15,19 +15,30 @@ SAMPLES = [
 
 
 def run(config: dict) -> int:
+    from .synth import (compute_latents, load_latents, load_model,
+                        save_latents, synthesize)
     device = pick_device()
     configure_cpu_threads(workers=1)
     print(f"device={device}")
-    from TTS.api import TTS
     t0 = time.perf_counter()
-    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+    model = load_model(device)
     print(f"load: {time.perf_counter() - t0:.1f}s")
 
-    ref = str(paths.ROOT / config["reference"]["path"])
+    ref = paths.ROOT / config["reference"]["path"]
+    lat_path = ref.with_suffix(".latents.pt")
+    if lat_path.exists():
+        latents = load_latents(lat_path)
+    else:
+        latents = compute_latents(model, ref)
+        save_latents(latents, lat_path)
+    seed = config["model"]["seed"]
+    temperature = config["model"]["temperature"]
+    language = config["model"]["language"]
+
     gen_s = audio_s = 0.0
     for text in SAMPLES:
         t = time.perf_counter()
-        wav = tts.tts(text=text, speaker_wav=ref, language="ru")
+        wav = synthesize(model, text, latents, seed, temperature, language)
         gen_s += time.perf_counter() - t
         audio_s += len(wav) / 24000
     rtf = gen_s / audio_s
