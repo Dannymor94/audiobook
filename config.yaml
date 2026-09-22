@@ -5,22 +5,19 @@ model:
   name: qwen3_tts                 # Qwen3-TTS-12Hz-0.6B-Base (Apache 2.0)
   language: ru
   seed: 42                        # база; фактический seed чанка = seed_for_chunk(hash)
-  temperature: 0.9               # валидированное значение Qwen (0.65 было под XTTS)
+  temperature: 1.0               # выбрано на слух: плавнее интонация; цена ~2x RTF из-за разгонов
   # Qwen тоже обрезает хвост чанка без sentinel. Дописывается только к чанкам без
   # финальной пунктуации (589 из 5127). Текст на . ! ? … : ; » сам даёт стоп-сигнал.
   # Не входит в хеш чанка.
   sentinel: " ."
   # ё сохраняется (Qwen читает ё верно); ударения "+" не используются (ломают Qwen).
 reference:
-  path: ref/isaev_ref.wav        # 24 kHz mono, 15 c; = ref/candidates/01.wav
-  # sha1 файла ref/isaev_ref.latents.pt — входит в хеш каждого чанка.
-  latents_sha1: 78247ffee16cb125177f17f373ade9eb22e9abb7
-  # Verbatim transcript of the full-clone reference clip (ref 1 =
-  # out/expr_test/_refs/1.wav), confirmed by ear. NOT consumed today: production
-  # runs x-vector-only, which ignores ref_text. Persisted so it is never lost
-  # again — full-clone mode (PLAN этап A) requires it. NB: ref 1 is a DIFFERENT
-  # clip than the active `path` above; adopting it as the reference is a separate
-  # cache-nulling decision.
+  path: ref/ref1.wav             # ref 1: out/expr_test/_refs/1.wav, ~19.8 s, 24 kHz mono
+  # sha1 файла ref/ref1.latents.pt — входит в хеш каждого чанка.
+  latents_sha1: 32948e513a2cc79aa9f5a07b49dd96d90bf1b963
+  # Verbatim transcript of ref 1, confirmed by ear. Full-clone (ICL) mode:
+  # latents computed with x_vector_only_mode=False + this ref_text.
+  # Lives in ref/ (gitignored) — travels on flash drive.
   ref_text_path: ref/ref1.txt
 render:
   # Per-chunk length cap. Qwen open-end generation can run away (never emit a
@@ -38,8 +35,11 @@ render:
   # times. Each retry is cheap now (cap, not timeout), so keep a deep budget.
   timeout_retries: 6
   # Last-resort wall-clock guard only. The length cap ends runaways first; this
-  # catches a true hang (no tokens at all). A capped generation is far quicker.
-  chunk_timeout_s: 120
+  # catches a true hang (no tokens at all). Must exceed the time to generate the
+  # full cap budget: at RTF ~8x, a 250-char chunk cap (~432 tokens, ~36s audio)
+  # takes ~288s to generate. Set to 600 so the cap always fires before the
+  # timeout kills and respawns the worker.
+  chunk_timeout_s: 600
 pauses_ms:
   sentence: 350
   paragraph: 900
@@ -54,3 +54,6 @@ master:
   true_peak: -3
   highpass_hz: 80
   sample_rate: 44100
+  # eq3: +3 dB presence at 4 kHz, -2 dB mud cut at 300 Hz, light de-esser.
+  # Chosen by ear from clarity_test/ variants.
+  eq_filters: "equalizer=f=4000:t=q:w=1:g=3,equalizer=f=300:t=q:w=1:g=-2,deesser=i=0.15"
