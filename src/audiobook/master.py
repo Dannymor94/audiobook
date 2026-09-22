@@ -1,4 +1,4 @@
-"""Master stage: section.wav -> highpass 80 Hz -> two-pass loudnorm
+"""Master stage: section.wav -> highpass 80 Hz -> optional EQ -> two-pass loudnorm
 (-19 LUFS / -3 dBTP) -> 44.1 kHz mp3 (ID3v2), 192 kbps CBR. Then measure the
 true integrated loudness of the produced mp3 independently with pyloudnorm.
 """
@@ -18,9 +18,11 @@ def _ff() -> str:
     return str(ff)
 
 
-def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float) -> dict:
+def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float,
+                      eq: str = "") -> dict:
     """Pass 1: run loudnorm in analysis mode, parse its JSON report."""
-    af = f"highpass=f=80,loudnorm=I={I}:TP={tp}:LRA={lra}:print_format=json"
+    mid = f",{eq}" if eq else ""
+    af = f"highpass=f=80{mid},loudnorm=I={I}:TP={tp}:LRA={lra}:print_format=json"
     p = subprocess.run([ff, "-hide_banner", "-i", str(src), "-af", af, "-f", "null", "-"],
                        capture_output=True, text=True)
     err = p.stderr
@@ -40,11 +42,13 @@ def master_section(sec_dir: Path, config: dict) -> tuple[Path, dict]:
     I, tp, lra = float(m["lufs"]), float(m["true_peak"]), 11.0
     sr = int(m["sample_rate"])
     hp = int(m["highpass_hz"])
+    eq = m.get("eq_filters", "")
 
-    meas = _loudnorm_measure(ff, src, I, tp, lra)
+    meas = _loudnorm_measure(ff, src, I, tp, lra, eq)
     # Pass 2: apply with measured values (accurate, near-linear normalization).
+    mid = f",{eq}" if eq else ""
     af = (
-        f"highpass=f={hp},"
+        f"highpass=f={hp}{mid},"
         f"loudnorm=I={I}:TP={tp}:LRA={lra}:"
         f"measured_I={meas['input_i']}:measured_TP={meas['input_tp']}:"
         f"measured_LRA={meas['input_lra']}:measured_thresh={meas['input_thresh']}:"
