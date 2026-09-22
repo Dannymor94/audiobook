@@ -15,6 +15,13 @@ reference:
   path: ref/isaev_ref.wav        # 24 kHz mono, 15 c; = ref/candidates/01.wav
   # sha1 файла ref/isaev_ref.latents.pt — входит в хеш каждого чанка.
   latents_sha1: 78247ffee16cb125177f17f373ade9eb22e9abb7
+  # Verbatim transcript of the full-clone reference clip (ref 1 =
+  # out/expr_test/_refs/1.wav), confirmed by ear. NOT consumed today: production
+  # runs x-vector-only, which ignores ref_text. Persisted so it is never lost
+  # again — full-clone mode (PLAN этап A) requires it. NB: ref 1 is a DIFFERENT
+  # clip than the active `path` above; adopting it as the reference is a separate
+  # cache-nulling decision.
+  ref_text_path: ref/ref1.txt
 render:
   # Per-chunk length cap. Qwen open-end generation can run away (never emit a
   # stop); identical (text, seed) even renders differently in-process vs the
