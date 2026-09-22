@@ -131,12 +131,18 @@ def _dict_to_items(latents: dict) -> list:
     return [VoiceClonePromptItem(**d) for d in latents["items"]]
 
 
-def compute_latents(model, ref_wav: Path) -> dict:
+def compute_latents(model, ref_wav: Path, ref_text: str | None = None) -> dict:
     """Precompute the reusable voice-clone prompt once (project invariant:
-    reference latents are computed once and live in ref/)."""
-    items = model.create_voice_clone_prompt(
-        ref_audio=str(ref_wav), x_vector_only_mode=True
-    )
+    reference latents are computed once and live in ref/).
+    Pass ref_text for full-clone (ICL) mode; omit for x-vector-only."""
+    if ref_text is not None:
+        items = model.create_voice_clone_prompt(
+            ref_audio=str(ref_wav), ref_text=ref_text, x_vector_only_mode=False
+        )
+    else:
+        items = model.create_voice_clone_prompt(
+            ref_audio=str(ref_wav), x_vector_only_mode=True
+        )
     return {"items": [_item_to_dict(i) for i in items]}
 
 
