@@ -1,6 +1,6 @@
 """Master stage: section.wav -> highpass 80 Hz -> two-pass loudnorm
-(-19 LUFS / -3 dBTP) -> 44.1 kHz mp3 (ID3v2). Then measure the true integrated
-loudness of the produced mp3 independently with pyloudnorm.
+(-19 LUFS / -3 dBTP) -> 44.1 kHz mp3 (ID3v2), 192 kbps CBR. Then measure the
+true integrated loudness of the produced mp3 independently with pyloudnorm.
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def master_section(sec_dir: Path, config: dict) -> tuple[Path, dict]:
     out = sec_dir / "section.mp3"
     subprocess.run(
         [ff, "-hide_banner", "-y", "-i", str(src), "-af", af, "-ar", str(sr),
-         "-c:a", "libmp3lame", "-q:a", "2", "-id3v2_version", "3", str(out)],
+         "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3", str(out)],
         capture_output=True, text=True, check=True,
     )
     return out, meas
