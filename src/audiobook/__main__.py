@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
     sub.add_parser("chunk", help="чанкинг всех разделов → out/sections/NN/manifest.jsonl")
+    sub.add_parser("headings", help="рендер 483 заголовков → out/headings_check_v2/")
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
@@ -41,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "chunk":
         from .chunker import run as chunk
         return chunk(load_config())
+    if a.cmd == "headings":
+        from .headings import run as headings
+        return headings(load_config())
     if a.cmd == "calibrate":
         from .calibrate import run as calibrate
         return calibrate(load_config())
