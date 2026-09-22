@@ -8,11 +8,22 @@
 # this file run `./run.sh chunk` to re-queue the touched chunks (nothing else
 # re-renders). Confirm every entry BY EAR — duration/whisper cannot verify stress.
 #
-# House rule for stress (confirmed by ear, see PROJECT.md §5.5): Qwen responds
-# to a DOUBLED STRESSED VOWEL — "Оотзывы" for stress on the first О. Acute marks
-# (U+0301) are ignored, the RUAccent "+" mark garbles output, and hyphens,
-# spaces or caps are all worse. The sentinel (config.model.sentinel) already
-# trims the drawn-out tail the doubling adds (2.56s → 1.52s), so no extra
-# handling is needed. Every entry here must be confirmed by ear.
+# House rule for stress (confirmed by ear, see PROJECT.md §5.5). Two forms:
+#   1. DEFAULT — SINGLE CAPITAL stressed vowel: "волну" -> "волнУ",
+#      "Запить" -> "ЗапИть". Validated on end-of-word stress; use this whenever
+#      the stressed vowel is not the word-initial letter of an already-capital
+#      word.
+#   2. EXCEPTION — word-initial stress on an ALREADY-CAPITALIZED word: DOUBLE the
+#      stressed vowel, since a capital there is indistinguishable from ordinary
+#      capitalization: "Отзывы" -> "Оотзывы".
+# Rejected (all worse than baseline): the acute mark (U+0301) is ignored; the
+# RUAccent "+" mark garbles output; hyphen, space or a capitalized whole
+# syllable all hurt. The sentinel (config.model.sentinel) trims the drawn-out
+# tail doubling adds (2.56s → 1.52s). Every entry must be confirmed by ear —
+# duration/whisper cannot verify stress. Matching is case-sensitive and
+# whole-word, so the key must carry the exact case as it appears in the text
+# ("Запить" fires on the sentence-initial occurrence; a lowercase key would not).
 
 "Отзывы": "Оотзывы"
+"волну": "волнУ"       # accusative of "волна" (emotional-wave metaphor); all 24 book occurrences
+"Запить": "ЗапИть"     # ch13 only, single occurrence, sentence-initial
