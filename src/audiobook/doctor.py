@@ -70,6 +70,15 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
             except Exception as e:  # noqa: BLE001
                 r.check("референс читается", False, str(e))
 
+        # ref_text for full-clone mode: if config points to one it must exist,
+        # else create_voice_clone_prompt(x_vector_only_mode=False) raises
+        # ValueError on the render machine. Lives in ref/ (gitignored, flash drive).
+        rtp = (config or {}).get("reference", {}).get("ref_text_path")
+        if rtp:
+            rt = paths.ROOT / rtp
+            r.check("ref_text (полный клон)", rt.exists(),
+                    f"нет {rt} — полный клон упадёт с ValueError; ref/ на флешке")
+
     print("\n".join(r.lines))
     print("\nDOCTOR:", "GREEN" if r.ok else "RED")
     return r.ok
