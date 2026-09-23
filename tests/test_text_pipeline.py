@@ -1009,6 +1009,30 @@ def test_accent_no_partial_file_on_failure(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Defect N: chapter heading word order in _expand_chapter_refs
+# ---------------------------------------------------------------------------
+
+def test_chapter_heading_word_order():
+    """'Глава N.' at line start → 'Глава первая.' (noun first, capital).
+    In-text cross-references keep ordinal-first form."""
+    from audiobook.text_norm import normalize_line
+
+    # Heading titles: word order must be "Глава <ordinal>"
+    assert normalize_line("Глава 1. Зверь внутри нас")[0].startswith("Глава первая.")
+    assert normalize_line("Глава 12. Первый навык")[0].startswith("Глава двенадцатая.")
+    assert normalize_line("Глава 21. Встреча с Тенью")[0].startswith("Глава двадцать первая.")
+    assert normalize_line("Глава 35. Главное, что нужно помнить")[0].startswith("Глава тридцать пятая.")
+
+    # In-text cross-references: inflected, ordinal first
+    normed, _ = normalize_line("Смотри главу 5.")
+    assert "пятую главу" in normed
+    normed, _ = normalize_line("Подробнее в Главе 12.")
+    assert "двенадцатой главе" in normed
+    normed, _ = normalize_line("Из Главы 3 следует")
+    assert "третьей главы" in normed
+
+
+# ---------------------------------------------------------------------------
 # Defect 3: empty section skip in text_norm and accent
 # ---------------------------------------------------------------------------
 

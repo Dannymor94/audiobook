@@ -170,6 +170,12 @@ def _expand_chapter_refs(text: str, changes: list[str]) -> str:
         n = int(m.group(2))
         case = _CHAPTER_CASE.get(ending, 'nom')
         ordinal = _ordinal_fem(n, case)
+        # Heading title: "Глава N." at start of line → "Глава первая." (noun first)
+        # In-text cross-references use inflected forms → ordinal first ("двенадцатой главе")
+        if case == 'nom' and m.start() == 0 and ending == 'а':
+            repl = f"Глава {ordinal}"
+            changes.append(f"chapter_heading: Глав{ending} {n} → {repl}")
+            return repl
         noun = _CHAPTER_NOUN[case]
         repl = f"{ordinal} {noun}"
         changes.append(f"chapter_ref: Глав{ending} {n} → {repl}")
