@@ -46,7 +46,7 @@ def _collect_headings(config: dict) -> list[tuple[str, str]]:
         d = json.loads(jf.read_text(encoding="utf-8"))
         nn, slug = d["nn"], d["slug"]
         normf = paths.TEXT / f"{nn}_{slug}.norm.txt"
-        if not normf.exists() or normf.stat().st_size < 10:
+        if not normf.exists() or normf.stat().st_size < 50:
             continue
         for u in load_units(nn, slug):
             if u["type"] == "heading":
