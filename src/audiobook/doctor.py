@@ -7,6 +7,36 @@ from pathlib import Path
 
 from . import paths
 
+# ELF magic bytes for Linux/Windows x86-64; Mach-O magic for macOS arm64/x86-64
+_MAGIC: dict[bytes, str] = {
+    b"\x7fELF": "ELF (Linux/Windows)",
+    b"\xfe\xed\xfa\xce": "Mach-O 32-bit",
+    b"\xfe\xed\xfa\xcf": "Mach-O 64-bit",
+    b"\xce\xfa\xed\xfe": "Mach-O 32-bit (reversed)",
+    b"\xcf\xfa\xed\xfe": "Mach-O 64-bit (reversed)",
+    b"MZ": "PE (Windows)",
+}
+
+
+def _binary_fmt(path: Path) -> str:
+    try:
+        data = path.read_bytes()[:4]
+        for magic, label in _MAGIC.items():
+            if data[: len(magic)] == magic:
+                return label
+        return "unknown"
+    except OSError:
+        return "unreadable"
+
+
+def _check_ffmpeg_platform(r: "Report", ff: Path) -> None:
+    fmt = _binary_fmt(ff)
+    r.info("ffmpeg формат", fmt)
+    expected = "ELF" if sys.platform == "linux" else ("Mach-O" if sys.platform == "darwin" else "PE")
+    ok = expected in fmt
+    r.check("ffmpeg платформа совпадает", ok,
+            f"бинарь {fmt!r} не запустится на {sys.platform}; убрать bin/ffmpeg или заменить нативным")
+
 
 class Report:
     def __init__(self) -> None:
@@ -36,7 +66,8 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
     ff = paths.ffmpeg()
     r.check("ffmpeg", ff is not None, "положить в bin/ или поставить в PATH")
     if ff:
-        r.info("ffmpeg", ff)
+        r.info("ffmpeg путь", ff)
+        _check_ffmpeg_platform(r, ff)
 
     try:
         import torch
