@@ -95,35 +95,33 @@ uv run pytest -q
 uv run python bench_ryzen.py --all
 ```
 
-Тест прогоняет 10 чанков из главы 13 на раскладках `1x8`, `2x4`, `3x2`, `4x2`.  
-Вывод для каждой раскладки:
+Тест прогоняет 10 чанков из главы 13 на раскладках `1x8`, `2x8`, `4x4`, `8x2`.
 
-```
-layout=2x4  workers=2  threads_each=4  audio=Xs  wall=Ys  throughput=Z audio-s/wall-s
-```
+**Измерено на gamebox (Ryzen 7 5700X, 8/16, 30 ГБ, fp32, production config):**
 
-**Пороги для ночного рендера (7 ч аудио за 8 ч стены):**
+| Раскладка | Throughput | RAM/воркер | Итог |
+|---|---|---|---|
+| 1×16 | 0,183 audio-s/wall-s | 6,5 ГБ | один воркер, все ядра |
+| **4×4** | **0,258** | **5,7 ГБ** | **выбран** |
+| 8×2 | своп (8×5 ГБ > 30 ГБ) | — | не влезает |
 
-| Раскладка | Нужен throughput audio/wall | Нужен RTF ≤ на воркер |
-|---|---|---|
-| 1×8 | ≥ 0.875 | ≤ 1.14 |
-| 2×4 | ≥ 0.875 | ≤ 2.29 |
-| 3×2 | ≥ 0.875 | ≤ 3.43 |
-| 4×2 | ≥ 0.875 | ≤ 4.57 |
+Это стена памяти: fp32-веса (~2,5 ГБ) стримятся каждый шаг, 4 воркера дают +40% к одному. Снижение footprint на Zen 3 не работает (`bench_precision.py`): bf16 ×35 медленнее (нет AVX512-BF16), fp16 → inf/nan, int8-dynamic → 100% runaway. interop-потоки нейтральны.
 
-> **Важно.** Mac RTF 6.4 получен с MPS (GPU). Ryzen RX 580 не поддерживается qwen-tts (нет ROCm-wheel). Рендер идёт на CPU. Ожидаемый RTF на CPU — в 3–5× хуже, чем на MPS. Если bench покажет, что ни одна раскладка не укладывается в ночь, — надо либо добавить GPU (ROCm/CUDA), либо дать два-три дня вместо одной ночи. Решение — после замера.
-
-Прислать вывод `bench_ryzen.py --all` для планирования этапа F (массовый рендер).
+**Полная книга: 12,4 ч × 3600 / 0,258 ≈ 48 часов стены ≈ две ночи.** Production-раскладка — **fp32 4×4**.
 
 ---
 
 ## 8. Запуск рендера
 
-После получения результатов bench и согласования раскладки:
+Раскладка выбрана — fp32 4×4. Порядок стадий: `synth → qc → assemble → master`.
 
 ```bash
-# Один раздел (пробный):
-AUDIOBOOK_DEVICE=cpu uv run audiobook synth --section 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
-
-# Полный рендер — только по итогам bench и решения об N воркерах
+export AUDIOBOOK_DEVICE=cpu
+SEC=20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+uv run audiobook synth  --section "$SEC" --workers 4   # 4 параллельных воркера
+uv run audiobook qc      --section "$SEC"
+uv run audiobook assemble --section "$SEC"
+uv run audiobook master   --section "$SEC"
 ```
+
+`--workers 4` запускает параллельный путь (`render_section_parallel`): манифест пишет только родитель по-чанково, resume не ломается. Без флага — один воркер (0,183 против 0,258).
