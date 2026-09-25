@@ -23,6 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
     sub.add_parser("chunk", help="чанкинг всех разделов → out/sections/NN/manifest.jsonl")
     sub.add_parser("headings", help="рендер 483 заголовков → out/headings_check_v2/")
+    rd = sub.add_parser("redo", help="рендер N кандидатов для чанка → out/redo/<sec>/<id>/")
+    rd.add_argument("section", help="имя секции (например 01_vvedenie)")
+    rd.add_argument("chunk_id", help="id чанка (например 0003)")
+    rd.add_argument("--candidates", type=int, default=3, help="число кандидатов (default 3)")
+    ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
+    ac.add_argument("section")
+    ac.add_argument("chunk_id")
+    ac.add_argument("variant", type=int, help="номер варианта (1-based)")
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
@@ -48,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "calibrate":
         from .calibrate import run as calibrate
         return calibrate(load_config())
+    if a.cmd == "redo":
+        from .redo import run_redo
+        return run_redo(load_config(), a.section, a.chunk_id, a.candidates)
+    if a.cmd == "accept":
+        from .redo import run_accept
+        return run_accept(load_config(), a.section, a.chunk_id, a.variant)
     if a.cmd == "synth":
         from .synth import run as synth
         return synth(load_config(), a.section)

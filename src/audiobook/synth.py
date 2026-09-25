@@ -293,7 +293,8 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         if row.get("status") == "done" and wav_path.exists():
             skipped += 1
             continue
-        base_seed = seed_for_chunk(row["hash"])
+        seed_ov = row.get("seed_override")
+        base_seed = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
         # respell (stress dictionary) THEN sentinel; hash was built the same way.
         synth_text = apply_sentinel(respell(row["text"], table), sentinel)
         # The per-chunk seed is deterministic, so a hang would recur every run.

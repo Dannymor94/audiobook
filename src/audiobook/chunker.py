@@ -359,6 +359,7 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
             "pause_after_ms": c["pause_after_ms"],
             "status": "pending",
             "locked": False,
+            "seed_override": None,  # set by `accept`; never enters the hash
             "duration_ms": None,
         })
     return manifest
@@ -384,6 +385,7 @@ def align(old: list[dict], new: list[dict]) -> tuple[list[dict], list[str], list
             merged = dict(nc)
             merged["status"] = oc["status"]
             merged["locked"] = oc["locked"]
+            merged["seed_override"] = oc.get("seed_override")
             merged["duration_ms"] = oc["duration_ms"]
             merged["_from_id"] = oc["id"]  # for wav rename
             aligned.append(merged)
