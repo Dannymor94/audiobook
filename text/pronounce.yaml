@@ -27,3 +27,13 @@
 "Отзывы": "Оотзывы"
 "волну": "волнУ"       # accusative of "волна" (emotional-wave metaphor); all 24 book occurrences
 "Запить": "ЗапИть"     # ch13 only, single occurrence, sentence-initial
+
+# Group-1 stress fixes (ch13 diagnosis). Fixed-stress words, no stress heteronym,
+# so a book-wide respelling is safe. Case-sensitive keys: both cases that occur.
+"тебя": "тебЯ"              # gen/acc of "ты", always final stress; 366 book occ.
+"Тебя": "ТебЯ"             # sentence-initial and quoted «Тебя»; 7 occ.
+"себе": "себЕ"             # reflexive dat/prep, always final stress; 214 occ.
+"твои": "твоИ"             # plural of "твой", stress on и; 55 occ.
+"Твои": "ТвоИ"             # capitalized form; 21 occ.
+"Вряд": "ВрЯд"             # "вряд ли", stress on я; only the capitalized form occurs
+"выбивается": "выбивАется"  # third-syllable stress; 6 occ.
