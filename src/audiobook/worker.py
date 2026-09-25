@@ -44,7 +44,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
         CapExceeded, load_latents, load_model, max_tokens_for_text, synthesize,
     )
 
-    configure_cpu_threads(workers=1)  # ATen intra-op pool → all cores too
+    configure_cpu_threads(workers=cfg.get("num_workers", 1))
     model = load_model(cfg["device"])
     latents = load_latents(cfg["latents_path"])
     cap = cfg.get("cap")  # {base_ms, ms_per_char, margin} or None to disable
