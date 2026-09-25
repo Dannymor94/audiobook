@@ -8,11 +8,11 @@
 
 ```bash
 sudo apt update
-sudo apt install -y git python3.11 python3.11-venv ffmpeg
-# Проверка:
-ffmpeg -version | head -1    # ожидаем 4.x или 5.x
-python3.11 --version         # ожидаем 3.11.x
+sudo apt install -y git ffmpeg     # python3.11 в apt 26.04 нет — ставится через uv (см. §3)
+ffmpeg -version | head -1           # системный ffmpeg (ELF x86-64)
 ```
+
+> **Грабли.** `paths.ffmpeg()` ищет `bin/ffmpeg` раньше PATH. Если репозиторий переносился с Mac (rsync тянет `bin/` мимо .gitignore), там лежит Mach-O arm64 — на Linux `Exec format error`. Убрать: `mv bin/ffmpeg bin/ffmpeg.mac.bak` — подхватится системный из PATH. Переносить надо без `bin/` (как `models/`, `ref/`, `out/`).
 
 Установить `uv`:
 
