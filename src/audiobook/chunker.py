@@ -328,13 +328,19 @@ def latents_hash(config: dict) -> str:
 
 
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
-               language: str, lat_hash: str, synth_text: str | None = None) -> str:
+               language: str, lat_hash: str, synth_text: str | None = None,
+               leadin: str | None = None) -> str:
     payload = f"{text}\x00{model}\x00{seed}\x00{temperature}\x00{language}\x00{lat_hash}"
     # The pronounce respelling only enters the hash when it actually changes the
     # text, so chunks the dictionary does not touch keep their pre-dictionary
     # hash (and cached audio). A firing entry re-queues exactly its chunks.
     if synth_text is not None and synth_text != text:
         payload += f"\x00pron={synth_text}"
+    # The context lead-in likewise enters the hash only for chunks short enough to
+    # fire on it (see leadin.fires), so padding re-queues exactly the short chunks
+    # and every other chunk keeps its cached audio.
+    if leadin:
+        payload += f"\x00leadin={leadin}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
@@ -344,17 +350,20 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     temperature = config["model"]["temperature"]
     language = config["model"]["language"]
     lat = latents_hash(config)
+    from audiobook import leadin
     from audiobook.pronounce import load_table, respell
     table = load_table()
 
     manifest: list[dict] = []
     for n, c in enumerate(build_chunks(units), start=1):
         synth_text = respell(c["text"], table)
+        phrase = leadin.fires(c["text"], config)
         manifest.append({
             "id": f"{n:04d}",
             "n": n,
             "text": c["text"],
-            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat, synth_text),
+            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat,
+                               synth_text, phrase),
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "status": "pending",

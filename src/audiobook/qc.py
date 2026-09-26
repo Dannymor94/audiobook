@@ -169,9 +169,9 @@ def run(config: dict, section: str | None = None) -> int:
     # Phase 2 — retry rounds. Each round: re-synth the CER failures with the next
     # seed (Qwen worker), then re-transcribe them (whisper). Models never overlap.
     from audiobook.device import pick_device
-    from audiobook.pronounce import load_table, respell
+    from audiobook.pronounce import load_table
     from audiobook.synth import (
-        _SAMPLE_RATE, apply_sentinel, cap_params, seed_for_chunk,
+        _SAMPLE_RATE, cap_params, prepare_synth_text, seed_for_chunk,
     )
     from audiobook.worker import TimeoutSynth
     import soundfile as sf
@@ -199,8 +199,10 @@ def run(config: dict, section: str | None = None) -> int:
             for r in fails:
                 base = r.get("seed") or seed_for_chunk(r["hash"])
                 new_seed = base + 1
-                synth_text = apply_sentinel(respell(r["text"], table), sentinel)
-                wav = eng.synth(synth_text, new_seed)
+                # Same pad→respell→sentinel as render, so a re-synth of a short
+                # chunk keeps its lead-in (and gets the carrier trimmed off).
+                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel)
+                wav = eng.synth(synth_text, new_seed, **({"leadin": phrase} if phrase else {}))
                 if wav is None:  # capped/timeout — leave qc_fail, becomes manual
                     log.warning("qc re-synth failed (cap/timeout) chunk %s", r["id"])
                     continue

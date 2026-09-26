@@ -40,8 +40,9 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     out_dir.mkdir(parents=True, exist_ok=True)
 
     import soundfile as sf
-    from audiobook.pronounce import load_table, respell
-    from audiobook.synth import _SAMPLE_RATE, apply_sentinel, cap_params, seed_for_chunk
+
+    from audiobook.pronounce import load_table
+    from audiobook.synth import _SAMPLE_RATE, cap_params, prepare_synth_text, seed_for_chunk
     from audiobook.worker import TimeoutSynth
 
     ref = paths.ROOT / config["reference"]["path"]
@@ -57,10 +58,12 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     table = load_table()
 
     base_seed = seed_for_chunk(row["hash"])
-    synth_text = apply_sentinel(respell(row["text"], table), sentinel)
+    synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+    synth_kw = {"leadin": phrase} if phrase else {}
 
     print(f"redo {section}/{chunk_id}: {row['text']!r}")
-    print(f"base_seed={base_seed}, rendering {n_candidates} candidates")
+    print(f"base_seed={base_seed}, rendering {n_candidates} candidates"
+          + (f" (lead-in: {phrase!r})" if phrase else ""))
 
     with TimeoutSynth(wcfg, rcfg.get("chunk_timeout_s", 600)) as engine:
         for i in range(1, n_candidates + 1):
@@ -69,7 +72,7 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
             if out_path.exists():
                 print(f"  variant {i:02d}  skip (exists)")
                 continue
-            wav = engine.synth(synth_text, seed)
+            wav = engine.synth(synth_text, seed, **synth_kw)
             if wav is None:
                 print(f"  variant {i:02d}  TIMEOUT")
                 continue

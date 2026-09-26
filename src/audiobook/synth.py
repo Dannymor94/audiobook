@@ -19,7 +19,7 @@ import numpy as np
 import soundfile as sf
 import torch
 
-from audiobook import paths
+from audiobook import leadin, paths
 from audiobook.device import pick_device
 
 log = logging.getLogger(__name__)
@@ -213,6 +213,21 @@ def strip_sentinel(text: str, sentinel: str) -> str:
     return text
 
 
+def prepare_synth_text(text: str, config: dict, table: dict,
+                       sentinel: str) -> tuple[str, str | None]:
+    """The exact string fed to the model for a chunk, plus the lead-in carrier if
+    one fires. Order: pad (short chunks) → respell (stress dict) → sentinel — the
+    chunk hash (chunker.chunk_hash) is built the same way. Returns
+    ``(synth_text, phrase|None)``; pass ``phrase`` as ``engine.synth(..., leadin=)``
+    so a padded chunk gets the carrier trimmed off. The single source of truth for
+    synthesis input, shared by render, redo, and qc re-synth — so no path can
+    quietly drop the padding and let the drift back in."""
+    from audiobook.pronounce import respell
+    phrase = leadin.fires(text, config)
+    base = leadin.pad(text, phrase) if phrase else text
+    return apply_sentinel(respell(base, table), sentinel), phrase
+
+
 # ── synthesis ─────────────────────────────────────────────────────────────────
 
 def synthesize(
@@ -283,7 +298,7 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
 
     sentinel = config["model"].get("sentinel", "")
     retries = config.get("render", {}).get("timeout_retries", 2)
-    from audiobook.pronounce import load_table, respell
+    from audiobook.pronounce import load_table
     table = load_table()
 
     synthesised = skipped = timed_out = 0
@@ -295,8 +310,9 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
             continue
         seed_ov = row.get("seed_override")
         base_seed = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
-        # respell (stress dictionary) THEN sentinel; hash was built the same way.
-        synth_text = apply_sentinel(respell(row["text"], table), sentinel)
+        # Short chunk → prepend the context lead-in (cut back off after synth).
+        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+        synth_kw = {"leadin": phrase} if phrase else {}
         # The per-chunk seed is deterministic, so a hang would recur every run.
         # Retry with derived alternate seeds (base+1, base+2, …) so a sampling-
         # triggered hang can escape; only a hang across all seeds is a "timeout".
@@ -304,7 +320,7 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         used_seed = base_seed
         for attempt in range(retries + 1):
             used_seed = base_seed + attempt
-            wav = engine.synth(synth_text, used_seed)
+            wav = engine.synth(synth_text, used_seed, **synth_kw)
             if wav is not None:
                 break
             log.warning("chunk %s timed out (seed %d, attempt %d/%d): %r",
@@ -329,14 +345,14 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
 
 
 def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
-                         chunks_dir_str, out_q) -> None:
+                         chunks_dir_str, out_q, config) -> None:
     """Child (spawn): synth a disjoint subset of chunk rows via one TimeoutSynth,
     write each wav atomically, and report each result on out_q as it lands. The
     PARENT owns the manifest — workers never touch it, so parallel workers cannot
     race on it. wcfg["num_workers"] tells the TimeoutSynth child how to divide
     CPU threads. Ends with a ``None`` sentinel."""
     import soundfile as sf
-    from audiobook.pronounce import load_table, respell
+    from audiobook.pronounce import load_table
     from audiobook.worker import TimeoutSynth
 
     table = load_table()
@@ -345,11 +361,12 @@ def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
         for row in group:
             seed_ov = row.get("seed_override")
             base = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
-            synth_text = apply_sentinel(respell(row["text"], table), sentinel)
+            synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+            synth_kw = {"leadin": phrase} if phrase else {}
             wav, used = None, base
             for attempt in range(retries + 1):
                 used = base + attempt
-                wav = engine.synth(synth_text, used)
+                wav = engine.synth(synth_text, used, **synth_kw)
                 if wav is not None:
                     break
             if wav is None:
@@ -408,7 +425,7 @@ def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: 
     procs = [
         ctx.Process(target=_render_group_worker,
                     args=(wcfg, timeout_s, sentinel, retries, groups[w],
-                          str(chunks_dir), out_q))
+                          str(chunks_dir), out_q, config))
         for w in range(num_workers) if groups[w]
     ]
     for p in procs:
