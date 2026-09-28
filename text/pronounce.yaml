@@ -37,3 +37,17 @@
 "Твои": "ТвоИ"             # capitalized form; 21 occ.
 "Вряд": "ВрЯд"             # "вряд ли", stress on я; only the capitalized form occurs
 "выбивается": "выбивАется"  # third-syllable stress; 6 occ.
+
+# Group-2 stress fixes (ch13 continuity diagnosis).
+"сознание": "соЗнание"     # model reads as "сУснание"; 2nd-syllable stress; 33 occ
+"сознания": "соЗнания"     # genitive; 6 occ
+"сознанию": "соЗнанию"     # dative; 1 occ
+"Сознание": "СоЗнание"     # sentence-initial; 3 occ
+"найди": "найДи"           # imperative of "найти", final stress; model reads нАйди; 12 occ
+"Найди": "НайДи"           # sentence-initial; 30 occ
+
+# Group-3 stress fixes (enum_test diagnosis).
+"позволь": "позвОль"       # imperative of "позволить", stress on оль; model reads пыПозволь; 17 occ
+"Позволь": "ПозвОль"       # sentence-initial; 33 occ
+"включись": "включИсь"     # imperative of "включиться", stress on и; 0 lowercase occ (added for safety)
+"Включись": "ВключИсь"     # sentence-initial; 2 occ

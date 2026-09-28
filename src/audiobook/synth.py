@@ -267,6 +267,181 @@ def synthesize(
     return wav
 
 
+# ── enumeration-pause split ────────────────────────────────────────────────────
+# Depth-0 commas between short (≤20 char) segments with no subordinating markers
+# are enumeration boundaries. The chunk is split into sub-fragments, each
+# synthesised separately, then assembled with enum_pause_ms silence between items.
+
+_SUBORD_STARTS = frozenset({
+    "который", "которая", "которое", "которые", "которого", "которому",
+    "которым", "которых", "которую", "которой",
+    "когда", "если", "хотя", "пока", "потому", "поскольку", "чтобы",
+    "откуда", "зачем", "почему", "несмотря", "кто", "куда", "где", "что",
+})
+_SUBORD_ANYWHERE = frozenset({
+    "который", "которая", "которое", "которые", "которого", "которому",
+    "которым", "которых", "которую", "которой", "где",
+})
+_ENUM_MAX_ITEM = 20
+_AGE_WORDS = frozenset({"лет", "год", "года"})
+
+
+def _ecw(w: str) -> str:
+    return w.strip(".,;:—–!?…»«()[]\"'").lower()
+
+
+def _enum_has_subord(seg: str) -> bool:
+    words = seg.split()
+    if not words:
+        return False
+    if _ecw(words[0]) in _SUBORD_STARTS:
+        return True
+    return bool({_ecw(w) for w in words} & _SUBORD_ANYWHERE)
+
+
+def enum_splits(sentence: str) -> list[str]:
+    """Split sentence at enumeration commas; returns [sentence] if none apply."""
+    from audiobook.chunker import _depths
+    depths = _depths(sentence)
+    n = len(sentence)
+    seg_start = 0
+    splits: list[int] = []
+    i = 0
+    while i < n:
+        if sentence[i] in "—–" and depths[i] == 0:
+            seg_start = i + 1
+            while seg_start < n and sentence[seg_start] == " ":
+                seg_start += 1
+        elif sentence[i] == "," and depths[i] == 0:
+            left = sentence[seg_start:i].strip()
+            j = i + 1
+            while j < n and sentence[j] == " ":
+                j += 1
+            k = j
+            while k < n and (depths[k] != 0 or sentence[k] not in ",—–.!?…"):
+                k += 1
+            right = sentence[j:k].strip()
+            if (len(left) <= _ENUM_MAX_ITEM and len(right) <= _ENUM_MAX_ITEM
+                    and not _enum_has_subord(left) and not _enum_has_subord(right)
+                    and left and right):
+                splits.append(i)
+            seg_start = i + 1
+            while seg_start < n and sentence[seg_start] == " ":
+                seg_start += 1
+        i += 1
+    if not splits:
+        return [sentence]
+    parts: list[str] = []
+    prev = 0
+    for pos in splits:
+        p = sentence[prev:pos].strip()
+        if p:
+            parts.append(p)
+        prev = pos + 1
+        while prev < n and sentence[prev] == " ":
+            prev += 1
+    tail = sentence[prev:].strip()
+    if tail:
+        parts.append(tail)
+    parts = [p for p in parts if p]
+    # Byline guard: "Имя, N лет, Город" is not an enumeration
+    def _last_word(p: str) -> str:
+        words = p.lower().split()
+        return words[-1].strip(".,!?") if words else ""
+    if any(_last_word(p) in _AGE_WORDS for p in parts):
+        return [sentence]
+    return parts
+
+
+def chunk_fragments(text: str, config: dict) -> list[tuple[str, int, bool]]:
+    """Return (fragment_text, pause_after_ms, is_enum_part) triples for a chunk.
+
+    Returns [(text, 0, False)] if enum_pause_ms is absent/zero in config.
+    Otherwise splits at enum commas per sentence; enum items get enum_pause_ms,
+    sentence boundaries get pauses_ms.sentence, last fragment gets 0.
+    """
+    enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
+    if not enum_pause_ms:
+        return [(text, 0, False)]
+    from audiobook.chunker import _split_sentences
+    sentence_ms = config.get("pauses_ms", {}).get("sentence", 350)
+    sents = _split_sentences(text)
+    frags: list[tuple[str, int, bool]] = []
+    for si, sent in enumerate(sents):
+        parts = enum_splits(sent)
+        is_enum = len(parts) > 1
+        last_sent = si == len(sents) - 1
+        for pi, part in enumerate(parts):
+            last_part = pi == len(parts) - 1
+            if last_part and last_sent:
+                pause = 0
+            elif last_part:
+                pause = sentence_ms
+            else:
+                pause = enum_pause_ms
+            frags.append((part, pause, is_enum))
+    return frags
+
+
+def _assemble_enum_fragments(rendered: list[tuple[np.ndarray, int]]) -> np.ndarray:
+    """Assemble (wav, pause_ms) pairs with trimmed silence and inter-fragment gaps."""
+    frame = int(_SAMPLE_RATE * 0.010)
+    threshold = 0.01
+    parts: list[np.ndarray] = []
+    for wav, pause_ms in rendered:
+        if len(wav) >= frame:
+            n = len(wav) // frame
+            amps = np.abs(wav[:n * frame].reshape(n, frame)).max(axis=1)
+            loud = np.where(amps > threshold)[0]
+            if len(loud):
+                wav = wav[loud[0] * frame: (loud[-1] + 1) * frame]
+        parts.append(wav)
+        if pause_ms > 0:
+            parts.append(np.zeros(int(_SAMPLE_RATE * pause_ms / 1000), dtype=np.float32))
+    return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+
+def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
+                     engine, retries: int) -> tuple[np.ndarray | None, int]:
+    """Synthesise one chunk via engine; handles enum splits internally.
+
+    Returns (wav, used_seed). wav is None if all retries failed.
+    For enum chunks: all fragments synthesised per attempt; any fragment failure
+    retries the full chunk with the next seed block.
+    """
+    seed_ov = row.get("seed_override")
+    base = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
+    frags = chunk_fragments(row["text"], config)
+
+    if len(frags) == 1:
+        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+        synth_kw = {"leadin": phrase} if phrase else {}
+        for attempt in range(retries + 1):
+            used = base + attempt
+            wav = engine.synth(synth_text, used, **synth_kw)
+            if wav is not None:
+                return wav, used
+        return None, base
+
+    # Multi-fragment: enum split.
+    # Each attempt uses a block of (len(frags)+1) seeds so blocks never overlap.
+    block = len(frags) + 1
+    for attempt in range(retries + 1):
+        attempt_base = base + attempt * block
+        rendered: list[tuple[np.ndarray, int]] = []
+        for fi, (frag_text, pause_ms, is_enum) in enumerate(frags):
+            frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+            frag_synth_text, frag_phrase = prepare_synth_text(frag, config, table, sentinel)
+            frag_kw = {"leadin": frag_phrase} if frag_phrase else {}
+            frag_wav = engine.synth(frag_synth_text, attempt_base + fi, **frag_kw)
+            if frag_wav is None:
+                break
+            rendered.append((frag_wav, pause_ms))
+        if len(rendered) == len(frags):
+            return _assemble_enum_fragments(rendered), attempt_base
+    return None, base
+
+
 # ── synth stage: render a section's chunks, cached and resumable ───────────────
 
 def _read_manifest(path: Path) -> list[dict]:
@@ -308,26 +483,11 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         if row.get("status") == "done" and wav_path.exists():
             skipped += 1
             continue
-        seed_ov = row.get("seed_override")
-        base_seed = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
-        # Short chunk → prepend the context lead-in (cut back off after synth).
-        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
-        synth_kw = {"leadin": phrase} if phrase else {}
-        # The per-chunk seed is deterministic, so a hang would recur every run.
-        # Retry with derived alternate seeds (base+1, base+2, …) so a sampling-
-        # triggered hang can escape; only a hang across all seeds is a "timeout".
-        wav = None
-        used_seed = base_seed
-        for attempt in range(retries + 1):
-            used_seed = base_seed + attempt
-            wav = engine.synth(synth_text, used_seed, **synth_kw)
-            if wav is not None:
-                break
-            log.warning("chunk %s timed out (seed %d, attempt %d/%d): %r",
-                        row["id"], used_seed, attempt + 1, retries + 1, row["text"])
-        if wav is None:  # exhausted retries — kept alive by engine, next chunk continues
+        wav, used_seed = _synth_one_chunk(row, config, table, sentinel, engine, retries)
+        if wav is None:
+            log.warning("chunk %s exhausted retries: %r", row["id"], row["text"])
             row["status"] = "timeout"
-            row["seed"] = base_seed
+            row["seed"] = seed_for_chunk(row["hash"])
             row["duration_ms"] = None
             _write_manifest(manifest_path, rows)
             timed_out += 1
@@ -336,9 +496,9 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
         tmp.replace(wav_path)
         row["status"] = "done"
-        row["seed"] = used_seed  # the seed that actually produced this wav
+        row["seed"] = used_seed
         row["duration_ms"] = round(len(wav) / _SAMPLE_RATE * 1000)
-        _write_manifest(manifest_path, rows)  # persist progress per chunk
+        _write_manifest(manifest_path, rows)
         synthesised += 1
         synth_audio_s += len(wav) / _SAMPLE_RATE
     return synthesised, skipped, timed_out, synth_audio_s
@@ -359,18 +519,10 @@ def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
     chunks_dir = Path(chunks_dir_str)
     with TimeoutSynth(wcfg, timeout_s) as engine:
         for row in group:
-            seed_ov = row.get("seed_override")
-            base = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
-            synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
-            synth_kw = {"leadin": phrase} if phrase else {}
-            wav, used = None, base
-            for attempt in range(retries + 1):
-                used = base + attempt
-                wav = engine.synth(synth_text, used, **synth_kw)
-                if wav is not None:
-                    break
+            wav, used = _synth_one_chunk(row, config, table, sentinel, engine, retries)
             if wav is None:
-                out_q.put({"id": row["id"], "status": "timeout", "seed": base})
+                out_q.put({"id": row["id"], "status": "timeout",
+                           "seed": seed_for_chunk(row["hash"])})
                 continue
             wav_path = chunks_dir / f"{row['id']}.wav"
             tmp = wav_path.parent / (wav_path.name + ".part")

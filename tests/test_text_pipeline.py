@@ -1051,3 +1051,48 @@ def test_text_norm_skips_empty_section(tmp_path, monkeypatch):
     assert not (tmp_path / '00_section.norm.txt').exists(), "00 must be skipped"
     assert not (tmp_path / '02_soderzhanie.norm.txt').exists(), "02 must be skipped"
     assert (tmp_path / '03_real.norm.txt').exists(), "03 must be processed"
+
+
+# ---------------------------------------------------------------------------
+# enum_splits and chunk_fragments
+# ---------------------------------------------------------------------------
+
+from audiobook.synth import chunk_fragments, enum_splits
+
+
+def test_enum_splits_fires_on_short_items():
+    parts = enum_splits("Тяжесть, ком, напряжение.")
+    assert parts == ["Тяжесть", "ком", "напряжение."]
+
+
+def test_enum_splits_fires_after_dash_reset():
+    parts = enum_splits("Где ты находишься — в голове, в прошлом, в будущем?")
+    assert parts == ["Где ты находишься — в голове", "в прошлом", "в будущем?"]
+
+
+def test_enum_splits_blocks_subordinate():
+    # "где" triggers _SUBORD_ANYWHERE on the right segment
+    assert enum_splits("место, где он был") == ["место, где он был"]
+
+
+def test_enum_splits_blocks_long_item():
+    assert enum_splits("очень длинный текст слева, справа") == ["очень длинный текст слева, справа"]
+
+
+def test_enum_splits_byline_guard():
+    # "Анна, сорок два года, Москва" — last word of middle part = "года"
+    assert enum_splits("Анна, сорок два года, Москва") == ["Анна, сорок два года, Москва"]
+
+
+def test_chunk_fragments_no_enum_pause():
+    cfg = {"pauses_ms": {}}
+    frags = chunk_fragments("Тяжесть, ком, напряжение.", cfg)
+    assert frags == [("Тяжесть, ком, напряжение.", 0, False)]
+
+
+def test_chunk_fragments_with_enum_pause():
+    cfg = {"pauses_ms": {"enum_pause_ms": 250, "sentence": 350}}
+    frags = chunk_fragments("Тяжесть, ком, напряжение.", cfg)
+    assert [f for f, _, _ in frags] == ["Тяжесть", "ком", "напряжение."]
+    assert [p for _, p, _ in frags] == [250, 250, 0]
+    assert all(ie for _, _, ie in frags)

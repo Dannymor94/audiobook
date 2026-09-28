@@ -125,3 +125,30 @@ uv run audiobook master   --section "$SEC"
 ```
 
 `--workers 4` запускает параллельный путь (`render_section_parallel`): манифест пишет только родитель по-чанково, resume не ломается. Без флага — один воркер (0,183 против 0,258).
+
+---
+
+## 9. qBittorrent Web UI с Mac
+
+qBittorrent-nox слушает на `*:8080`. curl с Mac достигает его напрямую, но Chrome выдаёт `ERR_ADDRESS_UNREACHABLE` — iCloud Private Relay создаёт `utun`-интерфейсы и нарушает браузерный доступ к локальным IP (curl обходит это, браузерный стек — нет).
+
+**Рабочий способ: SSH-туннель.**
+
+Запустить туннель (в отдельном терминале или фоне):
+
+```bash
+ssh -N -L 8080:localhost:8080 gamebox
+```
+
+Открыть в браузере: **http://localhost:8080**
+
+Алиас для ~/.zshrc (удобный запуск):
+
+```bash
+alias qbt='ssh -N -L 8080:localhost:8080 gamebox &; sleep 1 && open http://localhost:8080'
+```
+
+После добавления: `source ~/.zshrc`, затем просто `qbt`.
+
+**Watch folder:** `/mnt/data/storage` — бросить `.torrent`-файл туда, qBittorrent подхватит и удалит.  
+**Download path:** `/mnt/data/storage/Downloads`

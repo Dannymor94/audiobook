@@ -57,7 +57,8 @@ pauses_ms:
   sentence: 350
   paragraph: 900
   chapter: 2000
-  crossfade: 20
+  crossfade: 0
+  enum_pause_ms: 250
 qc:
   whisper_model: small           # models/whisper/small
   cer_threshold: 0.05
