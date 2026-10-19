@@ -35,6 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--first", type=int, default=None, help="первые N чанков секции")
     rc.add_argument("--transcribe", action="store_true",
                     help="только черновики текста (whisper) для кандидатов без .txt")
+    rs = sub.add_parser("ref-scout",
+                        help="поиск кандидатов референса в длинной живой записи → ref/candidates/")
+    rs.add_argument("src", help="путь к записи (m4a/wav/mp3)")
+    rs.add_argument("--k", type=int, default=6, help="сколько кандидатов (default 6)")
+    rs.add_argument("--tol", type=float, default=0.10,
+                    help="допуск темпа к текущему референсу (default 0.10 = ±10%%)")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -76,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "ref-compare":
         from .ref_compare import run as ref_compare
         return ref_compare(load_config(), a.section, a.first, a.transcribe)
+    if a.cmd == "ref-scout":
+        from .ref_scout import run as ref_scout
+        return ref_scout(load_config(), a.src, a.k, a.tol)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)

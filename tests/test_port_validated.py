@@ -363,3 +363,39 @@ def test_ref_compare_render_resumable_no_silence(tmp_path):
     before = Eng.calls
     render_candidate(Eng(), rows[:1], cfg, out)
     assert Eng.calls == before  # resumed: nothing re-synthesised
+
+
+# ── ref-scout ─────────────────────────────────────────────────────────────────
+
+def test_scout_windows_on_phrase_bounds():
+    from audiobook.ref_scout import Seg, windows
+    segs = [Seg(i * 6.0, i * 6.0 + 5.5, f"фраза {i}") for i in range(6)]
+    ws = windows(segs, 15, 25)
+    assert ws and all(15 <= w.dur <= 25 for w in ws)
+    starts = {s.start for s in segs}
+    ends = {s.end for s in segs}
+    assert all(w.start in starts and w.end in ends for w in ws)
+
+
+def test_scout_semitone_spread():
+    from audiobook.ref_scout import semitone_spread
+    flat = np.full(200, 120.0)
+    glide = 120.0 * 2 ** (np.linspace(-3, 3, 200) / 12)
+    assert semitone_spread(flat) == pytest.approx(0.0)
+    assert semitone_spread(glide) == pytest.approx(4.8, abs=0.2)
+    assert semitone_spread(np.full(5, 120.0)) == 0.0
+
+
+def test_scout_pick_rate_band_no_overlap():
+    from audiobook.ref_scout import Window, pick
+    ws = [Window(0, 20, "", rate=10.0, spread=5.0),
+          Window(10, 30, "", rate=10.0, spread=6.0),   # overlaps the next best
+          Window(40, 60, "", rate=13.0, spread=9.0),   # too fast
+          Window(70, 90, "", rate=10.5, spread=4.0)]
+    got = pick(ws, target_rate=10.0, tol=0.1, k=3)
+    assert [(w.start, w.end) for w in got] == [(10, 30), (70, 90)]
+
+
+def test_scout_char_rate():
+    from audiobook.ref_scout import char_rate
+    assert char_rate("Раз, два!", 2.0) == pytest.approx(3.0)  # "раздва": 6 chars / 2 s
