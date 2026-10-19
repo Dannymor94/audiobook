@@ -57,9 +57,18 @@ def assemble_section(sec_dir: Path, config: dict,
     if pending:
         raise SystemExit(f"секция не досинтезирована, pending: {pending}")
 
-    fade_samples = int(_SR * config["pauses_ms"]["crossfade"] / 1000)
     chunks_dir = sec_dir / "chunks"
+    section, stats = join_chunks(rows, chunks_dir, config)
+    out = sec_dir / f"{preview_name(first)}.wav"
+    sf.write(str(out), section, _SR, subtype="PCM_16")
+    return out, stats
 
+
+def join_chunks(rows: list[dict], chunks_dir: Path,
+                config: dict) -> tuple[np.ndarray, list[dict]]:
+    """Trim edge silence of each <id>.wav, fade, insert pause_after_ms between
+    chunks (the final trailing pause is dropped). Shared with ref_compare."""
+    fade_samples = int(_SR * config.get("pauses_ms", {}).get("crossfade", 0) / 1000)
     parts: list[np.ndarray] = []
     stats: list[dict] = []
     for i, row in enumerate(rows):
@@ -78,9 +87,7 @@ def assemble_section(sec_dir: Path, config: dict,
         })
 
     section = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-    out = sec_dir / f"{preview_name(first)}.wav"
-    sf.write(str(out), section, _SR, subtype="PCM_16")
-    return out, stats
+    return section, stats
 
 
 def run(config: dict, section: str | None = None, first: int | None = None) -> int:

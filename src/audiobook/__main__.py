@@ -29,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("section", help="имя секции (например 01_vvedenie)")
     rd.add_argument("chunk_id", help="id чанка (например 0003)")
     rd.add_argument("--candidates", type=int, default=3, help="число кандидатов (default 3)")
+    rc = sub.add_parser("ref-compare",
+                        help="кандидаты ref/candidates/*.wav на одном тексте → out/ref_compare/")
+    rc.add_argument("--section", type=str, default=None)
+    rc.add_argument("--first", type=int, default=None, help="первые N чанков секции")
+    rc.add_argument("--transcribe", action="store_true",
+                    help="только черновики текста (whisper) для кандидатов без .txt")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -67,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "redo":
         from .redo import run_redo
         return run_redo(load_config(), a.section, a.chunk_id, a.candidates)
+    if a.cmd == "ref-compare":
+        from .ref_compare import run as ref_compare
+        return ref_compare(load_config(), a.section, a.first, a.transcribe)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)

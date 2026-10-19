@@ -36,11 +36,18 @@ def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float,
 def master_section(sec_dir: Path, config: dict,
                    first: int | None = None) -> tuple[Path, dict]:
     from audiobook.assemble import preview_name
-    ff = _ff()
     stem = preview_name(first)
     src = sec_dir / f"{stem}.wav"
     if not src.exists():
         raise SystemExit(f"нет {src.name}: {src}")
+    out = sec_dir / f"{stem}.mp3"
+    return out, master_wav(src, out, config)
+
+
+def master_wav(src: Path, out: Path, config: dict) -> dict:
+    """highpass → config EQ → two-pass loudnorm → 192k CBR mp3. Returns the
+    pass-1 loudnorm measurement."""
+    ff = _ff()
     m = config["master"]
     I, tp, lra = float(m["lufs"]), float(m["true_peak"]), 11.0
     sr = int(m["sample_rate"])
@@ -57,13 +64,12 @@ def master_section(sec_dir: Path, config: dict,
         f"measured_LRA={meas['input_lra']}:measured_thresh={meas['input_thresh']}:"
         f"offset={meas['target_offset']}:linear=true"
     )
-    out = sec_dir / f"{stem}.mp3"
     subprocess.run(
         [ff, "-hide_banner", "-y", "-i", str(src), "-af", af, "-ar", str(sr),
          "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3", str(out)],
         capture_output=True, text=True, check=True,
     )
-    return out, meas
+    return meas
 
 
 def measure_lufs(mp3: Path, ff: str | None = None) -> tuple[float, float]:

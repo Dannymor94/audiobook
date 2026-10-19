@@ -311,3 +311,55 @@ def test_chunk_single_section(monkeypatch, tmp_path):
     assert not (secs / "01_odin").exists()
     with pytest.raises(SystemExit):
         chunker.run(_cfg(), "99_net")
+
+
+# ── ref-compare ───────────────────────────────────────────────────────────────
+
+def test_ref_compare_candidates_and_latents_name(tmp_path):
+    from audiobook.ref_compare import find_candidates, latents_file
+    (tmp_path / "a.wav").write_bytes(b"x")
+    (tmp_path / "a.txt").write_text("текст", encoding="utf-8")
+    (tmp_path / "b.wav").write_bytes(b"x")
+    (tmp_path / "b.draft.txt").write_text("черновик", encoding="utf-8")
+    got = find_candidates(tmp_path)
+    assert [(n, t is not None) for n, _w, t in got] == [("a", True), ("b", False)]
+    assert latents_file(tmp_path / "a.wav", "1.7B").name == "a.latents_1.7b.pt"
+
+
+def test_ref_compare_refuses_unconfirmed_text(monkeypatch, tmp_path):
+    from audiobook import ref_compare
+    from audiobook.synth import _write_manifest
+    monkeypatch.setattr(paths, "ROOT", tmp_path)
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    cdir = tmp_path / "ref" / "candidates"
+    cdir.mkdir(parents=True)
+    (cdir / "b.wav").write_bytes(b"x")  # only a wav, no confirmed .txt
+    sec = tmp_path / "out" / "sections" / "s"
+    sec.mkdir(parents=True)
+    _write_manifest(sec / "manifest.jsonl", [{"id": "0001", "text": "т", "hash": "0" * 40}])
+    with pytest.raises(SystemExit, match="txt"):
+        ref_compare.run(_cfg(), "s", 1)
+
+
+def test_ref_compare_render_resumable_no_silence(tmp_path):
+    """Existing chunk wavs are skipped; a failed chunk leaves no wav."""
+    from audiobook.ref_compare import render_candidate
+
+    class Eng:
+        calls = 0
+
+        def synth(self, text, seed, **kw):
+            Eng.calls += 1
+            return None if "сбой" in text else np.full(2400, 0.1, dtype=np.float32)
+
+    rows = [{"id": "0001", "text": "Первый тестовый чанк.", "hash": "1" * 40,
+             "seed_override": None},
+            {"id": "0002", "text": "Второй сбой тестовый.", "hash": "2" * 40,
+             "seed_override": None}]
+    out = tmp_path / "cand"
+    cfg = _cfg(render={"timeout_retries": 1})
+    assert render_candidate(Eng(), rows, cfg, out) == 1
+    assert (out / "0001.wav").exists() and not (out / "0002.wav").exists()
+    before = Eng.calls
+    render_candidate(Eng(), rows[:1], cfg, out)
+    assert Eng.calls == before  # resumed: nothing re-synthesised
