@@ -96,6 +96,95 @@ def _split_sentences(text: str) -> list[str]:
     return [s for s in sents if s]
 
 
+# ── enumeration-comma split ──────────────────────────────────────────────────
+# Depth-0 commas between short (≤20 char) non-subordinate segments are treated
+# as enumeration boundaries at synthesis time. Lives here (not synth.py) so
+# chunk_hash can reference it without a circular import.
+
+_SUBORD_STARTS = frozenset({
+    "который", "которая", "которое", "которые", "которого", "которому",
+    "которым", "которых", "которую", "которой",
+    "когда", "если", "хотя", "пока", "потому", "поскольку", "чтобы",
+    "откуда", "зачем", "почему", "несмотря", "кто", "куда", "где", "что",
+})
+_SUBORD_ANYWHERE = frozenset({
+    "который", "которая", "которое", "которые", "которого", "которому",
+    "которым", "которых", "которую", "которой", "где",
+})
+_ENUM_MAX_ITEM = 20
+_AGE_WORDS = frozenset({"лет", "год", "года"})
+
+
+def _ecw(w: str) -> str:
+    return w.strip(".,;:—–!?…»«()[]\"'").lower()
+
+
+def _enum_has_subord(seg: str) -> bool:
+    words = seg.split()
+    if not words:
+        return False
+    if _ecw(words[0]) in _SUBORD_STARTS:
+        return True
+    return bool({_ecw(w) for w in words} & _SUBORD_ANYWHERE)
+
+
+def enum_splits(sentence: str) -> list[str]:
+    """Split sentence at enumeration commas; returns [sentence] if none apply.
+
+    An enum comma sits at depth 0 between two segments each ≤ 20 chars with
+    no subordinating markers. Em-dashes reset the left-segment window.
+    Byline guard: if any resulting part ends in an age word, returns [sentence].
+    """
+    depths = _depths(sentence)
+    n = len(sentence)
+    seg_start = 0
+    splits: list[int] = []
+    i = 0
+    while i < n:
+        if sentence[i] in "—–" and depths[i] == 0:
+            seg_start = i + 1
+            while seg_start < n and sentence[seg_start] == " ":
+                seg_start += 1
+        elif sentence[i] == "," and depths[i] == 0:
+            left = sentence[seg_start:i].strip()
+            j = i + 1
+            while j < n and sentence[j] == " ":
+                j += 1
+            k = j
+            while k < n and (depths[k] != 0 or sentence[k] not in ",—–.!?…"):
+                k += 1
+            right = sentence[j:k].strip()
+            if (len(left) <= _ENUM_MAX_ITEM and len(right) <= _ENUM_MAX_ITEM
+                    and not _enum_has_subord(left) and not _enum_has_subord(right)
+                    and left and right):
+                splits.append(i)
+            seg_start = i + 1
+            while seg_start < n and sentence[seg_start] == " ":
+                seg_start += 1
+        i += 1
+    if not splits:
+        return [sentence]
+    parts: list[str] = []
+    prev = 0
+    for pos in splits:
+        p = sentence[prev:pos].strip()
+        if p:
+            parts.append(p)
+        prev = pos + 1
+        while prev < n and sentence[prev] == " ":
+            prev += 1
+    tail = sentence[prev:].strip()
+    if tail:
+        parts.append(tail)
+    parts = [p for p in parts if p]
+    def _last_word(p: str) -> str:
+        w = p.lower().split()
+        return w[-1].strip(".,!?") if w else ""
+    if any(_last_word(p) in _AGE_WORDS for p in parts):
+        return [sentence]
+    return parts
+
+
 def _is_stopword(word: str) -> bool:
     w = word.strip(".,;:—–!?…»«()[]\"'").lower()
     return w in _STOPWORDS
@@ -328,13 +417,23 @@ def latents_hash(config: dict) -> str:
 
 
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
-               language: str, lat_hash: str, synth_text: str | None = None) -> str:
+               language: str, lat_hash: str, synth_text: str | None = None,
+               leadin: str | None = None, enum_pause_ms: int = 0) -> str:
     payload = f"{text}\x00{model}\x00{seed}\x00{temperature}\x00{language}\x00{lat_hash}"
     # The pronounce respelling only enters the hash when it actually changes the
     # text, so chunks the dictionary does not touch keep their pre-dictionary
     # hash (and cached audio). A firing entry re-queues exactly its chunks.
     if synth_text is not None and synth_text != text:
         payload += f"\x00pron={synth_text}"
+    # The context lead-in likewise enters the hash only for chunks short enough to
+    # fire on it (see leadin.fires), so padding re-queues exactly the short chunks
+    # and every other chunk keeps its cached audio.
+    if leadin:
+        payload += f"\x00leadin={leadin}"
+    # Enum-pause enters the hash only for chunks that actually have enum splits,
+    # so changing enum_pause_ms re-queues exactly the affected chunks.
+    if enum_pause_ms:
+        payload += f"\x00enum_pause={enum_pause_ms}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
@@ -344,17 +443,26 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     temperature = config["model"]["temperature"]
     language = config["model"]["language"]
     lat = latents_hash(config)
+    from audiobook import leadin
     from audiobook.pronounce import load_table, respell
     table = load_table()
+
+    enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
     manifest: list[dict] = []
     for n, c in enumerate(build_chunks(units), start=1):
         synth_text = respell(c["text"], table)
+        phrase = leadin.fires(c["text"], config)
+        # Enum-pause enters hash only when this chunk actually has splits.
+        c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
+            len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
+        )) else 0
         manifest.append({
             "id": f"{n:04d}",
             "n": n,
             "text": c["text"],
-            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat, synth_text),
+            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat,
+                               synth_text, phrase, c_enum_ms),
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "status": "pending",

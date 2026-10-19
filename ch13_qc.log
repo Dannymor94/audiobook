@@ -1,0 +1,19 @@
+
+********
+Warning: flash-attn is not installed. Will only run the manual PyTorch version. Please install flash-attn for faster inference.
+********
+ 
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+
+********
+Warning: flash-attn is not installed. Will only run the manual PyTorch version. Please install flash-attn for faster inference.
+********
+ 
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+section=20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu  chunks=44  recovered=4  manual=0  suspect=0
+section=20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu  chunks=44  -> /home/danavrata/audiobook/out/sections/20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/section.wav
+assembled audio (chunks, pre-pauses)=374.3s  peak=1.000  CLIPPING
+EXIT=0

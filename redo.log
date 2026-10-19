@@ -1,0 +1,33 @@
+redo 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/0015: 'Шаг первый. «Я». Осознай себя.'
+base_seed=2520839783, rendering 3 candidates (lead-in: 'Вот что важно понять.')
+
+********
+Warning: flash-attn is not installed. Will only run the manual PyTorch version. Please install flash-attn for faster inference.
+********
+ 
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 01  seed+100  3.38s
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 02  seed+200  3.08s
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 03  seed+300  2.70s
+
+Listen: /home/danavrata/audiobook/out/redo/20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/0015
+Accept: audiobook accept 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu 0015 <1..3>
+redo 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/0018: 'Шаг второй. «Тебя». Перенеси внимание.'
+base_seed=1831631478, rendering 3 candidates (lead-in: 'Вот что важно понять.')
+
+********
+Warning: flash-attn is not installed. Will only run the manual PyTorch version. Please install flash-attn for faster inference.
+********
+ 
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 01  seed+100  2.98s
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 02  seed+200  3.26s
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+  variant 03  seed+300  2.88s
+
+Listen: /home/danavrata/audiobook/out/redo/20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/0018
+Accept: audiobook accept 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu 0018 <1..3>
+EXIT=0

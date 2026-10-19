@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
         s.add_argument("--chapter", type=int, default=None)
         s.add_argument("--section", type=str, default=None,
                        help="имя секции out/sections/<section> (обязательно для рендера)")
+        if name == "synth":
+            s.add_argument("--workers", type=int, default=1,
+                           help="параллельных воркеров синтеза (Ryzen: 4)")
     a = p.parse_args(argv)
 
     if a.cmd == "doctor":
@@ -64,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
     if a.cmd == "synth":
         from .synth import run as synth
-        return synth(load_config(), a.section)
+        return synth(load_config(), a.section, a.workers)
     if a.cmd == "qc":
         from .qc import run as qc
         return qc(load_config(), a.section)

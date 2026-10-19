@@ -40,11 +40,25 @@ render:
   # takes ~288s to generate. Set to 600 so the cap always fires before the
   # timeout kills and respawns the worker.
   chunk_timeout_s: 600
+  # Context lead-in for short chunks (headings, one-word quoted inserts like «Я»):
+  # too little text lets the voice-clone timbre drift mid-utterance. Prepend this
+  # neutral carrier, synthesize the padded text, then cut the carrier off at the
+  # first own-word boundary via whisper word timestamps (see leadin.py). Validated
+  # by ear on ch13 (context-padding experiment, variant c). Enters the chunk hash
+  # ONLY for chunks with len(text) <= max_chars, so it re-queues exactly the short
+  # chunks and leaves every other chunk's cache. max_chars=55 covers ch13's short
+  # quoted inserts (0015/0018/0022, 28-43 ch.) and every heading incl. the chapter
+  # title 0001 (51 ch.); the longest heading in the section is 51. Set to null to
+  # disable. Confirm the carrier by ear before changing it — it conditions timbre.
+  leadin:
+    phrase: "Вот что важно понять."
+    max_chars: 55
 pauses_ms:
   sentence: 350
   paragraph: 900
   chapter: 2000
-  crossfade: 20
+  crossfade: 0
+  enum_pause_ms: 250
 qc:
   whisper_model: small           # models/whisper/small
   cer_threshold: 0.05

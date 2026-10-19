@@ -40,6 +40,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
         _os.environ[_var] = _n
 
     from audiobook.device import configure_cpu_threads
+    from audiobook.leadin import TrimFailed, trim_carrier
     from audiobook.synth import (
         CapExceeded, load_latents, load_model, max_tokens_for_text, synthesize,
     )
@@ -59,9 +60,16 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
                 model, task["text"], latents, task["seed"],
                 cfg["temperature"], cfg["language"], max_new_tokens=mnt,
             )
+            # Short chunk padded with a lead-in: cut the carrier off (whisper).
+            # ponytail: loads whisper-small into this Qwen worker (+~0.3 GB) on the
+            # first padded chunk; fine at num_workers=1, watch memory if fanned out.
+            if task.get("leadin"):
+                wav = trim_carrier(wav, task["text"], task["leadin"])
             out_q.put({"ok": True, "wav": np.asarray(wav, dtype=np.float32)})
         except CapExceeded as e:  # runaway hit the length cap → cheap retry, worker stays up
             out_q.put({"ok": False, "cap_hit": True, "error": repr(e)})
+        except TrimFailed as e:  # carrier boundary not found → retry next seed, worker stays up
+            out_q.put({"ok": False, "retry": True, "error": repr(e)})
         except Exception as e:  # report, do not crash the worker
             out_q.put({"ok": False, "error": repr(e)})
 
@@ -106,8 +114,8 @@ class TimeoutSynth:
         if msg != "ready":
             raise RuntimeError(f"unexpected worker startup message: {msg!r}")
 
-    def synth(self, text: str, seed: int) -> np.ndarray | None:
-        self._in.put({"text": text, "seed": seed})
+    def synth(self, text: str, seed: int, leadin: str | None = None) -> np.ndarray | None:
+        self._in.put({"text": text, "seed": seed, "leadin": leadin})
         try:
             res = self._out.get(timeout=self._timeout_s)
         except _queue.Empty:
@@ -115,8 +123,10 @@ class TimeoutSynth:
             self._start()  # respawn (reloads model) for the next chunk
             return None
         if not res["ok"]:
-            if res.get("cap_hit"):
-                return None  # runaway capped in seconds; worker alive, retry next seed
+            # cap_hit: runaway capped in seconds. retry: lead-in trim couldn't find
+            # the boundary. Both mean "worker alive, retry the next seed".
+            if res.get("cap_hit") or res.get("retry"):
+                return None
             raise RuntimeError(f"synth failed: {res['error']}")
         return res["wav"]
 

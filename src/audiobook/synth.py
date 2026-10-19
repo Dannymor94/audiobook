@@ -19,7 +19,7 @@ import numpy as np
 import soundfile as sf
 import torch
 
-from audiobook import paths
+from audiobook import leadin, paths
 from audiobook.device import pick_device
 
 log = logging.getLogger(__name__)
@@ -213,6 +213,21 @@ def strip_sentinel(text: str, sentinel: str) -> str:
     return text
 
 
+def prepare_synth_text(text: str, config: dict, table: dict,
+                       sentinel: str) -> tuple[str, str | None]:
+    """The exact string fed to the model for a chunk, plus the lead-in carrier if
+    one fires. Order: pad (short chunks) → respell (stress dict) → sentinel — the
+    chunk hash (chunker.chunk_hash) is built the same way. Returns
+    ``(synth_text, phrase|None)``; pass ``phrase`` as ``engine.synth(..., leadin=)``
+    so a padded chunk gets the carrier trimmed off. The single source of truth for
+    synthesis input, shared by render, redo, and qc re-synth — so no path can
+    quietly drop the padding and let the drift back in."""
+    from audiobook.pronounce import respell
+    phrase = leadin.fires(text, config)
+    base = leadin.pad(text, phrase) if phrase else text
+    return apply_sentinel(respell(base, table), sentinel), phrase
+
+
 # ── synthesis ─────────────────────────────────────────────────────────────────
 
 def synthesize(
@@ -252,6 +267,100 @@ def synthesize(
     return wav
 
 
+# ── enumeration-pause split ────────────────────────────────────────────────────
+# enum_splits() lives in chunker.py (shared with hash computation); re-export.
+from audiobook.chunker import enum_splits  # noqa: E402
+
+
+def chunk_fragments(text: str, config: dict) -> list[tuple[str, int, bool]]:
+    """Return (fragment_text, pause_after_ms, is_enum_part) triples for a chunk.
+
+    Returns [(text, 0, False)] if enum_pause_ms is absent/zero in config.
+    Otherwise splits at enum commas per sentence; enum items get enum_pause_ms,
+    sentence boundaries get pauses_ms.sentence, last fragment gets 0.
+    """
+    enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
+    if not enum_pause_ms:
+        return [(text, 0, False)]
+    from audiobook.chunker import _split_sentences
+    sentence_ms = config.get("pauses_ms", {}).get("sentence", 350)
+    sents = _split_sentences(text)
+    frags: list[tuple[str, int, bool]] = []
+    for si, sent in enumerate(sents):
+        parts = enum_splits(sent)
+        is_enum = len(parts) > 1
+        last_sent = si == len(sents) - 1
+        for pi, part in enumerate(parts):
+            last_part = pi == len(parts) - 1
+            if last_part and last_sent:
+                pause = 0
+            elif last_part:
+                pause = sentence_ms
+            else:
+                pause = enum_pause_ms
+            frags.append((part, pause, is_enum))
+    return frags
+
+
+def _assemble_enum_fragments(rendered: list[tuple[np.ndarray, int]]) -> np.ndarray:
+    """Assemble (wav, pause_ms) pairs with trimmed silence and inter-fragment gaps."""
+    frame = int(_SAMPLE_RATE * 0.010)
+    threshold = 0.01
+    parts: list[np.ndarray] = []
+    for wav, pause_ms in rendered:
+        if len(wav) >= frame:
+            n = len(wav) // frame
+            amps = np.abs(wav[:n * frame].reshape(n, frame)).max(axis=1)
+            loud = np.where(amps > threshold)[0]
+            if len(loud):
+                wav = wav[loud[0] * frame: (loud[-1] + 1) * frame]
+        parts.append(wav)
+        if pause_ms > 0:
+            parts.append(np.zeros(int(_SAMPLE_RATE * pause_ms / 1000), dtype=np.float32))
+    return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+
+def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
+                     engine, retries: int) -> tuple[np.ndarray | None, int]:
+    """Synthesise one chunk via engine; handles enum splits internally.
+
+    Returns (wav, used_seed). wav is None if all retries failed.
+    For enum chunks: all fragments synthesised per attempt; any fragment failure
+    retries the full chunk with the next seed block.
+    """
+    seed_ov = row.get("seed_override")
+    base = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
+    frags = chunk_fragments(row["text"], config)
+
+    if len(frags) == 1:
+        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+        synth_kw = {"leadin": phrase} if phrase else {}
+        for attempt in range(retries + 1):
+            used = base + attempt
+            wav = engine.synth(synth_text, used, **synth_kw)
+            if wav is not None:
+                return wav, used
+        return None, base
+
+    # Multi-fragment: enum split.
+    # Each attempt uses a block of (len(frags)+1) seeds so blocks never overlap.
+    block = len(frags) + 1
+    for attempt in range(retries + 1):
+        attempt_base = base + attempt * block
+        rendered: list[tuple[np.ndarray, int]] = []
+        for fi, (frag_text, pause_ms, is_enum) in enumerate(frags):
+            frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+            frag_synth_text, frag_phrase = prepare_synth_text(frag, config, table, sentinel)
+            frag_kw = {"leadin": frag_phrase} if frag_phrase else {}
+            frag_wav = engine.synth(frag_synth_text, attempt_base + fi, **frag_kw)
+            if frag_wav is None:
+                break
+            rendered.append((frag_wav, pause_ms))
+        if len(rendered) == len(frags):
+            return _assemble_enum_fragments(rendered), attempt_base
+    return None, base
+
+
 # ── synth stage: render a section's chunks, cached and resumable ───────────────
 
 def _read_manifest(path: Path) -> list[dict]:
@@ -283,7 +392,7 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
 
     sentinel = config["model"].get("sentinel", "")
     retries = config.get("render", {}).get("timeout_retries", 2)
-    from audiobook.pronounce import load_table, respell
+    from audiobook.pronounce import load_table
     table = load_table()
 
     synthesised = skipped = timed_out = 0
@@ -293,25 +402,11 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         if row.get("status") == "done" and wav_path.exists():
             skipped += 1
             continue
-        seed_ov = row.get("seed_override")
-        base_seed = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
-        # respell (stress dictionary) THEN sentinel; hash was built the same way.
-        synth_text = apply_sentinel(respell(row["text"], table), sentinel)
-        # The per-chunk seed is deterministic, so a hang would recur every run.
-        # Retry with derived alternate seeds (base+1, base+2, …) so a sampling-
-        # triggered hang can escape; only a hang across all seeds is a "timeout".
-        wav = None
-        used_seed = base_seed
-        for attempt in range(retries + 1):
-            used_seed = base_seed + attempt
-            wav = engine.synth(synth_text, used_seed)
-            if wav is not None:
-                break
-            log.warning("chunk %s timed out (seed %d, attempt %d/%d): %r",
-                        row["id"], used_seed, attempt + 1, retries + 1, row["text"])
-        if wav is None:  # exhausted retries — kept alive by engine, next chunk continues
+        wav, used_seed = _synth_one_chunk(row, config, table, sentinel, engine, retries)
+        if wav is None:
+            log.warning("chunk %s exhausted retries: %r", row["id"], row["text"])
             row["status"] = "timeout"
-            row["seed"] = base_seed
+            row["seed"] = seed_for_chunk(row["hash"])
             row["duration_ms"] = None
             _write_manifest(manifest_path, rows)
             timed_out += 1
@@ -320,15 +415,118 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
         sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
         tmp.replace(wav_path)
         row["status"] = "done"
-        row["seed"] = used_seed  # the seed that actually produced this wav
+        row["seed"] = used_seed
         row["duration_ms"] = round(len(wav) / _SAMPLE_RATE * 1000)
-        _write_manifest(manifest_path, rows)  # persist progress per chunk
+        _write_manifest(manifest_path, rows)
         synthesised += 1
         synth_audio_s += len(wav) / _SAMPLE_RATE
     return synthesised, skipped, timed_out, synth_audio_s
 
 
-def run(config: dict, section: str | None = None) -> int:
+def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
+                         chunks_dir_str, out_q, config) -> None:
+    """Child (spawn): synth a disjoint subset of chunk rows via one TimeoutSynth,
+    write each wav atomically, and report each result on out_q as it lands. The
+    PARENT owns the manifest — workers never touch it, so parallel workers cannot
+    race on it. wcfg["num_workers"] tells the TimeoutSynth child how to divide
+    CPU threads. Ends with a ``None`` sentinel."""
+    import soundfile as sf
+    from audiobook.pronounce import load_table
+    from audiobook.worker import TimeoutSynth
+
+    table = load_table()
+    chunks_dir = Path(chunks_dir_str)
+    with TimeoutSynth(wcfg, timeout_s) as engine:
+        for row in group:
+            wav, used = _synth_one_chunk(row, config, table, sentinel, engine, retries)
+            if wav is None:
+                out_q.put({"id": row["id"], "status": "timeout",
+                           "seed": seed_for_chunk(row["hash"])})
+                continue
+            wav_path = chunks_dir / f"{row['id']}.wav"
+            tmp = wav_path.parent / (wav_path.name + ".part")
+            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+            tmp.replace(wav_path)
+            out_q.put({"id": row["id"], "status": "done", "seed": used,
+                       "duration_ms": round(len(wav) / _SAMPLE_RATE * 1000),
+                       "audio_s": len(wav) / _SAMPLE_RATE})
+    out_q.put(None)
+
+
+def _plan_parallel(rows: list[dict], chunks_dir: Path, num_workers: int
+                   ) -> tuple[list[list[dict]], int]:
+    """Split rows into `num_workers` round-robin groups of the not-yet-done chunks.
+    A chunk is done (skipped) only if status=='done' AND its wav is on disk, so a
+    manifest that claims done but lost its wav is re-synthesised. Round-robin (not
+    contiguous) so no worker gets a run of unusually long chunks. Pure — the
+    resume/partition correctness is unit-tested without models."""
+    todo = [r for r in rows
+            if not (r.get("status") == "done" and (chunks_dir / f"{r['id']}.wav").exists())]
+    skipped = len(rows) - len(todo)
+    groups: list[list[dict]] = [[] for _ in range(num_workers)]
+    for i, row in enumerate(todo):
+        groups[i % num_workers].append(row)
+    return groups, skipped
+
+
+def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: float,
+                            num_workers: int) -> tuple[int, int, int, float]:
+    """Parallel render: N worker processes synth disjoint chunk subsets; this
+    parent drains results and persists the manifest after each one (resume stays
+    intact — a crash loses at most the in-flight chunks, whose wavs weren't
+    renamed). Same (respell → sentinel → retry) logic and per-chunk seeds as
+    render_section, so output matches the single-worker path chunk-for-chunk."""
+    import multiprocessing as mp
+
+    manifest_path = sec_dir / "manifest.jsonl"
+    rows = _read_manifest(manifest_path)
+    chunks_dir = sec_dir / "chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    by_id = {r["id"]: r for r in rows}
+
+    groups, skipped = _plan_parallel(rows, chunks_dir, num_workers)
+    if not any(groups):
+        return 0, skipped, 0, 0.0
+
+    sentinel = config["model"].get("sentinel", "")
+    retries = config.get("render", {}).get("timeout_retries", 2)
+
+    ctx = mp.get_context("spawn")
+    out_q = ctx.Queue()
+    procs = [
+        ctx.Process(target=_render_group_worker,
+                    args=(wcfg, timeout_s, sentinel, retries, groups[w],
+                          str(chunks_dir), out_q, config))
+        for w in range(num_workers) if groups[w]
+    ]
+    for p in procs:
+        p.start()
+
+    synthesised = timed_out = 0
+    synth_audio_s = 0.0
+    live = len(procs)
+    while live:
+        res = out_q.get()
+        if res is None:
+            live -= 1
+            continue
+        row = by_id[res["id"]]
+        row["status"] = res["status"]
+        row["seed"] = res["seed"]
+        if res["status"] == "done":
+            row["duration_ms"] = res["duration_ms"]
+            synthesised += 1
+            synth_audio_s += res["audio_s"]
+        else:
+            row["duration_ms"] = None
+            timed_out += 1
+        _write_manifest(manifest_path, rows)  # single writer, per-chunk persistence
+    for p in procs:
+        p.join()
+    return synthesised, skipped, timed_out, synth_audio_s
+
+
+def run(config: dict, section: str | None = None, num_workers: int = 1) -> int:
     if not section:
         raise SystemExit("synth: --section обязателен (иначе отрендерится вся книга)")
     sec_dir = paths.OUT / "sections" / section
@@ -344,12 +542,17 @@ def run(config: dict, section: str | None = None) -> int:
         "temperature": config["model"]["temperature"],
         "language": config["model"]["language"],
         "cap": cap_params(config),
+        "num_workers": num_workers,  # TimeoutSynth child divides CPU threads by this
     }
 
-    from audiobook.worker import TimeoutSynth
     t0 = time.perf_counter()
-    with TimeoutSynth(wcfg, timeout_s) as engine:
-        synthesised, skipped, timed_out, synth_audio_s = render_section(engine, sec_dir, config)
+    if num_workers > 1:
+        synthesised, skipped, timed_out, synth_audio_s = render_section_parallel(
+            sec_dir, config, wcfg, timeout_s, num_workers)
+    else:
+        from audiobook.worker import TimeoutSynth
+        with TimeoutSynth(wcfg, timeout_s) as engine:
+            synthesised, skipped, timed_out, synth_audio_s = render_section(engine, sec_dir, config)
     wall = time.perf_counter() - t0
 
     rows = _read_manifest(sec_dir / "manifest.jsonl")

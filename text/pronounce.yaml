@@ -27,3 +27,31 @@
 "Отзывы": "Оотзывы"
 "волну": "волнУ"       # accusative of "волна" (emotional-wave metaphor); all 24 book occurrences
 "Запить": "ЗапИть"     # ch13 only, single occurrence, sentence-initial
+
+# Group-1 stress fixes (ch13 diagnosis). Fixed-stress words, no stress heteronym,
+# so a book-wide respelling is safe. Case-sensitive keys: both cases that occur.
+"тебя": "тебЯ"              # gen/acc of "ты", always final stress; 366 book occ.
+"Тебя": "ТебЯ"             # sentence-initial and quoted «Тебя»; 7 occ.
+"себе": "себЕ"             # reflexive dat/prep, always final stress; 214 occ.
+"твои": "твоИ"             # plural of "твой", stress on и; 55 occ.
+"Твои": "ТвоИ"             # capitalized form; 21 occ.
+"Вряд": "ВрЯд"             # "вряд ли", stress on я; only the capitalized form occurs
+"выбивается": "выбивАется"  # third-syllable stress; 6 occ.
+
+# Group-2 stress fixes (ch13 continuity diagnosis).
+"сознание": "соЗнание"     # model reads as "сУснание"; 2nd-syllable stress; 33 occ
+"сознания": "соЗнания"     # genitive; 6 occ
+"сознанию": "соЗнанию"     # dative; 1 occ
+"Сознание": "СоЗнание"     # sentence-initial; 3 occ
+"найди": "найДи"           # imperative of "найти", final stress; model reads нАйди; 12 occ
+"Найди": "НайДи"           # sentence-initial; 30 occ
+
+# Group-3 stress fixes (enum_test diagnosis).
+"позволь": "позвОль"       # imperative of "позволить", stress on оль; model reads пыПозволь; 17 occ
+"Позволь": "ПозвОль"       # sentence-initial; 33 occ
+"включись": "включИсь"     # imperative of "включиться", stress on и; 0 lowercase occ (added for safety)
+"Включись": "ВключИсь"     # sentence-initial; 2 occ
+
+# Group-4 stress fixes (1.7B test_v2 diagnosis).
+"навык": "навЫк"           # fixed stress on ы; 38 book occ, all lowercase (no sentence-initial Навык found)
+"фантазии": "фантАзии"     # gen/nom-pl of фантазия, fixed stress on а; 26 book occ, all lowercase

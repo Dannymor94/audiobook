@@ -106,7 +106,7 @@ def run_layout(layout: str, chunks: list[str], timeout_s: float) -> None:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-LAYOUTS = ["1x8", "2x4", "3x2", "4x2"]
+LAYOUTS = ["1x8", "2x8", "4x4", "8x2"]
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--layout", choices=LAYOUTS, help="e.g. 2x4")
+    group.add_argument("--layout", choices=LAYOUTS, help="e.g. 2x8")
     group.add_argument("--all", action="store_true", help="run all layouts in sequence")
     args = parser.parse_args()
 
