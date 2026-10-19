@@ -14,7 +14,9 @@ Latents are computed once per candidate and model variant
 held twice in RAM. Seeds come from each chunk's hash, identical across
 candidates, so the reference is the only thing that differs.
 
-Out: out/ref_compare/<section>/<name>.mp3 (+ chunk wavs in <name>/ for resume).
+Out: out/ref_compare/<section>/<name>_<tag>.mp3 (+ chunk wavs in <name>_<tag>/ for
+resume); <tag> hashes the clip + confirmed text, so a corrected transcript gets
+fresh latents and a fresh render instead of the stale ones.
 """
 from __future__ import annotations
 
@@ -43,8 +45,18 @@ def find_candidates(cdir: Path) -> list[tuple[str, Path, Path | None]]:
     return out
 
 
-def latents_file(wav: Path, variant: str) -> Path:
-    return wav.with_name(f"{wav.stem}.latents_{variant.lower()}.pt")
+def candidate_tag(wav: Path, txt: Path) -> str:
+    """Short content hash of the reference audio + its confirmed text. Editing
+    the transcript (or replacing the clip) yields a new tag, so latents and
+    renders made from the old text are never silently reused."""
+    import hashlib
+    h = hashlib.sha1(wav.read_bytes())
+    h.update(b"\x00" + txt.read_text(encoding="utf-8").strip().encode("utf-8"))
+    return h.hexdigest()[:8]
+
+
+def latents_file(wav: Path, variant: str, tag: str) -> Path:
+    return wav.with_name(f"{wav.stem}.latents_{variant.lower()}_{tag}.pt")
 
 
 def _latents_job(variant: str, wav: str, ref_text: str, out: str) -> None:
@@ -58,7 +70,7 @@ def _latents_job(variant: str, wav: str, ref_text: str, out: str) -> None:
 
 
 def ensure_latents(wav: Path, txt: Path, variant: str) -> Path:
-    out = latents_file(wav, variant)
+    out = latents_file(wav, variant, candidate_tag(wav, txt))
     if out.exists():
         return out
     import multiprocessing as mp
@@ -149,7 +161,8 @@ def run(config: dict, section: str | None, first: int | None,
     base = worker_config(config, 1)  # validates variant/workers; latents swapped below
     timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
     out_root = paths.OUT / "ref_compare" / section
-    for name, wav, txt in cands:
+    for base_name, wav, txt in cands:
+        name = f"{base_name}_{candidate_tag(wav, txt)}"  # new text → new render
         mp3 = out_root / f"{name}.mp3"
         if mp3.exists():
             print(f"{name}: уже есть {mp3}")

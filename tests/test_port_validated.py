@@ -323,7 +323,20 @@ def test_ref_compare_candidates_and_latents_name(tmp_path):
     (tmp_path / "b.draft.txt").write_text("черновик", encoding="utf-8")
     got = find_candidates(tmp_path)
     assert [(n, t is not None) for n, _w, t in got] == [("a", True), ("b", False)]
-    assert latents_file(tmp_path / "a.wav", "1.7B").name == "a.latents_1.7b.pt"
+    assert latents_file(tmp_path / "a.wav", "1.7B", "abcd1234").name == \
+        "a.latents_1.7b_abcd1234.pt"
+
+
+def test_ref_compare_tag_changes_with_text(tmp_path):
+    from audiobook.ref_compare import candidate_tag
+    wav, txt = tmp_path / "a.wav", tmp_path / "a.txt"
+    wav.write_bytes(b"audio")
+    txt.write_text("первый текст\n", encoding="utf-8")
+    t1 = candidate_tag(wav, txt)
+    txt.write_text("первый текст", encoding="utf-8")  # whitespace only
+    assert candidate_tag(wav, txt) == t1
+    txt.write_text("исправленный текст", encoding="utf-8")
+    assert candidate_tag(wav, txt) != t1
 
 
 def test_ref_compare_refuses_unconfirmed_text(monkeypatch, tmp_path):
