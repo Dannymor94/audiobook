@@ -51,3 +51,7 @@
 "Позволь": "ПозвОль"       # sentence-initial; 33 occ
 "включись": "включИсь"     # imperative of "включиться", stress on и; 0 lowercase occ (added for safety)
 "Включись": "ВключИсь"     # sentence-initial; 2 occ
+
+# Group-4 stress fixes (1.7B test_v2 diagnosis).
+"навык": "навЫк"           # fixed stress on ы; 38 book occ, all lowercase (no sentence-initial Навык found)
+"фантазии": "фантАзии"     # gen/nom-pl of фантазия, fixed stress on а; 26 book occ, all lowercase
