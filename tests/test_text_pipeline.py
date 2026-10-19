@@ -901,10 +901,8 @@ def test_synth_offline_no_download(monkeypatch, tmp_path):
     qwen_tts import. Guards the offline load-by-path fix."""
     import audiobook.synth as synth_mod
     monkeypatch.setattr(synth_mod, "_model", None)
-    monkeypatch.setattr(
-        synth_mod, "_QWEN_HUB_DIR",
-        tmp_path / "models" / "hf" / "hub" / "models--Qwen--Qwen3-TTS-12Hz-0.6B-Base",
-    )
+    from audiobook import paths
+    monkeypatch.setattr(paths, "MODELS", tmp_path / "models")
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     with pytest.raises(FileNotFoundError, match="Qwen3-TTS weights missing"):
         synth_mod.load_model("cpu")

@@ -44,8 +44,15 @@ def _fade(clip: np.ndarray, samples: int, leading: bool, trailing: bool) -> np.n
     return c
 
 
-def assemble_section(sec_dir: Path, config: dict) -> tuple[Path, list[dict]]:
-    rows = _read_manifest(sec_dir / "manifest.jsonl")
+def preview_name(first: int | None) -> str:
+    """Output stem: whole section → "section", first N chunks → "preview_firstN"
+    (a separate file, so a preview never overwrites the full section)."""
+    return "section" if first is None else f"preview_first{first}"
+
+
+def assemble_section(sec_dir: Path, config: dict,
+                     first: int | None = None) -> tuple[Path, list[dict]]:
+    rows = _read_manifest(sec_dir / "manifest.jsonl")[:first]
     pending = [r["id"] for r in rows if r.get("status") != "done"]
     if pending:
         raise SystemExit(f"секция не досинтезирована, pending: {pending}")
@@ -71,16 +78,16 @@ def assemble_section(sec_dir: Path, config: dict) -> tuple[Path, list[dict]]:
         })
 
     section = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-    out = sec_dir / "section.wav"
+    out = sec_dir / f"{preview_name(first)}.wav"
     sf.write(str(out), section, _SR, subtype="PCM_16")
     return out, stats
 
 
-def run(config: dict, section: str | None = None) -> int:
+def run(config: dict, section: str | None = None, first: int | None = None) -> int:
     if not section:
         raise SystemExit("assemble: --section обязателен")
     sec_dir = paths.OUT / "sections" / section
-    out, stats = assemble_section(sec_dir, config)
+    out, stats = assemble_section(sec_dir, config, first)
     total_ms = sum(s["trimmed_ms"] for s in stats)
     peak = max((s["peak"] for s in stats), default=0.0)
     print(f"section={section}  chunks={len(stats)}  -> {out}")

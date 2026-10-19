@@ -168,25 +168,17 @@ def run(config: dict, section: str | None = None) -> int:
 
     # Phase 2 — retry rounds. Each round: re-synth the CER failures with the next
     # seed (Qwen worker), then re-transcribe them (whisper). Models never overlap.
-    from audiobook.device import pick_device
     from audiobook.pronounce import load_table
     from audiobook.synth import (
-        _SAMPLE_RATE, cap_params, prepare_synth_text, seed_for_chunk,
+        _SAMPLE_RATE, prepare_synth_text, seed_for_chunk, worker_config,
     )
     from audiobook.worker import TimeoutSynth
     import soundfile as sf
 
     table = load_table()
     sentinel = config["model"].get("sentinel", "")
-    ref = paths.ROOT / config["reference"]["path"]
     rcfg = config.get("render", {})
-    wcfg = {
-        "device": pick_device(),
-        "latents_path": str(ref.with_suffix(".latents.pt")),
-        "temperature": config["model"]["temperature"],
-        "language": config["model"]["language"],
-        "cap": cap_params(config),
-    }
+    wcfg = worker_config(config)  # variant + its latents, same as render
     timeout_s = rcfg.get("chunk_timeout_s", 120)
 
     recovered = 0

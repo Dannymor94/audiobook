@@ -42,18 +42,12 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     import soundfile as sf
 
     from audiobook.pronounce import load_table
-    from audiobook.synth import _SAMPLE_RATE, cap_params, prepare_synth_text, seed_for_chunk
+    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, seed_for_chunk, worker_config
     from audiobook.worker import TimeoutSynth
 
-    ref = paths.ROOT / config["reference"]["path"]
     rcfg = config.get("render", {})
-    wcfg = {
-        "device": "cpu",
-        "latents_path": str(ref.with_suffix(".latents.pt")),
-        "temperature": config["model"]["temperature"],
-        "language": config["model"]["language"],
-        "cap": cap_params(config),
-    }
+    wcfg = worker_config(config)  # variant + its latents, same as render
+    wcfg["device"] = "cpu"
     sentinel = config["model"].get("sentinel", "")
     table = load_table()
 

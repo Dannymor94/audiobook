@@ -1,7 +1,8 @@
 """Chunker + manifest. Reads .norm.txt (text) and blocks JSON (structure),
 emits out/sections/NN_<slug>/manifest.jsonl. Does NOT synthesize.
 
-Rules: target 120-220 chars, hard cap 250, min 40 (merge forward).
+Rules: target 120-220 chars, hard cap 250, min 40 (merge forward); config
+chunking: {target, cap, min_len} overrides (1.7B: 180/180/40).
 Paragraph is always a boundary. Never split inside quotes/brackets.
 Never end a chunk on a preposition, conjunction or "не".
 Heading = own chunk (pause by level). Stack lines = own chunks, 500ms between.
@@ -10,13 +11,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
+from typing import NamedTuple
 
-from audiobook import paths
+from audiobook import paths, voicecfg
 
 TARGET = 220
 CAP = 250
 MIN_LEN = 40
+
+
+class Limits(NamedTuple):
+    """Chunk length rules. Defaults = the module constants (the 0.6B-era rules);
+    config ``chunking: {target, cap, min_len}`` overrides them. 1.7B garbled
+    word-level on long chunks — 180 was the validated cap."""
+    target: int = TARGET
+    cap: int = CAP
+    min_len: int = MIN_LEN
+
+
+def limits(config: dict | None) -> Limits:
+    c = (config or {}).get("chunking") or {}
+    return Limits(int(c.get("target", TARGET)), int(c.get("cap", CAP)),
+                  int(c.get("min_len", MIN_LEN)))
 
 PAUSE_SENTENCE = 350
 PAUSE_PARAGRAPH = 900
@@ -235,9 +253,10 @@ def _split_sentences_flat(text: str) -> list[str]:
     return [s for s in sents if s]
 
 
-def _split_long(s: str) -> list[str]:
-    """Split a sentence longer than CAP at depth-0 boundaries, preferring
-    clause delimiters, never exceeding CAP, never ending on a stopword."""
+def _split_long(s: str, lim: Limits = Limits()) -> list[str]:
+    """Split a sentence longer than cap at depth-0 boundaries, preferring
+    clause delimiters, never exceeding cap, never ending on a stopword."""
+    TARGET, CAP = lim.target, lim.cap
     pts = _safe_space_points(s)
     if not pts:
         # No depth-0 spaces — entire string is inside quotes.
@@ -294,7 +313,8 @@ def _split_long(s: str) -> list[str]:
     return [p for p in pieces if p]
 
 
-def _merge_short(chunks: list[str]) -> list[str]:
+def _merge_short(chunks: list[str], lim: Limits = Limits()) -> list[str]:
+    MIN_LEN, CAP = lim.min_len, lim.cap
     out: list[str] = []
     i = 0
     while i < len(chunks):
@@ -313,7 +333,8 @@ def _merge_short(chunks: list[str]) -> list[str]:
     return out
 
 
-def _fix_stopword_endings(chunks: list[str]) -> list[str]:
+def _fix_stopword_endings(chunks: list[str], lim: Limits = Limits()) -> list[str]:
+    CAP = lim.cap
     for i in range(len(chunks) - 1):
         words = chunks[i].split()
         while len(words) > 1 and _is_stopword(words[-1]):
@@ -325,11 +346,12 @@ def _fix_stopword_endings(chunks: list[str]) -> list[str]:
     return [c for c in chunks if c]
 
 
-def chunk_prose(text: str) -> list[str]:
+def chunk_prose(text: str, lim: Limits = Limits()) -> list[str]:
     """Split a paragraph's text into chunks obeying length + boundary rules."""
+    TARGET, CAP = lim.target, lim.cap
     units: list[str] = []
     for s in _split_sentences(text):
-        units.extend(_split_long(s) if len(s) > CAP else [s])
+        units.extend(_split_long(s, lim) if len(s) > CAP else [s])
 
     chunks: list[str] = []
     cur = ""
@@ -344,8 +366,8 @@ def chunk_prose(text: str) -> list[str]:
     if cur:
         chunks.append(cur)
 
-    chunks = _merge_short(chunks)
-    chunks = _fix_stopword_endings(chunks)
+    chunks = _merge_short(chunks, lim)
+    chunks = _fix_stopword_endings(chunks, lim)
     return chunks
 
 
@@ -385,19 +407,82 @@ def load_units(nn: str, slug: str) -> list[dict]:
     return units
 
 
-def build_chunks(units: list[dict]) -> list[dict]:
-    """Return ordered [{text, pause_after_ms}]."""
+_HEADING_NUMBER = re.compile(r"^(Глава\s+[^.:]+?\.)\s+(\S.*)$")
+
+
+def split_heading(text: str) -> tuple[str | None, str | None, str]:
+    """Split a heading into (number, label, title) at "Глава N." and the first
+    depth-0 ": ". Missing parts are None; title is always the remainder.
+      "Глава тринадцатая. Базовый навык: «Цитата»" → ("Глава тринадцатая.",
+                                                      "Базовый навык:", "«Цитата»")
+      "Упражнение: найди" → (None, "Упражнение:", "найди")
+    Read as one chunk the model ran the parts together with no breath; split,
+    each part gets its own pause (validated by ear on 1.7B, ch13 test)."""
+    number = None
+    m = _HEADING_NUMBER.match(text)
+    rest = text
+    if m:
+        number, rest = m.group(1), m.group(2)
+    label = None
+    depth = 0
+    for i, ch in enumerate(rest):
+        if ch in _OPEN:
+            depth += 1
+        elif ch in _CLOSE and depth > 0:
+            depth -= 1
+        elif ch == ":" and depth == 0 and rest[i + 1:i + 2] == " ":
+            head, tail = rest[:i + 1].strip(), rest[i + 2:].strip()
+            if head != ":" and tail:
+                label, rest = head, tail
+            break
+    return number, label, rest
+
+
+def _heading_chunks(text: str, pause: int, pauses: dict) -> list[dict]:
+    """One heading → 1..3 chunks. Splitting is on only when config sets
+    pauses_ms.heading_number / heading_colon; absent keys keep the heading whole
+    (pre-1.7B behaviour, unchanged hashes)."""
+    p_num = pauses.get("heading_number")
+    p_col = pauses.get("heading_colon")
+    if not p_num and not p_col:
+        return [{"text": text, "pause_after_ms": pause}]
+    number, label, title = split_heading(text)
+    # A part whose pause is not configured is glued onto the next part.
+    parts: list[tuple[str, int | None]] = []
+    if number:
+        parts.append((number, int(p_num) if p_num else None))
+    if label:
+        parts.append((label, int(p_col) if p_col else None))
+    parts.append((title, pause))
+    out: list[dict] = []
+    carry = ""
+    for txt, p in parts:
+        txt = f"{carry} {txt}" if carry else txt
+        if p is None:
+            carry = txt
+            continue
+        carry = ""
+        out.append({"text": txt, "pause_after_ms": p})
+    return out
+
+
+def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
+    """Return ordered [{text, pause_after_ms}]. ``config`` supplies chunk length
+    limits (``chunking``) and heading split pauses (``pauses_ms``); None = the
+    module defaults, headings whole."""
+    lim = limits(config)
+    pauses = (config or {}).get("pauses_ms") or {}
     chunks: list[dict] = []
     for u in units:
         t = u["type"]
         if t == "heading":
             pause = _HEADING_PAUSE.get(u["level"], 600)
-            chunks.append({"text": u["text"], "pause_after_ms": pause})
+            chunks.extend(_heading_chunks(u["text"], pause, pauses))
         elif t == "stack":
             pause = PAUSE_STACK if not u["last_in_stack"] else PAUSE_PARAGRAPH
             chunks.append({"text": u["text"], "pause_after_ms": pause})
         else:  # paragraph, flow, chain, prose_with_arrow
-            pieces = chunk_prose(u["text"])
+            pieces = chunk_prose(u["text"], lim)
             for i, p in enumerate(pieces):
                 pause = PAUSE_SENTENCE if i < len(pieces) - 1 else PAUSE_PARAGRAPH
                 chunks.append({"text": p, "pause_after_ms": pause})
@@ -409,8 +494,7 @@ def build_chunks(units: list[dict]) -> list[dict]:
 # ── hashing ──────────────────────────────────────────────────────────────────
 
 def latents_hash(config: dict) -> str:
-    ref = paths.ROOT / config["reference"]["path"]
-    lat = ref.with_suffix(".latents.pt")
+    lat = voicecfg.latents_path(config)  # per model variant
     if lat.exists():
         return hashlib.sha1(lat.read_bytes()).hexdigest()
     return "no-latents"
@@ -438,7 +522,7 @@ def chunk_hash(text: str, model: str, seed: int, temperature: float,
 
 
 def build_manifest(units: list[dict], config: dict) -> list[dict]:
-    model = config["model"]["name"]
+    model = voicecfg.model_id(config)  # 0.6B → bare name (old hashes kept)
     seed = config["model"]["seed"]
     temperature = config["model"]["temperature"]
     language = config["model"]["language"]
@@ -450,9 +534,12 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
     manifest: list[dict] = []
-    for n, c in enumerate(build_chunks(units), start=1):
-        synth_text = respell(c["text"], table)
-        phrase = leadin.fires(c["text"], config)
+    for n, c in enumerate(build_chunks(units, config), start=1):
+        # Same order as synth.prepare_synth_text: text_prep → fires → respell.
+        # text_prep changes enter the hash through synth_text (pron=…).
+        prepared = voicecfg.prepare_text(c["text"], config)
+        synth_text = respell(prepared, table)
+        phrase = leadin.fires(prepared, config)
         # Enum-pause enters hash only when this chunk actually has splits.
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
@@ -542,7 +629,9 @@ def _read_manifest(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def run(config: dict) -> int:
+def run(config: dict, section: str | None = None) -> int:
+    """Re-chunk every section, or only ``section`` (NN_slug). A single-section
+    re-chunk touches only that section's manifest and wavs (orphans → _orphan/)."""
     import glob
     out_root = paths.OUT / "sections"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -552,6 +641,8 @@ def run(config: dict) -> int:
     for jf in sorted(glob.glob(str(paths.TEXT / "blocks" / "*.blocks.json"))):
         d = json.loads(Path(jf).read_text(encoding="utf-8"))
         nn, slug = d["nn"], d["slug"]
+        if section and f"{nn}_{slug}" != section:
+            continue
         normf = paths.TEXT / f"{nn}_{slug}.norm.txt"
         if not normf.exists() or normf.stat().st_size < 50:
             continue  # empty/skipped section
@@ -577,6 +668,8 @@ def run(config: dict) -> int:
         total += n
         per_section.append((f"{nn}_{slug}", n, note))
 
+    if section and not per_section:
+        raise SystemExit(f"chunk: секция не найдена или пуста: {section}")
     for name, n, note in per_section:
         extra = f"   [{note}]" if note else ""
         print(f"{name:<52} {n:>4} chunks{extra}")

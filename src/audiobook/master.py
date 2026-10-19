@@ -33,11 +33,14 @@ def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float,
     return json.loads(err[start:end + 1])
 
 
-def master_section(sec_dir: Path, config: dict) -> tuple[Path, dict]:
+def master_section(sec_dir: Path, config: dict,
+                   first: int | None = None) -> tuple[Path, dict]:
+    from audiobook.assemble import preview_name
     ff = _ff()
-    src = sec_dir / "section.wav"
+    stem = preview_name(first)
+    src = sec_dir / f"{stem}.wav"
     if not src.exists():
-        raise SystemExit(f"нет section.wav: {src}")
+        raise SystemExit(f"нет {src.name}: {src}")
     m = config["master"]
     I, tp, lra = float(m["lufs"]), float(m["true_peak"]), 11.0
     sr = int(m["sample_rate"])
@@ -54,7 +57,7 @@ def master_section(sec_dir: Path, config: dict) -> tuple[Path, dict]:
         f"measured_LRA={meas['input_lra']}:measured_thresh={meas['input_thresh']}:"
         f"offset={meas['target_offset']}:linear=true"
     )
-    out = sec_dir / "section.mp3"
+    out = sec_dir / f"{stem}.mp3"
     subprocess.run(
         [ff, "-hide_banner", "-y", "-i", str(src), "-af", af, "-ar", str(sr),
          "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3", str(out)],
@@ -80,11 +83,11 @@ def measure_lufs(mp3: Path, ff: str | None = None) -> tuple[float, float]:
     return lufs, peak
 
 
-def run(config: dict, section: str | None = None) -> int:
+def run(config: dict, section: str | None = None, first: int | None = None) -> int:
     if not section:
         raise SystemExit("master: --section обязателен")
     sec_dir = paths.OUT / "sections" / section
-    out, meas = master_section(sec_dir, config)
+    out, meas = master_section(sec_dir, config, first)
     lufs, peak = measure_lufs(out)
     peak_dbfs = 20 * (peak and __import__("math").log10(peak)) if peak else float("-inf")
     print(f"section={section}  -> {out}")

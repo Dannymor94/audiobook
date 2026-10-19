@@ -21,12 +21,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from audiobook import paths
+from audiobook import paths, voicecfg
 from audiobook.chunker import chunk_hash
 from audiobook.master import _loudnorm_measure, _ff
 from audiobook.pronounce import load_table, respell
 from audiobook.synth import (
-    _SAMPLE_RATE, apply_sentinel, cap_params, load_latents, seed_for_chunk,
+    _SAMPLE_RATE, apply_sentinel, load_latents, seed_for_chunk, worker_config,
 )
 from audiobook.text_blocks import cyrillic_slug
 from audiobook.worker import TimeoutSynth
@@ -60,7 +60,7 @@ def _heading_hash(text: str, config: dict) -> str:
     lat = latents_hash(config)
     table = load_table()
     synth_text = respell(text, table)
-    return chunk_hash(text, m["name"], m["seed"], m["temperature"],
+    return chunk_hash(text, voicecfg.model_id(config), m["seed"], m["temperature"],
                       m["language"], lat, synth_text if synth_text != text else None)
 
 
@@ -98,16 +98,9 @@ def run(config: dict) -> int:
     headings = _collect_headings(config)
     print(f"headings={len(headings)}  -> {_OUT}")
 
-    ref = paths.ROOT / config["reference"]["path"]
-    lat_path = ref.with_suffix(".latents.pt")
     rcfg = config.get("render", {})
-    wcfg = {
-        "device": "cpu",  # portability: Ryzen render target is CPU
-        "latents_path": str(lat_path),
-        "temperature": config["model"]["temperature"],
-        "language": config["model"]["language"],
-        "cap": cap_params(config),
-    }
+    wcfg = worker_config(config)  # variant + its latents, same as render
+    wcfg["device"] = "cpu"  # portability: Ryzen render target is CPU
     timeout_s = rcfg.get("chunk_timeout_s", 600)
     retries = rcfg.get("timeout_retries", 6)
     sentinel = config["model"].get("sentinel", "")

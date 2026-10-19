@@ -21,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bench", help="RTF на 5 чанках")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
-    sub.add_parser("chunk", help="чанкинг всех разделов → out/sections/NN/manifest.jsonl")
+    ck = sub.add_parser("chunk", help="чанкинг разделов → out/sections/NN/manifest.jsonl")
+    ck.add_argument("--section", type=str, default=None,
+                    help="только эта секция (без флага — вся книга)")
     sub.add_parser("headings", help="рендер 483 заголовков → out/headings_check_v2/")
     rd = sub.add_parser("redo", help="рендер N кандидатов для чанка → out/redo/<sec>/<id>/")
     rd.add_argument("section", help="имя секции (например 01_vvedenie)")
@@ -38,7 +40,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="имя секции out/sections/<section> (обязательно для рендера)")
         if name == "synth":
             s.add_argument("--workers", type=int, default=1,
-                           help="параллельных воркеров синтеза (Ryzen: 4)")
+                           help="параллельных воркеров синтеза (Ryzen 0.6B: 4, 1.7B: 2)")
+        if name in ("synth", "assemble", "master"):
+            s.add_argument("--first", type=int, default=None,
+                           help="только первые N чанков секции (превью → preview_firstN)")
     a = p.parse_args(argv)
 
     if a.cmd == "doctor":
@@ -52,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         return pick_ref(load_config())
     if a.cmd == "chunk":
         from .chunker import run as chunk
-        return chunk(load_config())
+        return chunk(load_config(), a.section)
     if a.cmd == "headings":
         from .headings import run as headings
         return headings(load_config())
@@ -67,16 +72,16 @@ def main(argv: list[str] | None = None) -> int:
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
     if a.cmd == "synth":
         from .synth import run as synth
-        return synth(load_config(), a.section, a.workers)
+        return synth(load_config(), a.section, a.workers, a.first)
     if a.cmd == "qc":
         from .qc import run as qc
         return qc(load_config(), a.section)
     if a.cmd == "assemble":
         from .assemble import run as assemble
-        return assemble(load_config(), a.section)
+        return assemble(load_config(), a.section, a.first)
     if a.cmd == "master":
         from .master import run as master
-        return master(load_config(), a.section)
+        return master(load_config(), a.section, a.first)
     print(f"{a.cmd}: не реализовано в каркасе", file=sys.stderr)
     return 2
 

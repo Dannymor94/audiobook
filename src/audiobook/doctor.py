@@ -5,7 +5,7 @@ import platform
 import sys
 from pathlib import Path
 
-from . import paths
+from . import paths, voicecfg
 
 # ELF magic bytes for Linux/Windows x86-64; Mach-O magic for macOS arm64/x86-64
 _MAGIC: dict[bytes, str] = {
@@ -84,8 +84,10 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
         r.check("qwen-tts импортируется", False, str(e))
 
     if not no_models:
-        qwen_dir = paths.MODELS / "hf" / "hub" / "models--Qwen--Qwen3-TTS-12Hz-0.6B-Base"
-        r.check("models/hf (Qwen3-TTS)", any(qwen_dir.rglob("model.safetensors")), "скопировать models/ с флешки")
+        variant = voicecfg.variant(config or {})
+        qwen_dir = voicecfg.hub_dir(variant)
+        r.check(f"models/hf (Qwen3-TTS {variant})", any(qwen_dir.rglob("model.safetensors")),
+                f"нет {qwen_dir} — скопировать models/ с флешки")
         r.check(f"models/nn  ({paths.MODELS / 'nn'})", (paths.MODELS / "nn").exists(), "скопировать models/nn с флешки (451 MB)")
         r.check(f"models/dictionary  ({paths.MODELS / 'dictionary'})", (paths.MODELS / "dictionary").exists(), "скопировать models/dictionary с флешки (22 MB)")
         r.check("models/whisper", (paths.MODELS / "whisper").exists(), "скопировать models/")
@@ -104,6 +106,11 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
         # ref_text for full-clone mode: if config points to one it must exist,
         # else create_voice_clone_prompt(x_vector_only_mode=False) raises
         # ValueError on the render machine. Lives in ref/ (gitignored, flash drive).
+        if config and config.get("reference", {}).get("path"):
+            lat = voicecfg.latents_path(config)
+            r.check(f"латенты под {variant}", lat.exists(),
+                    f"нет {lat} — латенты зависят от модели, посчитать один раз (README)")
+
         rtp = (config or {}).get("reference", {}).get("ref_text_path")
         if rtp:
             rt = paths.ROOT / rtp

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from . import paths
+from . import voicecfg
 from .device import configure_cpu_threads, pick_device
 
 SAMPLES = [
@@ -15,22 +15,18 @@ SAMPLES = [
 
 
 def run(config: dict) -> int:
-    from .synth import (compute_latents, load_latents, load_model,
-                        save_latents, synthesize)
+    from .synth import load_latents, load_model, synthesize
     device = pick_device()
     configure_cpu_threads(workers=1)
     print(f"device={device}")
     t0 = time.perf_counter()
-    model = load_model(device)
+    model = load_model(device, voicecfg.variant(config))
     print(f"load: {time.perf_counter() - t0:.1f}s")
 
-    ref = paths.ROOT / config["reference"]["path"]
-    lat_path = ref.with_suffix(".latents.pt")
-    if lat_path.exists():
-        latents = load_latents(lat_path)
-    else:
-        latents = compute_latents(model, ref)
-        save_latents(latents, lat_path)
+    lat_path = voicecfg.latents_path(config)
+    if not lat_path.exists():
+        raise SystemExit(f"нет латентов {lat_path} — посчитать один раз (README)")
+    latents = load_latents(lat_path)
     seed = config["model"]["seed"]
     temperature = config["model"]["temperature"]
     language = config["model"]["language"]

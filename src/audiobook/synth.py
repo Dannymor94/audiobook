@@ -19,7 +19,7 @@ import numpy as np
 import soundfile as sf
 import torch
 
-from audiobook import leadin, paths
+from audiobook import leadin, paths, voicecfg
 from audiobook.device import pick_device
 
 log = logging.getLogger(__name__)
@@ -61,9 +61,9 @@ def cap_params(config: dict) -> dict | None:
         "margin": r.get("cap_margin", 1.5),
     }
 
-_QWEN_HUB_DIR = (
-    paths.MODELS / "hf" / "hub" / "models--Qwen--Qwen3-TTS-12Hz-0.6B-Base"
-)
+# Max parallel TimeoutSynth workers per variant: each worker holds its own fp32
+# copy of the model. 1.7B measured 11.6 GB/worker on the 30 GB Ryzen → 2 max.
+_MAX_WORKERS = {"1.7B": 2}
 
 # Qwen wants a language *name*; config.yaml carries short codes. Extend as needed.
 _LANG_NAMES = {
@@ -75,15 +75,16 @@ _LANG_NAMES = {
 _model = None
 
 
-def _local_snapshot() -> Path:
+def _local_snapshot(variant: str = voicecfg.DEFAULT_VARIANT) -> Path:
     """Resolve the local snapshot dir (loading by path avoids the offline probe)."""
-    snaps = _QWEN_HUB_DIR / "snapshots"
+    hub = voicecfg.hub_dir(variant)
+    snaps = hub / "snapshots"
     if not snaps.is_dir():
         raise FileNotFoundError(
-            f"Qwen3-TTS weights missing: {_QWEN_HUB_DIR}\n"
+            f"Qwen3-TTS weights missing: {hub}\n"
             "Copy models/ from the project drive."
         )
-    ref = _QWEN_HUB_DIR / "refs" / "main"
+    ref = hub / "refs" / "main"
     if ref.is_file():
         commit = ref.read_text(encoding="utf-8").strip()
         cand = snaps / commit
@@ -95,7 +96,8 @@ def _local_snapshot() -> Path:
     return dirs[-1]
 
 
-def load_model(device: str | None = None):
+def load_model(device: str | None = None,
+               variant: str = voicecfg.DEFAULT_VARIANT):
     global _model
     if _model is not None:
         return _model
@@ -106,7 +108,7 @@ def load_model(device: str | None = None):
         dev = "cpu"
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    snapshot = _local_snapshot()  # raises with a clear message if weights absent
+    snapshot = _local_snapshot(variant)  # raises with a clear message if weights absent
     from qwen_tts import Qwen3TTSModel  # heavy + noisy import: keep it lazy
     model = Qwen3TTSModel.from_pretrained(str(snapshot), dtype=torch.float32)
     model.model.to(dev)
@@ -216,13 +218,14 @@ def strip_sentinel(text: str, sentinel: str) -> str:
 def prepare_synth_text(text: str, config: dict, table: dict,
                        sentinel: str) -> tuple[str, str | None]:
     """The exact string fed to the model for a chunk, plus the lead-in carrier if
-    one fires. Order: pad (short chunks) → respell (stress dict) → sentinel — the
+    one fires. Order: text_prep → pad (short chunks) → respell (stress dict) → sentinel — the
     chunk hash (chunker.chunk_hash) is built the same way. Returns
     ``(synth_text, phrase|None)``; pass ``phrase`` as ``engine.synth(..., leadin=)``
     so a padded chunk gets the carrier trimmed off. The single source of truth for
     synthesis input, shared by render, redo, and qc re-synth — so no path can
     quietly drop the padding and let the drift back in."""
     from audiobook.pronounce import respell
+    text = voicecfg.prepare_text(text, config)  # text_prep: quotes / final period
     phrase = leadin.fires(text, config)
     base = leadin.pad(text, phrase) if phrase else text
     return apply_sentinel(respell(base, table), sentinel), phrase
@@ -377,14 +380,16 @@ def _write_manifest(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
-def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, float]:
+def render_section(engine, sec_dir: Path, config: dict,
+                   first: int | None = None) -> tuple[int, int, int, float]:
     """Synthesise every not-yet-done chunk of one section via ``engine`` (a
     TimeoutSynth or any object with ``synth(text, seed) -> ndarray | None``).
     Returns (synthesised, skipped, timed_out, synth_audio_s). Skips a chunk whose
     status is 'done' AND whose wav is on disk; writes each wav atomically and
     persists the manifest after each one. A chunk that exceeds the engine timeout
     (engine returns None) is marked status 'timeout', logged, and the run
-    continues — it stays not-done, so a later run retries it."""
+    continues — it stays not-done, so a later run retries it. ``first`` limits
+    the run to the first N chunks of the manifest (preview of a section)."""
     manifest_path = sec_dir / "manifest.jsonl"
     rows = _read_manifest(manifest_path)
     chunks_dir = sec_dir / "chunks"
@@ -397,7 +402,7 @@ def render_section(engine, sec_dir: Path, config: dict) -> tuple[int, int, int, 
 
     synthesised = skipped = timed_out = 0
     synth_audio_s = 0.0
-    for row in rows:
+    for row in rows[:first]:
         wav_path = chunks_dir / f"{row['id']}.wav"
         if row.get("status") == "done" and wav_path.exists():
             skipped += 1
@@ -470,7 +475,8 @@ def _plan_parallel(rows: list[dict], chunks_dir: Path, num_workers: int
 
 
 def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: float,
-                            num_workers: int) -> tuple[int, int, int, float]:
+                            num_workers: int, first: int | None = None
+                            ) -> tuple[int, int, int, float]:
     """Parallel render: N worker processes synth disjoint chunk subsets; this
     parent drains results and persists the manifest after each one (resume stays
     intact — a crash loses at most the in-flight chunks, whose wavs weren't
@@ -484,7 +490,7 @@ def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: 
     chunks_dir.mkdir(parents=True, exist_ok=True)
     by_id = {r["id"]: r for r in rows}
 
-    groups, skipped = _plan_parallel(rows, chunks_dir, num_workers)
+    groups, skipped = _plan_parallel(rows[:first], chunks_dir, num_workers)
     if not any(groups):
         return 0, skipped, 0, 0.0
 
@@ -526,33 +532,53 @@ def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: 
     return synthesised, skipped, timed_out, synth_audio_s
 
 
-def run(config: dict, section: str | None = None, num_workers: int = 1) -> int:
-    if not section:
-        raise SystemExit("synth: --section обязателен (иначе отрендерится вся книга)")
-    sec_dir = paths.OUT / "sections" / section
-    if not (sec_dir / "manifest.jsonl").exists():
-        raise SystemExit(f"нет манифеста для секции {section}: {sec_dir}")
-
-    ref = paths.ROOT / config["reference"]["path"]
-    rcfg = config.get("render", {})
-    timeout_s = rcfg.get("chunk_timeout_s", 120)
-    wcfg = {
+def worker_config(config: dict, num_workers: int = 1) -> dict:
+    """Picklable TimeoutSynth config: model variant + its latents file + generation
+    params. The single place render, qc re-synth and redo build it, so all three
+    load the same weights and the same voice prompt."""
+    v = voicecfg.variant(config)
+    limit = _MAX_WORKERS.get(v)
+    if limit is not None and num_workers > limit:
+        raise SystemExit(
+            f"synth: модель {v} — не больше {limit} воркеров "
+            f"(каждый держит свою копию модели в RAM), запрошено {num_workers}")
+    lat = voicecfg.latents_path(config)
+    if not lat.exists():
+        raise SystemExit(
+            f"нет латентов для модели {v}: {lat}\n"
+            "посчитать один раз скриптом из README (латенты зависят от модели)")
+    return {
         "device": pick_device(),
-        "latents_path": str(ref.with_suffix(".latents.pt")),
+        "variant": v,
+        "latents_path": str(lat),
         "temperature": config["model"]["temperature"],
         "language": config["model"]["language"],
         "cap": cap_params(config),
         "num_workers": num_workers,  # TimeoutSynth child divides CPU threads by this
     }
 
+
+def run(config: dict, section: str | None = None, num_workers: int = 1,
+        first: int | None = None) -> int:
+    if not section:
+        raise SystemExit("synth: --section обязателен (иначе отрендерится вся книга)")
+    sec_dir = paths.OUT / "sections" / section
+    if not (sec_dir / "manifest.jsonl").exists():
+        raise SystemExit(f"нет манифеста для секции {section}: {sec_dir}")
+
+    rcfg = config.get("render", {})
+    timeout_s = rcfg.get("chunk_timeout_s", 120)
+    wcfg = worker_config(config, num_workers)
+
     t0 = time.perf_counter()
     if num_workers > 1:
         synthesised, skipped, timed_out, synth_audio_s = render_section_parallel(
-            sec_dir, config, wcfg, timeout_s, num_workers)
+            sec_dir, config, wcfg, timeout_s, num_workers, first)
     else:
         from audiobook.worker import TimeoutSynth
         with TimeoutSynth(wcfg, timeout_s) as engine:
-            synthesised, skipped, timed_out, synth_audio_s = render_section(engine, sec_dir, config)
+            synthesised, skipped, timed_out, synth_audio_s = render_section(
+                engine, sec_dir, config, first)
     wall = time.perf_counter() - t0
 
     rows = _read_manifest(sec_dir / "manifest.jsonl")

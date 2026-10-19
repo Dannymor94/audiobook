@@ -46,7 +46,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
     )
 
     configure_cpu_threads(workers=cfg.get("num_workers", 1))
-    model = load_model(cfg["device"])
+    model = load_model(cfg["device"], cfg.get("variant", "0.6B"))
     latents = load_latents(cfg["latents_path"])
     cap = cfg.get("cap")  # {base_ms, ms_per_char, margin} or None to disable
     out_q.put("ready")
