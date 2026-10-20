@@ -412,3 +412,17 @@ def test_scout_pick_rate_band_no_overlap():
 def test_scout_char_rate():
     from audiobook.ref_scout import char_rate
     assert char_rate("Раз, два!", 2.0) == pytest.approx(3.0)  # "раздва": 6 chars / 2 s
+
+
+def test_scout_cut_bounds_pad_into_gap_only():
+    from audiobook.ref_scout import Window, cut_bounds
+    # wide gaps: full 0.3 s pad both sides
+    w = Window(10.0, 30.0, "", prev_end=9.0, next_start=31.0)
+    assert cut_bounds(w) == pytest.approx((9.7, 30.3))
+    # tight gaps: never past the midpoint, so neighbours' words stay out
+    w = Window(10.0, 30.0, "", prev_end=9.9, next_start=30.1)
+    assert cut_bounds(w) == pytest.approx((9.95, 30.05))
+    # file start / end
+    w = Window(0.1, 20.0, "", prev_end=0.0)
+    assert cut_bounds(w)[0] == pytest.approx(0.05)
+    assert cut_bounds(w)[1] == pytest.approx(20.3)

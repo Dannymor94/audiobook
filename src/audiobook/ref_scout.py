@@ -27,6 +27,7 @@ from audiobook import paths
 
 _SR = 16_000
 MIN_S, MAX_S = 15.0, 25.0
+PAD_S = 0.30
 
 
 @dataclass
@@ -43,6 +44,8 @@ class Window:
     text: str
     rate: float = 0.0      # normalized chars per second of window
     spread: float = 0.0    # p10–p90 pitch, semitones
+    prev_end: float = 0.0          # end of the segment before (cut may not go earlier)
+    next_start: float = float("inf")  # start of the segment after
 
     @property
     def dur(self) -> float:
@@ -68,7 +71,10 @@ def windows(segs: list[Seg], min_s: float = MIN_S, max_s: float = MAX_S) -> list
                 break
             if dur >= min_s:
                 text = " ".join(s.text.strip() for s in segs[i:j + 1]).strip()
-                out.append(Window(segs[i].start, segs[j].end, text))
+                out.append(Window(
+                    segs[i].start, segs[j].end, text,
+                    prev_end=segs[i - 1].end if i > 0 else 0.0,
+                    next_start=segs[j + 1].start if j + 1 < len(segs) else float("inf")))
     return out
 
 
@@ -92,6 +98,16 @@ def pick(cands: list[Window], target_rate: float, tol: float, k: int) -> list[Wi
         if len(chosen) == k:
             break
     return sorted(chosen, key=lambda w: w.start)
+
+
+def cut_bounds(w: Window, pad: float = PAD_S) -> tuple[float, float]:
+    """Whisper segment edges sit tight on the speech and often clip the first
+    consonant (validated: scout_2526 lost the onset of its first word). Pad into
+    the neighbouring silence, never past half the gap — so no part of the
+    previous/next word gets in and the text still matches the audio."""
+    start = max(w.start - pad, (w.prev_end + w.start) / 2, 0.0)
+    end = min(w.end + pad, (w.end + w.next_start) / 2)
+    return start, end
 
 
 def mmss(t: float) -> str:
@@ -182,7 +198,8 @@ def run(config: dict, src: str, k: int = 6, tol: float = 0.10) -> int:
     print(f"цель темпа (текущий референс): {target:.2f} симв/с")
     for w in chosen:
         name = f"scout_{mmss(w.start)}"
-        clip = full[int(w.start * 24_000):int(w.end * 24_000)]
+        a, b = cut_bounds(w)
+        clip = full[int(a * 24_000):int(b * 24_000)]
         sf.write(str(cdir / f"{name}.wav"), clip, 24_000, subtype="PCM_16")
         (cdir / f"{name}.draft.txt").write_text(w.text + "\n", encoding="utf-8")
         listen += [clip, gap]
