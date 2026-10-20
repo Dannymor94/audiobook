@@ -27,7 +27,6 @@ from audiobook import paths
 
 _SR = 16_000
 MIN_S, MAX_S = 15.0, 25.0
-PAD_S = 0.30
 
 
 @dataclass
@@ -100,14 +99,28 @@ def pick(cands: list[Window], target_rate: float, tol: float, k: int) -> list[Wi
     return sorted(chosen, key=lambda w: w.start)
 
 
-def cut_bounds(w: Window, pad: float = PAD_S) -> tuple[float, float]:
-    """Whisper segment edges sit tight on the speech and often clip the first
-    consonant (validated: scout_2526 lost the onset of its first word). Pad into
-    the neighbouring silence, never past half the gap — so no part of the
-    previous/next word gets in and the text still matches the audio."""
-    start = max(w.start - pad, (w.prev_end + w.start) / 2, 0.0)
-    end = min(w.end + pad, (w.end + w.next_start) / 2)
-    return start, end
+def snap_to_silence(y: np.ndarray, sr: int, t: float, side: str,
+                    reach: float = 0.8, inside: float = 0.15) -> tuple[float, float]:
+    """Move a cut point to the quietest 20 ms spot nearby. Whisper segment edges
+    are not silence-aligned (adjacent segments share an edge, gap 0.00 s) and
+    clipped the onset of scout_2526's first word. For a start we search
+    [t-reach, t+inside], for an end [t-inside, t+reach]: the quietest spot there
+    is the pause between words, so the cut never splits a word.
+    Returns (time, depth_db) — depth of that spot vs the median frame level;
+    around -20 dB or lower is a real pause, near 0 dB means none was found."""
+    lo, hi = (t - reach, t + inside) if side == "start" else (t - inside, t + reach)
+    a, b = max(0, int(lo * sr)), min(len(y), int(hi * sr))
+    frame, hop = int(0.02 * sr), int(0.005 * sr)
+    seg = y[a:b]
+    if len(seg) < frame:
+        return t, 0.0
+    n = 1 + (len(seg) - frame) // hop
+    rms = np.array([np.sqrt(np.mean(seg[i * hop:i * hop + frame] ** 2)) for i in range(n)])
+    i = int(np.argmin(rms))
+    tc = (a + i * hop + frame // 2) / sr
+    ref = np.median(rms[rms > 0]) if np.any(rms > 0) else 1.0
+    depth = 20 * np.log10(max(rms[i], 1e-9) / ref)
+    return tc, float(depth)
 
 
 def mmss(t: float) -> str:
@@ -198,13 +211,15 @@ def run(config: dict, src: str, k: int = 6, tol: float = 0.10) -> int:
     print(f"цель темпа (текущий референс): {target:.2f} симв/с")
     for w in chosen:
         name = f"scout_{mmss(w.start)}"
-        a, b = cut_bounds(w)
+        a, da = snap_to_silence(full, 24_000, w.start, "start")
+        b, db = snap_to_silence(full, 24_000, w.end, "end")
         clip = full[int(a * 24_000):int(b * 24_000)]
         sf.write(str(cdir / f"{name}.wav"), clip, 24_000, subtype="PCM_16")
         (cdir / f"{name}.draft.txt").write_text(w.text + "\n", encoding="utf-8")
         listen += [clip, gap]
         print(f"{name}  {mmss(w.start)[:2]}:{mmss(w.start)[2:]}  {w.dur:4.1f} с  "
-              f"темп {w.rate:.2f}  мелодика {w.spread:.1f} пт")
+              f"темп {w.rate:.2f}  мелодика {w.spread:.1f} пт  "
+              f"паузы на срезе {da:.0f}/{db:.0f} дБ")
     raw = work / "listen_all.wav"
     sf.write(str(raw), np.concatenate(listen), 24_000, subtype="PCM_16")
     subprocess.run([_ff(), "-hide_banner", "-y", "-i", str(raw), "-c:a", "libmp3lame",

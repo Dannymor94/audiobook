@@ -414,15 +414,15 @@ def test_scout_char_rate():
     assert char_rate("Раз, два!", 2.0) == pytest.approx(3.0)  # "раздва": 6 chars / 2 s
 
 
-def test_scout_cut_bounds_pad_into_gap_only():
-    from audiobook.ref_scout import Window, cut_bounds
-    # wide gaps: full 0.3 s pad both sides
-    w = Window(10.0, 30.0, "", prev_end=9.0, next_start=31.0)
-    assert cut_bounds(w) == pytest.approx((9.7, 30.3))
-    # tight gaps: never past the midpoint, so neighbours' words stay out
-    w = Window(10.0, 30.0, "", prev_end=9.9, next_start=30.1)
-    assert cut_bounds(w) == pytest.approx((9.95, 30.05))
-    # file start / end
-    w = Window(0.1, 20.0, "", prev_end=0.0)
-    assert cut_bounds(w)[0] == pytest.approx(0.05)
-    assert cut_bounds(w)[1] == pytest.approx(20.3)
+def test_scout_snap_to_silence():
+    from audiobook.ref_scout import snap_to_silence
+    sr = 1000
+    rng = np.random.default_rng(0)
+    y = rng.normal(0, 0.3, 3 * sr).astype(np.float32)   # "speech"
+    y[1300:1400] = 0.0                                   # pause at 1.30-1.40 s
+    t, depth = snap_to_silence(y, sr, 1.50, "start")     # whisper edge inside speech
+    assert 1.30 <= t <= 1.40 and depth < -20
+    t, depth = snap_to_silence(y, sr, 1.25, "end")
+    assert 1.30 <= t <= 1.40
+    t, depth = snap_to_silence(rng.normal(0, 0.3, 3 * sr), sr, 1.5, "start")
+    assert depth > -20                                   # no pause → shallow depth reported
