@@ -426,3 +426,45 @@ def test_scout_snap_to_silence():
     assert 1.30 <= t <= 1.40
     t, depth = snap_to_silence(rng.normal(0, 0.3, 3 * sr), sr, 1.5, "start")
     assert depth > -20                                   # no pause → shallow depth reported
+
+
+# ── pron-test ─────────────────────────────────────────────────────────────────
+
+def test_pron_find_chunk_whole_word_case_sensitive():
+    from audiobook.pron_test import find_chunk
+    rows = [{"id": "0001", "text": "Тестовое слово внутри."},
+            {"id": "0002", "text": "Начало. Слово с заглавной."}]
+    assert find_chunk(rows, "Слово")["id"] == "0002"
+    assert find_chunk(rows, "слово")["id"] == "0001"
+    assert find_chunk(rows, "лово") is None
+
+
+def test_pron_variant_tables():
+    from audiobook.pron_test import variant_tables
+    base = {"Слово": "СловО", "другое": "другОе"}
+    got = dict(variant_tables(base, "Слово", ["-", "СлОво"]))
+    assert "Слово" not in got["-"] and got["-"]["другое"] == "другОе"
+    assert got["СлОво"]["Слово"] == "СлОво"
+    assert base["Слово"] == "СловО"  # caller's table untouched
+
+
+def test_pron_render_same_seed_only_spelling_differs():
+    from audiobook.pron_test import render_variants, variant_tables
+
+    class Eng:
+        def __init__(self):
+            self.calls = []
+
+        def synth(self, text, seed, **kw):
+            self.calls.append((text, seed))
+            return np.zeros(240, dtype=np.float32)
+
+    row = {"id": "0001", "text": "Первое предложение теста. Слово стоит здесь.",
+           "hash": "a" * 40, "seed_override": None}
+    eng = Eng()
+    res = render_variants(eng, row, _cfg(), variant_tables({}, "Слово", ["-", "СлОво"]),
+                          seeds=2)
+    assert [(v, k) for v, k, _t, _w in res] == [("-", 1), ("-", 2), ("СлОво", 1), ("СлОво", 2)]
+    (t1, s1), (t1b, s1b), (t2, s2), (t2b, s2b) = eng.calls
+    assert s1 == s2 and s1b == s2b and s1 != s1b       # same seed per take, takes differ
+    assert "Слово" in t1 and "СлОво" in t2

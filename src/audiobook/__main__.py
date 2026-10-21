@@ -41,6 +41,15 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--k", type=int, default=6, help="сколько кандидатов (default 6)")
     rs.add_argument("--tol", type=float, default=0.10,
                     help="допуск темпа к текущему референсу (default 0.10 = ±10%%)")
+    pt = sub.add_parser("pron-test",
+                        help="один чанк с разными написаниями слова → out/pron_test/")
+    pt.add_argument("--section", required=True)
+    pt.add_argument("--word", required=True, help="слово как в тексте (регистр важен)")
+    pt.add_argument("--try", dest="variants", nargs="+", required=True,
+                    help="написания для модели; '-' = без замены")
+    pt.add_argument("--chunk", default=None, help="id чанка (иначе первый с этим словом)")
+    pt.add_argument("--seeds", type=int, default=2,
+                    help="дублей на вариант (разные seed; default 2)")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -85,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "ref-scout":
         from .ref_scout import run as ref_scout
         return ref_scout(load_config(), a.src, a.k, a.tol)
+    if a.cmd == "pron-test":
+        from .pron_test import run as pron_test
+        return pron_test(load_config(), a.section, a.word, a.variants, a.chunk, a.seeds)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)

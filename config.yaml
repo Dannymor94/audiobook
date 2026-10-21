@@ -16,14 +16,14 @@ model:
   sentinel: " ."
   # ё сохраняется (Qwen читает ё верно); ударения "+" не используются (ломают Qwen).
 reference:
-  path: ref/ref1.wav             # ref 1: out/expr_test/_refs/1.wav, ~19.8 s, 24 kHz mono
-  # sha1 файла латентов (ref/ref1.latents.pt для 0.6B) — входит в хеш каждого
-  # чанка. Справочно; для 1.7B хеш берётся из ref/ref1.latents_1.7b.pt.
-  latents_sha1: 32948e513a2cc79aa9f5a07b49dd96d90bf1b963
-  # Verbatim transcript of ref 1, confirmed by ear. Full-clone (ICL) mode:
-  # latents computed with x_vector_only_mode=False + this ref_text.
-  # Lives in ref/ (gitignored) — travels on flash drive.
-  ref_text_path: ref/ref1.txt
+  # Отрывок живой записи главы 1 (25:26, ~23 с), выбран на слух: теплее и
+  # неторопливее ref1 (ch13 ref-compare, scout_2526c). Срез по настоящей паузе
+  # (ref-scout snap_to_silence) — прежний срез впритык давал акцент.
+  path: ref/ref_ch1.wav
+  # Дословная расшифровка, проверена на слух. Полный клон (ICL).
+  # Латенты: ref/ref_ch1.latents_1.7b.pt (хеш файла входит в хеш каждого чанка).
+  # Смена референса = весь кеш заново. Прежний: ref/ref1.wav (+ ref1.txt).
+  ref_text_path: ref/ref_ch1.txt
 render:
   # Per-chunk length cap. Qwen open-end generation can run away (never emit a
   # stop); identical (text, seed) even renders differently in-process vs the
