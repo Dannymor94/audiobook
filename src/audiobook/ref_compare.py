@@ -124,7 +124,7 @@ def render_candidate(engine, rows: list[dict], config: dict, out_dir: Path) -> i
             failed += 1
             continue
         tmp = wav_path.with_name(wav_path.name + ".part")
-        sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+        sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")
         tmp.replace(wav_path)
     return failed
 

@@ -552,3 +552,18 @@ def test_qc_cer_wrong_number_still_fails():
     from audiobook.qc import cer
     assert cer("Глава четырнадцатая.", "Глава 13.") > 0.05
     assert cer("Пять минут.", "7 минут.") > 0.05
+
+
+def test_chunk_wav_not_clipped_at_write(tmp_path):
+    """TTS output can exceed full scale; chunk wavs are float so the excess is
+    kept for loudnorm to bring down, instead of flat-topped at PCM_16 write."""
+    from audiobook.synth import render_section
+
+    class Loud:
+        def synth(self, text, seed, **kw):
+            return np.full(2400, 1.5, dtype=np.float32)
+
+    sec = _section(tmp_path, n=1)
+    render_section(Loud(), sec, _cfg())
+    data, _sr = sf.read(str(sec / "chunks" / "0001.wav"), dtype="float32")
+    assert data.max() == pytest.approx(1.5)

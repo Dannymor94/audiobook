@@ -71,7 +71,7 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
                 print(f"  variant {i:02d}  TIMEOUT")
                 continue
             tmp = out_path.parent / (out_path.name + ".part")
-            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")  # float: no clipping at write
             tmp.replace(out_path)
             dur = len(wav) / _SAMPLE_RATE
             print(f"  variant {i:02d}  seed+{i * 100}  {dur:.2f}s")

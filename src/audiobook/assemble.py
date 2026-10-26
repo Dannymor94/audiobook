@@ -60,7 +60,7 @@ def assemble_section(sec_dir: Path, config: dict,
     chunks_dir = sec_dir / "chunks"
     section, stats = join_chunks(rows, chunks_dir, config)
     out = sec_dir / f"{preview_name(first)}.wav"
-    sf.write(str(out), section, _SR, subtype="PCM_16")
+    sf.write(str(out), section, _SR, subtype="FLOAT")  # float: no clipping before master
     return out, stats
 
 

@@ -417,7 +417,7 @@ def render_section(engine, sec_dir: Path, config: dict,
             timed_out += 1
             continue
         tmp = wav_path.parent / (wav_path.name + ".part")
-        sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+        sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")  # float: no clipping at write
         tmp.replace(wav_path)
         row["status"] = "done"
         row["seed"] = used_seed
@@ -450,7 +450,7 @@ def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
                 continue
             wav_path = chunks_dir / f"{row['id']}.wav"
             tmp = wav_path.parent / (wav_path.name + ".part")
-            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")  # float: no clipping at write
             tmp.replace(wav_path)
             out_q.put({"id": row["id"], "status": "done", "seed": used,
                        "duration_ms": round(len(wav) / _SAMPLE_RATE * 1000),

@@ -174,7 +174,7 @@ def run(config: dict, max_chunks: int = 60, dry_run: bool = False) -> int:
                 print(f"  НЕ СИНТЕЗИРОВАЛСЯ: {r['section']} {r['id']}")
                 continue
             tmp = p.with_name(p.name + ".part")
-            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+            sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")
             tmp.replace(p)
 
     gap = np.zeros(int(GAP_S * _SAMPLE_RATE), dtype=np.float32)

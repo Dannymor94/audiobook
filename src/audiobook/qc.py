@@ -247,7 +247,7 @@ def run(config: dict, section: str | None = None) -> int:
                     continue
                 wav_path = chunks_dir / f"{r['id']}.wav"
                 tmp = wav_path.parent / (wav_path.name + ".part")
-                sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="PCM_16", format="WAV")
+                sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")  # float: no clipping at write
                 tmp.replace(wav_path)
                 r["seed"] = new_seed
                 r["duration_ms"] = round(len(wav) / _SAMPLE_RATE * 1000)
