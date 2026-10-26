@@ -84,11 +84,50 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+def _stem_eq(a: str, b: str) -> bool:
+    """Same numeral up to its ending: тринадцатый ~ тринадцатая, первый ~ первой."""
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n >= max(3, min(len(a), len(b)) - 3)
+
+
+def _numbers_like_ref(hyp_text: str, ref_tokens: list[str]) -> str:
+    """Write each digit run of the transcript the way the reference says it.
+
+    Whisper writes "Глава 13", the book says "Глава тринадцатая". Cardinal
+    expansion alone leaves "тринадцать" vs "тринадцатая" — 12% CER on a short
+    heading, a false QC failure (ch13 chunk 0001). For each number try its
+    cardinal and ordinal words; if they match reference tokens up to the
+    ending, use the reference tokens verbatim. A genuinely different number
+    (13 vs "четырнадцатая") does not match and still counts as an error."""
+    from num2words import num2words
+
+    def repl(m: re.Match) -> str:
+        n = int(m.group())
+        forms = []
+        for kind in ("cardinal", "ordinal"):
+            try:
+                forms.append(num2words(n, lang="ru", to=kind).split())
+            except Exception:
+                pass
+        for fw in forms:
+            for i in range(len(ref_tokens) - len(fw) + 1):
+                if all(_stem_eq(a, b) for a, b in zip(fw, ref_tokens[i:i + len(fw)])):
+                    return " " + " ".join(ref_tokens[i:i + len(fw)]) + " "
+        return " " + " ".join(forms[0]) + " " if forms else " "
+
+    return _DIGITS.sub(repl, hyp_text)
+
+
 def cer(ref_text: str, hyp_text: str) -> float:
     """Character error rate of a transcript against reference text, both put
-    through normalize_for_cer first. 0.0 on two empty/identical normalizations."""
+    through normalize_for_cer first. 0.0 on two empty/identical normalizations.
+    Numbers in the transcript are written as the reference words them."""
     ref = normalize_for_cer(ref_text)
-    hyp = normalize_for_cer(hyp_text)
+    hyp = normalize_for_cer(_numbers_like_ref(hyp_text, ref.split()))
     if not ref:
         return 0.0 if not hyp else 1.0
     return _levenshtein(ref, hyp) / len(ref)

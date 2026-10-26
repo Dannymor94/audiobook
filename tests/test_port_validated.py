@@ -532,3 +532,23 @@ def test_probe_select_caps_kind_limit():
     from audiobook.probe import CAP, select
     cands = [({"text": str(i)}, {"one_word_run"}) for i in range(20)]
     assert len(select(cands, max_chunks=50)) == CAP["one_word_run"]
+
+
+# ── qc: numbers vs ordinals ───────────────────────────────────────────────────
+
+@pytest.mark.parametrize("ref,hyp", [
+    ("Глава тринадцатая.", "Глава 13."),
+    ("Глава первая.", "Глава 1."),
+    ("Двадцать пятый день.", "25 день."),
+    ("Пять минут тишины.", "5 минут тишины."),
+    ("Сорок дней.", "40 дней."),
+])
+def test_qc_cer_numbers_written_like_reference(ref, hyp):
+    from audiobook.qc import cer
+    assert cer(ref, hyp) == 0.0
+
+
+def test_qc_cer_wrong_number_still_fails():
+    from audiobook.qc import cer
+    assert cer("Глава четырнадцатая.", "Глава 13.") > 0.05
+    assert cer("Пять минут.", "7 минут.") > 0.05
