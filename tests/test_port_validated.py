@@ -502,3 +502,33 @@ def test_qc_never_requeues_locked_chunk():
     assert qc_status({"cer": 0.30, "locked": True}, 0.05) == "done"
     assert qc_status({"cer": 0.30, "locked": False}, 0.05) == "qc_fail"
     assert qc_status({"cer": 0.01}, 0.05) == "done"
+
+
+# ── probe ─────────────────────────────────────────────────────────────────────
+
+def test_probe_tags():
+    from audiobook.probe import tags_for
+    watch = {"потом", "руки"}
+    t = tags_for("Потом подними Руки. Раз. Два. Слово ПТСР и ТЕЛО, сайт example.ru.",
+                 watch, vocab={"тело"})
+    assert {"homograph:потом", "homograph:руки", "one_word_run",
+            "abbrev:ПТСР", "caps_word", "latin:example.ru"} <= t
+    assert "abbrev:ТЕЛО" not in t
+    assert tags_for("Обычное длинное предложение без ловушек.", watch, set()) == set()
+
+
+def test_probe_select_greedy_cover():
+    from audiobook.probe import select
+    cands = [({"text": "a" * 50}, {"homograph:x"}),
+             ({"text": "b" * 50}, {"homograph:x", "homograph:y"}),
+             ({"text": "c" * 10}, {"homograph:y"}),
+             ({"text": "d" * 10}, {"latin:z"})]
+    got = select(cands, max_chunks=10)
+    texts = [r["text"][0] for r, _t in got]
+    assert texts[0] == "b" and "d" in texts and len(got) == 2  # x,y via b; z via d
+
+
+def test_probe_select_caps_kind_limit():
+    from audiobook.probe import CAP, select
+    cands = [({"text": str(i)}, {"one_word_run"}) for i in range(20)]
+    assert len(select(cands, max_chunks=50)) == CAP["one_word_run"]

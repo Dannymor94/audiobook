@@ -50,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("--chunk", default=None, help="id чанка (иначе первый с этим словом)")
     pt.add_argument("--seeds", type=int, default=2,
                     help="дублей на вариант (разные seed; default 2)")
+    pb = sub.add_parser("probe",
+                        help="подборка чанков с ловушками ударения по всей книге → out/probe/")
+    pb.add_argument("--max", type=int, default=60, help="максимум чанков (default 60)")
+    pb.add_argument("--dry-run", action="store_true", help="только показать выбор, без синтеза")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -97,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "pron-test":
         from .pron_test import run as pron_test
         return pron_test(load_config(), a.section, a.word, a.variants, a.chunk, a.seeds)
+    if a.cmd == "probe":
+        from .probe import run as probe
+        return probe(load_config(), a.max, a.dry_run)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
