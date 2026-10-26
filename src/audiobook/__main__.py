@@ -39,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
         if name == "synth":
             s.add_argument("--workers", type=int, default=1,
                            help="параллельных воркеров синтеза (Ryzen: 4)")
+    pt = sub.add_parser("pron-test", help="тест произношения: N вариантов × M дублей → all.mp3")
+    pt.add_argument("--section", required=True, help="имя секции (для имени папки)")
+    pt.add_argument("--word", required=True, help="базовая фраза")
+    pt.add_argument("--try", dest="tries", nargs="+", metavar="VARIANT",
+                    help="варианты написания; '-' = базовая фраза как есть")
+    pt.add_argument("--dubs", type=int, default=3, help="дублей на вариант (default 3)")
+
     a = p.parse_args(argv)
 
     if a.cmd == "doctor":
@@ -77,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "master":
         from .master import run as master
         return master(load_config(), a.section)
+    if a.cmd == "pron-test":
+        from .pron_test import run_pron_test
+        tries = a.tries or ["-"]
+        return run_pron_test(load_config(), a.section, a.word, tries, a.dubs)
     print(f"{a.cmd}: не реализовано в каркасе", file=sys.stderr)
     return 2
 
