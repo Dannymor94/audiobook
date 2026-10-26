@@ -16,7 +16,10 @@
 #   2. EXCEPTION — word-initial stress on an ALREADY-CAPITALIZED word: DOUBLE the
 #      stressed vowel, since a capital there is indistinguishable from ordinary
 #      capitalization: "Отзывы" -> "Оотзывы".
-# Rejected (all worse than baseline): the acute mark (U+0301) is ignored; the
+# 1.7B notes (pron-test, ch13, ref_ch1): the capital rule held for "тебЯ" (2/2
+# takes clean); the acute mark gives garbled speech (2/2); isolated one-word
+# sentences may need a phrase entry with commas instead of periods.
+# Rejected on 0.6B (all worse than baseline): the acute mark (U+0301) is ignored; the
 # RUAccent "+" mark garbles output; hyphen, space or a capitalized whole
 # syllable all hurt. The sentinel (config.model.sentinel) trims the drawn-out
 # tail doubling adds (2.56s → 1.52s). Every entry must be confirmed by ear —
@@ -26,7 +29,10 @@
 
 "Отзывы": "Оотзывы"
 "волну": "волнУ"       # accusative of "волна" (emotional-wave metaphor); all 24 book occurrences
-"Запить": "ЗапИть"     # ch13 only, single occurrence, sentence-initial
+# ch13: one-word sentences "Заесть. Запить. Заснуть." — on 1.7B every capital-
+# vowel variant misplaced stress (2/2 takes each); commas, no marks, read right
+# (pron-test zaest, variant 4). Replaces the old 0.6B entry "Запить": "ЗапИть".
+"Заесть. Запить. Заснуть": "Заесть, запить, заснуть"
 
 # Group-1 stress fixes (ch13 diagnosis). Fixed-stress words, no stress heteronym,
 # so a book-wide respelling is safe. Case-sensitive keys: both cases that occur.
