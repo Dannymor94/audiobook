@@ -468,3 +468,30 @@ def test_pron_render_same_seed_only_spelling_differs():
     (t1, s1), (t1b, s1b), (t2, s2), (t2b, s2b) = eng.calls
     assert s1 == s2 and s1b == s2b and s1 != s1b       # same seed per take, takes differ
     assert "Слово" in t1 and "СлОво" in t2
+
+
+# ── respell: single pass ──────────────────────────────────────────────────────
+
+def test_respell_single_pass_no_chaining():
+    from audiobook.pronounce import respell
+    table = {"слово": "словО", "одно слово": "однО слово́"}
+    # phrase wins and its value is not re-respelled by the word entry
+    assert respell("Тут одно слово.", table) == "Тут однО слово́."
+    assert respell("Просто слово.", table) == "Просто словО."
+
+
+def test_respell_real_table_unchanged_semantics():
+    """The project dictionary has no overlapping entries, so single-pass gives
+    the same output as the old sequential replace — no hash changes."""
+    import re
+    from audiobook.pronounce import load_table, respell
+    table = load_table()
+
+    def old(text):
+        for src in sorted(table, key=len, reverse=True):
+            text = re.sub(rf"\b{re.escape(src)}\b", table[src], text)
+        return text
+
+    for t in ["Я тебя вижу, Тебя слышу и себе верю.", "Найди. Позволь себе навык.",
+              "Твои фантазии и твои сознание, сознания, Сознание.", "Вряд ли выбивается."]:
+        assert respell(t, table) == old(t)

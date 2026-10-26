@@ -33,10 +33,15 @@ def load_table(path: Path | None = None) -> dict[str, str]:
 def respell(text: str, table: dict[str, str]) -> str:
     """Replace each source string with its respelling, whole-word only.
 
-    Longest keys first, so a phrase entry wins over a substring of it. Word
+    One pass over the text with a single alternation, longest keys first, so a
+    phrase entry wins over a word inside it AND a replacement is never fed back
+    into the table (a phrase value containing "тебя" must not be re-respelled
+    by the "тебя" entry — that double-marked pron-test variants). Word
     boundaries (\\b, Unicode-aware) keep 'Отзывы' from firing inside a longer
     word. Identity when nothing matches — that is what keeps the hash stable.
     """
-    for src in sorted(table, key=len, reverse=True):
-        text = re.sub(rf"\b{re.escape(src)}\b", table[src], text)
-    return text
+    if not table:
+        return text
+    keys = sorted(table, key=len, reverse=True)
+    pat = re.compile(r"\b(?:" + "|".join(re.escape(k) for k in keys) + r")\b")
+    return pat.sub(lambda m: table[m.group(0)], text)
