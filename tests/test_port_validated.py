@@ -495,3 +495,10 @@ def test_respell_real_table_unchanged_semantics():
     for t in ["Я тебя вижу, Тебя слышу и себе верю.", "Найди. Позволь себе навык.",
               "Твои фантазии и твои сознание, сознания, Сознание.", "Вряд ли выбивается."]:
         assert respell(t, table) == old(t)
+
+
+def test_qc_never_requeues_locked_chunk():
+    from audiobook.qc import qc_status
+    assert qc_status({"cer": 0.30, "locked": True}, 0.05) == "done"
+    assert qc_status({"cer": 0.30, "locked": False}, 0.05) == "qc_fail"
+    assert qc_status({"cer": 0.01}, 0.05) == "done"

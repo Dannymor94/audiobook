@@ -117,6 +117,14 @@ def _release(model) -> None:
     gc.collect()
 
 
+def qc_status(row: dict, threshold: float) -> str:
+    """A locked chunk was accepted by ear (`accept`): QC records its CER but never
+    queues it for re-synth — that would overwrite the human choice."""
+    if row.get("locked"):
+        return "done"
+    return "qc_fail" if row["cer"] > threshold else "done"
+
+
 def _ms_per_char(row: dict) -> float:
     n = max(1, len(row.get("text", "")))
     return round((row.get("duration_ms") or 0) / n, 1)
@@ -153,7 +161,7 @@ def run(config: dict, section: str | None = None) -> int:
             r["transcript"] = txt
             r["cer"] = round(cer(r["text"], txt), 4)
             r["ms_per_char"] = _ms_per_char(r)
-            r["status"] = "qc_fail" if r["cer"] > threshold else "done"
+            r["status"] = qc_status(r, threshold)
     finally:
         _release(wm)
     _write_manifest(manifest_path, rows)
