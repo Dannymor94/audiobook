@@ -71,7 +71,7 @@ def render_variants(engine, row: dict, config: dict,
 
 
 def run(config: dict, section: str, word: str, variants: list[str],
-        chunk_id: str | None = None, seeds: int = 2) -> int:
+        chunk_id: str | None = None, seeds: int = 2, n_chunks: int = 1) -> int:
     from audiobook.master import master_wav
     from audiobook.pronounce import load_table
     from audiobook.synth import _SAMPLE_RATE, _read_manifest, worker_config
@@ -81,36 +81,50 @@ def run(config: dict, section: str, word: str, variants: list[str],
     if not manifest.exists():
         raise SystemExit(f"нет манифеста {manifest} — сначала chunk --section {section}")
     rows = _read_manifest(manifest)
-    row = (next((r for r in rows if r["id"] == chunk_id), None) if chunk_id
-           else find_chunk(rows, word))
-    if row is None:
-        raise SystemExit(f"чанк не найден: {chunk_id or word!r} в {section}")
-    if not re.search(rf"\b{re.escape(word)}\b", row["text"]):
-        raise SystemExit(f"в чанке {row['id']} нет слова {word!r} (регистр важен)")
+    pat = re.compile(rf"\b{re.escape(word)}\b")
+    if chunk_id:
+        picked = [r for r in rows if r["id"] == chunk_id]
+        if not picked:
+            raise SystemExit(f"чанк не найден: {chunk_id} в {section}")
+        if not pat.search(picked[0]["text"]):
+            raise SystemExit(f"в чанке {chunk_id} нет слова {word!r} (регистр важен)")
+    else:
+        picked = [r for r in rows if pat.search(r["text"])][:max(1, n_chunks)]
+        if not picked:
+            raise SystemExit(f"слово {word!r} не найдено в {section} (регистр важен)")
 
     tables = variant_tables(load_table(), word, variants)
-    out_dir = paths.OUT / "pron_test" / f"{section}_{row['id']}_{word}"
+    tag = picked[0]["id"] if len(picked) == 1 else f"{len(picked)}chunks"
+    out_dir = paths.OUT / "pron_test" / f"{section}_{tag}_{word}"
     out_dir.mkdir(parents=True, exist_ok=True)
     timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
     with TimeoutSynth(worker_config(config, 1), timeout_s) as engine:
-        results = render_variants(engine, row, config, tables, seeds)
+        results = [(row, render_variants(engine, row, config, tables, seeds))
+                   for row in picked]
 
-    gap = np.zeros(int(1.2 * _SAMPLE_RATE), dtype=np.float32)
+    gap_s = 1.2
+    gap = np.zeros(int(gap_s * _SAMPLE_RATE), dtype=np.float32)
     parts: list[np.ndarray] = []
-    print(f"чанк {row['id']}: {row['text']}")
-    for n, (v, take, synth_text, wav) in enumerate(results, start=1):
-        if wav is None:
-            print(f"  {n}. {v!r} дубль {take}: НЕ СИНТЕЗИРОВАЛСЯ (cap/timeout)")
-            continue
-        sf.write(str(out_dir / f"{n}.wav"), wav, _SAMPLE_RATE, subtype="PCM_16")
-        parts += [wav, gap]
-        print(f"  {n}. {v!r} дубль {take}  ({len(wav) / _SAMPLE_RATE:.1f} с)  "
-              f"→ модели: {synth_text}")
+    t = 0.0
+    n = 0
+    for row, res in results:
+        print(f"чанк {row['id']}: {row['text']}")
+        for v, take, synth_text, wav in res:
+            n += 1
+            if wav is None:
+                print(f"  {n}. {v!r} дубль {take}: НЕ СИНТЕЗИРОВАЛСЯ (cap/timeout)")
+                continue
+            sf.write(str(out_dir / f"{n}.wav"), wav, _SAMPLE_RATE, subtype="FLOAT")
+            parts += [wav, gap]
+            m, sec = divmod(int(t), 60)
+            print(f"  {n}. [{m}:{sec:02d}] {v!r} дубль {take}  ({len(wav) / _SAMPLE_RATE:.1f} с)"
+                  f"  → модели: {synth_text}")
+            t += len(wav) / _SAMPLE_RATE + gap_s
     if not parts:
         raise SystemExit("ни один вариант не синтезировался")
     raw = out_dir / "all.wav"
-    sf.write(str(raw), np.concatenate(parts), _SAMPLE_RATE, subtype="PCM_16")
+    sf.write(str(raw), np.concatenate(parts), _SAMPLE_RATE, subtype="FLOAT")
     master_wav(raw, out_dir / "all.mp3", config)
     raw.unlink()  # intermediate; per-variant wavs are kept
-    print(f"прослушка: {out_dir / 'all.mp3'}")
+    print(f"прослушка: {out_dir / 'all.mp3'}  (в [м:сс] — начало каждого дубля)")
     return 0

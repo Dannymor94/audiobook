@@ -567,3 +567,22 @@ def test_chunk_wav_not_clipped_at_write(tmp_path):
     render_section(Loud(), sec, _cfg())
     data, _sr = sf.read(str(sec / "chunks" / "0001.wav"), dtype="float32")
     assert data.max() == pytest.approx(1.5)
+
+
+def test_step_label_split():
+    from audiobook.chunker import build_chunks, split_step_label
+    assert split_step_label("Шаг третий. «Слово». Сделай это.") == ("Шаг третий.", "«Слово». Сделай это.")
+    assert split_step_label("Шаг за шагом мы идём.") == (None, "Шаг за шагом мы идём.")
+    units = [{"type": "paragraph", "text": "Шаг первый. «Слово». Короткое пояснение к шагу."}]
+    got = [(c["text"], c["pause_after_ms"]) for c in build_chunks(units, _cfg(pauses_ms={"step_label": 800}))]
+    assert got[0] == ("Шаг первый.", 800) and got[1][0] == "«Слово». Короткое пояснение к шагу."
+    assert build_chunks(units, _cfg())[0]["text"].startswith("Шаг первый. «Слово»")
+
+
+def test_heading_level_pause_from_config():
+    from audiobook.chunker import build_chunks
+    units = [{"type": "heading", "level": 1, "text": "Простой заголовок"},
+             {"type": "paragraph", "text": "Абзац после заголовка, достаточно длинный."}]
+    cfg = _cfg(pauses_ms={"heading_level": {1: 2000}})
+    assert build_chunks(units, cfg)[0]["pause_after_ms"] == 2000
+    assert build_chunks(units, _cfg())[0]["pause_after_ms"] == 1500

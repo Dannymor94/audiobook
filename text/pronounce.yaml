@@ -61,3 +61,5 @@
 # Group-4 stress fixes (1.7B test_v2 diagnosis).
 "навык": "навЫк"           # fixed stress on ы; 38 book occ, all lowercase (no sentence-initial Навык found)
 "фантазии": "фантАзии"     # gen/nom-pl of фантазия, fixed stress on а; 26 book occ, all lowercase
+"слезы": "слёзы"           # в тексте без ё (5 из 21), модель читает слезЫ; все 5 — мн. ч.
+"обжётся": "обжёгся"       # ОПЕЧАТКА в рукописи («обжётся и решил»), 2 места — сообщить автору

@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("--try", dest="variants", nargs="+", required=True,
                     help="написания для модели; '-' = без замены")
     pt.add_argument("--chunk", default=None, help="id чанка (иначе первый с этим словом)")
+    pt.add_argument("--chunks", type=int, default=1,
+                    help="сколько первых чанков с этим словом взять (default 1)")
     pt.add_argument("--seeds", type=int, default=2,
                     help="дублей на вариант (разные seed; default 2)")
     pb = sub.add_parser("probe",
@@ -100,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         return ref_scout(load_config(), a.src, a.k, a.tol)
     if a.cmd == "pron-test":
         from .pron_test import run as pron_test
-        return pron_test(load_config(), a.section, a.word, a.variants, a.chunk, a.seeds)
+        return pron_test(load_config(), a.section, a.word, a.variants, a.chunk, a.seeds,
+                         a.chunks)
     if a.cmd == "probe":
         from .probe import run as probe
         return probe(load_config(), a.max, a.dry_run)

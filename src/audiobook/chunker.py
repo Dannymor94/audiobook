@@ -466,23 +466,41 @@ def _heading_chunks(text: str, pause: int, pauses: dict) -> list[dict]:
     return out
 
 
+_STEP_LABEL = re.compile(r"^(Шаг\s+[А-Яа-яЁё0-9]+\.)\s+(\S.*)$")
+
+
+def split_step_label(text: str) -> tuple[str | None, str]:
+    """ "Шаг третий. «Чувствую». Включись." → ("Шаг третий.", "«Чувствую». Включись.").
+    Read in one breath the label ran into the step text; split, it gets its
+    own pause (ch13 listening: "Шаг 3. Слово. ... Пауза.")."""
+    m = _STEP_LABEL.match(text)
+    return (m.group(1), m.group(2)) if m else (None, text)
+
+
 def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     """Return ordered [{text, pause_after_ms}]. ``config`` supplies chunk length
     limits (``chunking``) and heading split pauses (``pauses_ms``); None = the
     module defaults, headings whole."""
     lim = limits(config)
     pauses = (config or {}).get("pauses_ms") or {}
+    level_pause = {int(k): int(v) for k, v in (pauses.get("heading_level") or {}).items()}
+    p_step = pauses.get("step_label")
     chunks: list[dict] = []
     for u in units:
         t = u["type"]
         if t == "heading":
-            pause = _HEADING_PAUSE.get(u["level"], 600)
+            pause = level_pause.get(u["level"], _HEADING_PAUSE.get(u["level"], 600))
             chunks.extend(_heading_chunks(u["text"], pause, pauses))
         elif t == "stack":
             pause = PAUSE_STACK if not u["last_in_stack"] else PAUSE_PARAGRAPH
             chunks.append({"text": u["text"], "pause_after_ms": pause})
         else:  # paragraph, flow, chain, prose_with_arrow
-            pieces = chunk_prose(u["text"], lim)
+            text = u["text"]
+            if p_step:
+                label, text = split_step_label(text)
+                if label:
+                    chunks.append({"text": label, "pause_after_ms": int(p_step)})
+            pieces = chunk_prose(text, lim)
             for i, p in enumerate(pieces):
                 pause = PAUSE_SENTENCE if i < len(pieces) - 1 else PAUSE_PARAGRAPH
                 chunks.append({"text": p, "pause_after_ms": pause})
