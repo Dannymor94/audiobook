@@ -151,6 +151,41 @@ def transcribe(model, wav_path: Path) -> str:
     return " ".join(s.text.strip() for s in segments).strip()
 
 
+def transcribe_words(model, wav_path: Path) -> tuple[str, list[dict]]:
+    """Transcript plus per-word timing and whisper confidence:
+    [{"w": word, "s": start_s, "e": end_s, "p": probability}]."""
+    segments, _info = model.transcribe(str(wav_path), language="ru", beam_size=5,
+                                       word_timestamps=True)
+    texts, words = [], []
+    for seg in segments:
+        texts.append(seg.text.strip())
+        for w in seg.words or []:
+            words.append({"w": w.word.strip(), "s": round(w.start, 2),
+                          "e": round(w.end, 2), "p": round(w.probability, 3)})
+    return " ".join(texts).strip(), words
+
+
+def _norm_word(w: str) -> str:
+    return normalize_for_cer(w).replace(" ", "")
+
+
+def flag_words(words: list[dict], watch: set[str], min_conf: float) -> list[list]:
+    """Words worth a human listen: whisper was unsure (garbled, "тебья",
+    "дышьи"), or the word is a known stress trap. Whisper hears words, not
+    stress, so a clean-but-misstressed word is only caught via the watch list.
+    → [[word, start_s, prob, reason]], reason "conf" | "watch"."""
+    out = []
+    for w in words:
+        nw = _norm_word(w["w"])
+        if not nw:
+            continue
+        if w["p"] < min_conf:
+            out.append([w["w"], w["s"], w["p"], "conf"])
+        elif nw in watch:
+            out.append([w["w"], w["s"], w["p"], "watch"])
+    return out
+
+
 def _release(model) -> None:
     del model
     gc.collect()
@@ -193,11 +228,15 @@ def run(config: dict, section: str | None = None) -> int:
 
     # Phase 1 — transcribe every rendered chunk, CER vs the chunk TEXT (not the
     # pronounce respelling), store metrics. Whisper is the only model loaded here.
+    from audiobook.probe import load_watch
+    watch = {_norm_word(w) for w in load_watch()}
+    min_conf = float(config["qc"].get("word_conf", 0.6))
     wm = load_whisper()
     try:
         for r in candidates:
-            txt = transcribe(wm, chunks_dir / f"{r['id']}.wav")
+            txt, words = transcribe_words(wm, chunks_dir / f"{r['id']}.wav")
             r["transcript"] = txt
+            r["flag_words"] = flag_words(words, watch, min_conf)
             r["cer"] = round(cer(r["text"], txt), 4)
             r["ms_per_char"] = _ms_per_char(r)
             r["status"] = qc_status(r, threshold)
@@ -257,8 +296,9 @@ def run(config: dict, section: str | None = None) -> int:
         wm = load_whisper()
         try:
             for r in fails:
-                txt = transcribe(wm, chunks_dir / f"{r['id']}.wav")
+                txt, words = transcribe_words(wm, chunks_dir / f"{r['id']}.wav")
                 r["transcript"] = txt
+                r["flag_words"] = flag_words(words, watch, min_conf)
                 r["cer"] = round(cer(r["text"], txt), 4)
                 if r["cer"] <= threshold:
                     r["status"] = "done"

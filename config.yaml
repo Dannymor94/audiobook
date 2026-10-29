@@ -89,6 +89,9 @@ pauses_ms:
 qc:
   whisper_model: small           # models/whisper/small
   cer_threshold: 0.05
+  # Слова, в которых whisper не уверен (p ниже порога), попадают в suspects —
+  # список мест для прослушки. Ударение whisper не слышит; это ловит искажения.
+  word_conf: 0.6
   max_retries: 3
 master:
   lufs: -19

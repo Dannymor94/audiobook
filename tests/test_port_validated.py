@@ -586,3 +586,37 @@ def test_heading_level_pause_from_config():
     cfg = _cfg(pauses_ms={"heading_level": {1: 2000}})
     assert build_chunks(units, cfg)[0]["pause_after_ms"] == 2000
     assert build_chunks(units, _cfg())[0]["pause_after_ms"] == 1500
+
+
+# ── suspects: whisper confidence + stress traps → section timestamps ─────────
+
+def test_flag_words_conf_and_watch():
+    from audiobook.qc import flag_words
+    words = [{"w": "Тестовое", "s": 0.1, "e": 0.5, "p": 0.95},
+             {"w": "слово,", "s": 0.6, "e": 0.9, "p": 0.31},
+             {"w": "Потом", "s": 1.0, "e": 1.3, "p": 0.9}]
+    got = flag_words(words, watch={"потом"}, min_conf=0.6)
+    assert got == [["слово,", 0.6, 0.31, "conf"], ["Потом", 1.0, 0.9, "watch"]]
+
+
+def test_assemble_index_and_suspect_times(tmp_path):
+    from audiobook.assemble import assemble_section
+    from audiobook.suspects import collect, read_index
+    from audiobook.synth import _write_manifest
+    sec = tmp_path / "sec"
+    (sec / "chunks").mkdir(parents=True)
+    sr = 24000
+    lead = np.zeros(int(0.2 * sr), dtype=np.float32)          # 200 ms silence
+    voice = np.full(int(1.0 * sr), 0.5, dtype=np.float32)     # 1 s "speech"
+    for cid in ("0001", "0002"):
+        sf.write(str(sec / "chunks" / f"{cid}.wav"), np.concatenate([lead, voice, lead]), sr)
+    rows = [{"id": "0001", "text": "Первый.", "status": "done", "pause_after_ms": 500,
+             "flag_words": []},
+            {"id": "0002", "text": "Второй.", "status": "done", "pause_after_ms": 2000,
+             "flag_words": [["Второй", 0.7, 0.4, "conf"]]}]
+    _write_manifest(sec / "manifest.jsonl", rows)
+    assemble_section(sec, _cfg(pauses_ms={"crossfade": 0}))
+    idx = read_index(sec / "section.index.tsv")
+    assert idx["0001"] == (0, 200) and idx["0002"] == (1500, 200)  # 1 s + 0.5 s pause
+    (it,) = collect(rows, idx)
+    assert it["t_ms"] == pytest.approx(1500 - 200 + 700)  # word at 0.7 s in raw chunk

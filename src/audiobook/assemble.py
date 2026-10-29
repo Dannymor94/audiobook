@@ -19,17 +19,24 @@ def _read_manifest(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def _trim_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
-    """Trim leading/trailing 10 ms frames below the amplitude threshold."""
+def _trim_bounds(audio: np.ndarray, threshold: float = 0.01) -> tuple[int, int]:
+    """[start, end) sample bounds after trimming leading/trailing 10 ms frames
+    below the amplitude threshold."""
     frame = int(_SR * 0.010)
     if len(audio) < frame:
-        return audio
+        return 0, len(audio)
     n = len(audio) // frame
     amps = np.abs(audio[: n * frame].reshape(n, frame)).max(axis=1)
     loud = np.where(amps > threshold)[0]
     if len(loud) == 0:
-        return audio
-    return audio[loud[0] * frame: (loud[-1] + 1) * frame]
+        return 0, len(audio)
+    return int(loud[0] * frame), int((loud[-1] + 1) * frame)
+
+
+def _trim_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
+    """Trim leading/trailing 10 ms frames below the amplitude threshold."""
+    a, b = _trim_bounds(audio, threshold)
+    return audio[a:b]
 
 
 def _fade(clip: np.ndarray, samples: int, leading: bool, trailing: bool) -> np.ndarray:
@@ -60,6 +67,10 @@ def assemble_section(sec_dir: Path, config: dict,
     chunks_dir = sec_dir / "chunks"
     section, stats = join_chunks(rows, chunks_dir, config)
     out = sec_dir / f"{preview_name(first)}.wav"
+    with open(sec_dir / f"{preview_name(first)}.index.tsv", "w", encoding="utf-8") as f:
+        f.write("id\tstart_ms\tlead_ms\n")
+        for st in stats:
+            f.write(f"{st['id']}\t{st['start_ms']}\t{st['lead_ms']}\n")
     sf.write(str(out), section, _SR, subtype="FLOAT")  # float: no clipping before master
     return out, stats
 
@@ -71,10 +82,15 @@ def join_chunks(rows: list[dict], chunks_dir: Path,
     fade_samples = int(_SR * config.get("pauses_ms", {}).get("crossfade", 0) / 1000)
     parts: list[np.ndarray] = []
     stats: list[dict] = []
+    pos = 0  # samples so far in the section
     for i, row in enumerate(rows):
         raw, sr = sf.read(str(chunks_dir / f"{row['id']}.wav"), dtype="float32")
         assert sr == _SR, f"unexpected sr {sr} in {row['id']}"
-        trimmed = _trim_silence(raw)
+        a, b = _trim_bounds(raw)
+        trimmed = raw[a:b]
+        start_ms, lead_ms = round(pos / _SR * 1000), round(a / _SR * 1000)
+        pos += len(trimmed) + (0 if i == len(rows) - 1
+                               else int(_SR * row["pause_after_ms"] / 1000))
         last = i == len(rows) - 1
         parts.append(_fade(trimmed, fade_samples, leading=(i > 0), trailing=(not last)))
         if not last:  # inter-chunk pause; final trailing pause dropped for a clean tail
@@ -84,6 +100,9 @@ def join_chunks(rows: list[dict], chunks_dir: Path,
             "raw_ms": round(len(raw) / _SR * 1000),
             "trimmed_ms": round(len(trimmed) / _SR * 1000),
             "peak": float(np.max(np.abs(raw))) if len(raw) else 0.0,
+            # where the chunk starts in the section, and how much leading
+            # silence was cut: chunk-time t → section-time start_ms - lead_ms + t
+            "start_ms": start_ms, "lead_ms": lead_ms,
         })
 
     section = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
