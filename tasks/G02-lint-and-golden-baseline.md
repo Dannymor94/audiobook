@@ -1,8 +1,8 @@
 ---
 id: G02
 title: отчёт о тексте для автора + базовая версия golden set
-status: todo
-owner:
+status: doing
+owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: [T03, T04]
 ---
