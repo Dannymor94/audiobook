@@ -17,6 +17,7 @@ House rule from 0.6B (single capital stressed vowel) is not assumed to hold for
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -70,11 +71,55 @@ def render_variants(engine, row: dict, config: dict,
     return out
 
 
+META_COLUMNS = ["n", "chunk", "variant", "take", "start", "synth_text"]
+SAMPLE_RATE = 24000  # synth._SAMPLE_RATE; kept here so the writer needs no model imports
+GAP_S = 1.2
+
+
+def _mmss(t: float) -> str:
+    m, sec = divmod(int(t), 60)
+    return f"{m}:{sec:02d}"
+
+
+def write_results(out_dir: Path, results: list[tuple[dict, list]]) -> list[np.ndarray]:
+    """Write <n>.wav per variant/take plus meta.tsv (n, chunk, variant, take,
+    start, synth_text) next to them — the review page reads it for captions.
+    ``n`` counts all variants in order, a failed one gets no wav and no meta row.
+    Returns the audio parts (wav, gap, wav, gap, ...) for the all.mp3 listen."""
+    gap = np.zeros(int(GAP_S * SAMPLE_RATE), dtype=np.float32)
+    parts: list[np.ndarray] = []
+    t = 0.0
+    n = 0
+    meta_rows: list[list[str]] = []
+    for row, res in results:
+        print(f"чанк {row['id']}: {row['text']}")
+        for v, take, synth_text, wav in res:
+            n += 1
+            if wav is None:
+                print(f"  {n}. {v!r} дубль {take}: НЕ СИНТЕЗИРОВАЛСЯ (cap/timeout)")
+                continue
+            sf.write(str(out_dir / f"{n}.wav"), wav, SAMPLE_RATE, subtype="FLOAT")
+            parts += [wav, gap]
+            start = _mmss(t)
+            print(f"  {n}. [{start}] {v!r} дубль {take}  ({len(wav) / SAMPLE_RATE:.1f} с)"
+                  f"  → модели: {synth_text}")
+            flat = " ".join(synth_text.split())  # one line per row: no tabs/newlines
+            meta_rows.append([str(n), str(row["id"]), v, str(take), start, flat])
+            t += len(wav) / SAMPLE_RATE + GAP_S
+    tmp = out_dir / "meta.tsv.part"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\t".join(META_COLUMNS) + "\n")
+        for r in meta_rows:
+            f.write("\t".join(r) + "\n")
+    tmp.replace(out_dir / "meta.tsv")
+    return parts
+
+
 def run(config: dict, section: str, word: str, variants: list[str],
         chunk_id: str | None = None, seeds: int = 2, n_chunks: int = 1) -> int:
     from audiobook.master import master_wav
     from audiobook.pronounce import load_table
-    from audiobook.synth import _SAMPLE_RATE, _read_manifest, worker_config
+    from audiobook.synth import _read_manifest, worker_config
     from audiobook.worker import TimeoutSynth
 
     manifest = paths.OUT / "sections" / section / "manifest.jsonl"
@@ -102,28 +147,11 @@ def run(config: dict, section: str, word: str, variants: list[str],
         results = [(row, render_variants(engine, row, config, tables, seeds))
                    for row in picked]
 
-    gap_s = 1.2
-    gap = np.zeros(int(gap_s * _SAMPLE_RATE), dtype=np.float32)
-    parts: list[np.ndarray] = []
-    t = 0.0
-    n = 0
-    for row, res in results:
-        print(f"чанк {row['id']}: {row['text']}")
-        for v, take, synth_text, wav in res:
-            n += 1
-            if wav is None:
-                print(f"  {n}. {v!r} дубль {take}: НЕ СИНТЕЗИРОВАЛСЯ (cap/timeout)")
-                continue
-            sf.write(str(out_dir / f"{n}.wav"), wav, _SAMPLE_RATE, subtype="FLOAT")
-            parts += [wav, gap]
-            m, sec = divmod(int(t), 60)
-            print(f"  {n}. [{m}:{sec:02d}] {v!r} дубль {take}  ({len(wav) / _SAMPLE_RATE:.1f} с)"
-                  f"  → модели: {synth_text}")
-            t += len(wav) / _SAMPLE_RATE + gap_s
+    parts = write_results(out_dir, results)
     if not parts:
         raise SystemExit("ни один вариант не синтезировался")
     raw = out_dir / "all.wav"
-    sf.write(str(raw), np.concatenate(parts), _SAMPLE_RATE, subtype="FLOAT")
+    sf.write(str(raw), np.concatenate(parts), SAMPLE_RATE, subtype="FLOAT")
     master_wav(raw, out_dir / "all.mp3", config)
     raw.unlink()  # intermediate; per-variant wavs are kept
     print(f"прослушка: {out_dir / 'all.mp3'}  (в [м:сс] — начало каждого дубля)")

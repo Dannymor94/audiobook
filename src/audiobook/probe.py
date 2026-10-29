@@ -6,7 +6,8 @@ manifests or the chunk cache), tags risky chunks, greedily picks a small set
 that covers every tag, renders just those, and writes one listening file:
 
   out/probe/probe.mp3   — the picks back to back, 1 s apart
-  out/probe/index.tsv   — start mm:ss, section, chunk id, tags, text
+  out/probe/index.tsv   — start mm:ss, section, chunk id, tags, text, hash16
+                          (hash16 = name of chunks/<hash16>.wav; the review page maps by it)
 
 The listener notes "mm:ss — what's wrong"; index.tsv maps it to the chunk and
 the word. Fixes go to text/pronounce.yaml (confirmed with pron-test) or, for a
@@ -181,13 +182,13 @@ def run(config: dict, max_chunks: int = 60, dry_run: bool = False) -> int:
     parts: list[np.ndarray] = []
     t = 0.0
     with open(out_dir / "index.tsv", "w", encoding="utf-8") as f:
-        f.write("start\tsection\tchunk\ttags\ttext\n")
+        f.write("start\tsection\tchunk\ttags\ttext\thash\n")
         for r, ts in chosen:
             p = wav_dir / f"{r['hash'][:16]}.wav"
             if not p.exists():
                 continue
             wav, _sr = sf.read(str(p), dtype="float32")
-            f.write(f"{mmss(t)}\t{r['section']}\t{r['id']}\t{', '.join(sorted(ts))}\t{r['text']}\n")
+            f.write(f"{mmss(t)}\t{r['section']}\t{r['id']}\t{', '.join(sorted(ts))}\t{r['text']}\t{r['hash'][:16]}\n")
             parts += [wav, gap]
             t += len(wav) / _SAMPLE_RATE + GAP_S
     raw = out_dir / "probe.wav"

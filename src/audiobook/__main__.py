@@ -101,6 +101,18 @@ def main(argv: list[str] | None = None) -> int:
     qa.add_argument("job_args", nargs="*")
     qs.add_parser("list", help="задачи в очереди и выполненные")
     qs.add_parser("run", help="воркер: выполнять pending по одной, пока очередь не опустеет")
+    rv = sub.add_parser("review",
+                        help="страница прослушки с кнопками хорошо/плохо/? → <папка>/review.html")
+    rv.add_argument("--dir", required=True, help="папка с *.wav (pron_test, redo, probe, golden…)")
+    rv.add_argument("--title", default=None, help="название (default: имя папки)")
+    rv.add_argument("--meta", default=None, help="tsv с подписями (колонки file или n/chunk + любые)")
+    lb = sub.add_parser("labels", help="журнал решений на слух text/labels.yaml")
+    lbs = lb.add_subparsers(dest="labels_cmd", required=True)
+    li = lbs.add_parser("import", help="дописать в журнал labels_*.json со страницы прослушки")
+    li.add_argument("file", help="labels_<title>.json")
+    li.add_argument("--section", default=None, help="секция для всех записей файла")
+    ls = lbs.add_parser("show", help="показать журнал")
+    ls.add_argument("--section", default=None)
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -174,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "queue":
         from .jobqueue import cli as queue_cli
         return queue_cli(a.queue_cmd, getattr(a, "job_args", []))
+    if a.cmd == "review":
+        from .review import run as review
+        return review(a.dir, a.title, a.meta)
+    if a.cmd == "labels":
+        from . import labels
+        if a.labels_cmd == "import":
+            return labels.run_import(a.file, a.section)
+        return labels.run_show(a.section)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
