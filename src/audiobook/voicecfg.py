@@ -98,6 +98,9 @@ def prepare_text(text: str, config: dict) -> str:
     through ``synth_text``)."""
     tp = config.get("text_prep") or {}
     t = text
+    if tp.get("yo_restore"):
+        from audiobook.yo import restore  # book-wide ё map, cached
+        t = restore(t)
     strip = bool(tp.get("strip_quotes"))
     if strip:
         t = t.translate(_QUOTES).strip()

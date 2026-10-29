@@ -673,3 +673,30 @@ def test_flag_words_short_function_words_need_very_low_conf():
              {"w": "длинное", "s": 0.6, "e": 1.0, "p": 0.52}]  # long, unsure → flag
     got = [w for w, *_ in flag_words(words, watch=set(), min_conf=0.6)]
     assert got == ["это", "длинное"]
+
+
+# ── yo_restore ────────────────────────────────────────────────────────────────
+
+def test_yo_build_map_majority_and_homographs():
+    from audiobook.yo import build_map
+    texts = ["Тёплый тёплый теплый день. Все всё все. Чем о чём. Редкий рёдкий редкий редкий."]
+    m = build_map(texts)
+    assert m["теплый"] == "тёплый"        # ё 2 vs 1 → restore
+    assert "все" not in m and "чем" not in m  # homographs untouched
+    assert "редкий" not in m              # ё 1 vs 3 → book says no ё
+
+
+def test_yo_restore_keeps_case():
+    from audiobook.yo import restore
+    m = {"теплый": "тёплый", "ее": "её"}
+    assert restore("Теплый и теплый, ее и ТЕПЛЫЙ.", m) == "Тёплый и тёплый, её и ТЁПЛЫЙ."
+
+
+def test_prepare_text_yo_restore(monkeypatch, tmp_path):
+    from audiobook import yo
+    monkeypatch.setattr(paths, "TEXT", tmp_path)
+    (tmp_path / "01_x.norm.txt").write_text("Тёплый тёплый теплый.\n", encoding="utf-8")
+    yo._book_map.cache_clear()
+    cfg = _cfg(text_prep={"yo_restore": True})
+    assert voicecfg.prepare_text("Теплый вечер.", cfg) == "Тёплый вечер."
+    assert voicecfg.prepare_text("Теплый вечер.", _cfg()) == "Теплый вечер."
