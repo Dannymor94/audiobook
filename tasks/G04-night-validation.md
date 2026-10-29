@@ -4,7 +4,7 @@ title: ночная проверка перед рендером книги (4 �
 status: todo
 owner:
 machine: gamebox
-depends_on: [R2]   # не брать, пока в ветке нет коммита "Review fixes (3/3)"
+depends_on: []
 ---
 ## Зачем
 Перед рендером всей книги проверить на реальном звуке всё, что поменяли за неделю:
@@ -60,8 +60,9 @@ D=52_lichnost_za_2_minuty                          # 6 мин: слова кап
    (sed по копии; `diff config.yaml out/cfg_t09.yaml` → ровно одна строка — в отчёт).
 2. `./run.sh queue add -- golden render --tag base2`
    `AUDIOBOOK_CONFIG=out/cfg_t09.yaml ./run.sh queue add -- golden render --tag t09`
-   `./run.sh queue list` — у задачи t09 должен быть записан путь cfg_t09.yaml
-   (если очередь не хранит конфиг задачи — стоп этого шага, отметить в отчёте).
+   `./run.sh queue list` — у задачи t09 в строке должно стоять
+   `[AUDIOBOOK_CONFIG=out/cfg_t09.yaml]`, у base2 — ничего. Иначе стоп этого шага.
+   `AUDIOBOOK_CONFIG=` писать только перед этой одной командой, НЕ через export.
 
 ## Шаг 3. Четыре главы целиком (≈5.5 ч) — в ту же очередь, после шага 2
 Для каждой S из A, B, C, D по порядку:
