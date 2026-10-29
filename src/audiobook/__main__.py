@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import paths
@@ -129,6 +130,28 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--first", type=int, default=None,
                            help="только первые N чанков секции (превью → preview_firstN)")
     a = p.parse_args(argv)
+    if a.cmd in _MAIN_CONFIG_ONLY and os.environ.get("AUDIOBOOK_CONFIG"):
+        print(f"{a.cmd}: AUDIOBOOK_CONFIG задан — эта команда пишет в кеш и манифесты "
+              "книги и работает только с config.yaml", file=sys.stderr)
+        return 2
+    heavy = a.cmd in _HEAVY or (a.cmd == "probe" and not a.dry_run) or (
+        a.cmd == "golden" and getattr(a, "golden_cmd", "") == "render")
+    if heavy:
+        from .jobqueue import heavy_command_lock
+        with heavy_command_lock(a.cmd):
+            return _dispatch(a)
+    return _dispatch(a)
+
+
+# Commands that write the book's cache/manifests: never with a trial config.
+_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "redo", "assemble", "master",
+                     "headings"}
+# Commands that load a model or rewrite a section: one at a time (heavy.lock).
+_HEAVY = {"chunk", "synth", "qc", "accept", "redo", "pron-test", "ref-compare",
+          "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate"}
+
+
+def _dispatch(a) -> int:
 
     if a.cmd == "doctor":
         from .doctor import run as doctor

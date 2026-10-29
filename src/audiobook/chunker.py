@@ -580,45 +580,74 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 
 # ── alignment ────────────────────────────────────────────────────────────────
 
+# Per-chunk results that belong to the audio, not to the text: carried over
+# with the wav when a re-chunk keeps the chunk (same hash).
+_CARRY = ("status", "locked", "seed_override", "duration_ms", "seed", "cer",
+          "transcript", "flag_words", "ms_per_char", "suspect")
+
+
 def align(old: list[dict], new: list[dict]) -> tuple[list[dict], list[str], list[str]]:
     """Match new chunks to old by hash. Returns (aligned_new, queued_ids, orphan_ids).
 
-    aligned_new = new manifest with status/locked/duration carried over where the
-    hash matched (wav gets renamed old.id -> new.id). Unmatched new -> queued.
-    Old chunks whose hash is gone -> orphans (wav moved to _orphan/).
+    Each old row is matched at most once: the book repeats identical chunks
+    ("Шаг один." ×6), and a dict by hash sent every copy to the same old wav —
+    renaming over an accepted (locked) take. Same id + same hash is matched
+    first, then the remaining copies in order. aligned_new carries status,
+    lock, seed and QC results; ``_from_id`` drives the wav rename. Unmatched
+    new → queued; old rows left unmatched → orphans (wav to _orphan/).
     """
-    old_by_hash = {c["hash"]: c for c in old}
-    new_hashes = {c["hash"] for c in new}
-
+    pools: dict[str, list[dict]] = {}
+    for oc in old:
+        pools.setdefault(oc["hash"], []).append(oc)
+    used: set[int] = set()
+    pick: dict[str, dict] = {}
+    for nc in new:  # pass 1: same id, same hash
+        same = next((oc for oc in pools.get(nc["hash"], [])
+                     if oc["id"] == nc["id"] and id(oc) not in used), None)
+        if same is not None:
+            pick[nc["id"]] = same
+            used.add(id(same))
     aligned: list[dict] = []
     queued: list[str] = []
-    for nc in new:
-        oc = old_by_hash.get(nc["hash"])
-        if oc is not None:
-            merged = dict(nc)
-            merged["status"] = oc["status"]
-            merged["locked"] = oc["locked"]
-            merged["seed_override"] = oc.get("seed_override")
-            merged["duration_ms"] = oc["duration_ms"]
-            merged["_from_id"] = oc["id"]  # for wav rename
-            aligned.append(merged)
-        else:
+    for nc in new:  # pass 2: remaining copies in order
+        oc = pick.get(nc["id"])
+        if oc is None:
+            oc = next((c for c in pools.get(nc["hash"], []) if id(c) not in used), None)
+            if oc is not None:
+                used.add(id(oc))
+        if oc is None:
             aligned.append(nc)
             queued.append(nc["id"])
-    orphans = [oc["id"] for oc in old if oc["hash"] not in new_hashes]
+            continue
+        merged = dict(nc)
+        for k in _CARRY:
+            if k in oc:
+                merged[k] = oc[k]
+        merged["_from_id"] = oc["id"]  # for wav rename
+        aligned.append(merged)
+    orphans = [oc["id"] for oc in old if id(oc) not in used]
     return aligned, queued, orphans
 
 
-def _apply_wav_moves(aligned: list[dict], orphans: list[str], chunks_dir: Path) -> None:
-    """Rename matched wavs to their new ids; move orphan wavs to _orphan/."""
+def _apply_wav_moves(aligned: list[dict], orphans: list[str], chunks_dir: Path,
+                     old: list[dict] | None = None) -> None:
+    """Rename matched wavs to their new ids; move orphan wavs to _orphan/.
+    Orphans are named <id>__<hash12>.wav so an earlier orphan with the same id
+    is never overwritten (that would be deleting rendered audio)."""
     if not chunks_dir.exists():
         return
+    hash_of = {c["id"]: c["hash"] for c in (old or [])}
     orphan_dir = chunks_dir / "_orphan"
     for oid in orphans:
         wav = chunks_dir / f"{oid}.wav"
         if wav.exists():
             orphan_dir.mkdir(exist_ok=True)
-            wav.rename(orphan_dir / wav.name)
+            dst = orphan_dir / f"{oid}__{hash_of.get(oid, 'nohash')[:12]}.wav"
+            n = 1
+            while dst.exists():
+                dst = orphan_dir / f"{oid}__{hash_of.get(oid, 'nohash')[:12]}_{n}.wav"
+                n += 1
+            wav.replace(dst)
     # two-phase rename to avoid id collisions
     staged: list[tuple[Path, Path]] = []
     for c in aligned:
@@ -627,20 +656,22 @@ def _apply_wav_moves(aligned: list[dict], orphans: list[str], chunks_dir: Path) 
             src = chunks_dir / f"{old_id}.wav"
             if src.exists():
                 tmp = chunks_dir / f"__tmp_{c['id']}.wav"
-                src.rename(tmp)
+                src.replace(tmp)
                 staged.append((tmp, chunks_dir / f"{c['id']}.wav"))
     for tmp, dst in staged:
-        tmp.rename(dst)
-    # drop leftover _from_id on non-renamed
+        tmp.replace(dst)  # replace: works on Windows when dst exists
     for c in aligned:
         c.pop("_from_id", None)
 
 
 def _write_manifest(path: Path, manifest: list[dict]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    """Atomic: temp file + rename, so an interrupt never leaves half a manifest."""
+    tmp = path.parent / (path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         for row in manifest:
             f.write(json.dumps({k: v for k, v in row.items() if k != "_from_id"},
                                ensure_ascii=False) + "\n")
+    tmp.replace(path)
 
 
 def _read_manifest(path: Path) -> list[dict]:
@@ -676,7 +707,7 @@ def run(config: dict, section: str | None = None) -> int:
         if manifest_path.exists():
             old = _read_manifest(manifest_path)
             aligned, queued, orphans = align(old, new_manifest)
-            _apply_wav_moves(aligned, orphans, chunks_dir)
+            _apply_wav_moves(aligned, orphans, chunks_dir, old)
             _write_manifest(manifest_path, aligned)
             note = f"re-chunk: {len(queued)} queued, {len(orphans)} orphaned"
         else:

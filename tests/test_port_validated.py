@@ -700,3 +700,51 @@ def test_prepare_text_yo_restore(monkeypatch, tmp_path):
     cfg = _cfg(text_prep={"yo_restore": True})
     assert voicecfg.prepare_text("Теплый вечер.", cfg) == "Тёплый вечер."
     assert voicecfg.prepare_text("Теплый вечер.", _cfg()) == "Теплый вечер."
+
+
+# ── review fixes: re-chunk alignment with repeated texts ─────────────────────
+
+def _row(cid, h, **kw):
+    r = {"id": cid, "hash": h, "status": "pending", "locked": False,
+         "seed_override": None, "duration_ms": None, "seed": 42}
+    r.update(kw)
+    return r
+
+
+def test_align_duplicate_hashes_each_old_row_once(tmp_path):
+    from audiobook.chunker import _apply_wav_moves, align
+    old = [_row("0001", "A", status="done", locked=True, seed_override=7, duration_ms=10),
+           _row("0002", "B", status="done", duration_ms=20),
+           _row("0003", "A", status="done", duration_ms=30, seed=99)]
+    new = [_row("0001", "A"), _row("0002", "B"), _row("0003", "A")]
+    aligned, queued, orphans = align(old, new)
+    assert queued == [] and orphans == []
+    assert aligned[0]["locked"] and aligned[0]["seed_override"] == 7
+    assert not aligned[2]["locked"] and aligned[2]["seed"] == 99
+    cdir = tmp_path / "chunks"
+    cdir.mkdir()
+    for cid, body in (("0001", "a1"), ("0002", "b"), ("0003", "a3")):
+        (cdir / f"{cid}.wav").write_text(body, encoding="utf-8")
+    _apply_wav_moves(aligned, orphans, cdir, old)
+    assert (cdir / "0001.wav").read_text(encoding="utf-8") == "a1"   # accepted take kept
+    assert (cdir / "0003.wav").read_text(encoding="utf-8") == "a3"
+
+
+def test_align_insert_before_duplicates_keeps_lock_on_one():
+    from audiobook.chunker import align
+    old = [_row("0001", "A", status="done", locked=True), _row("0002", "A", status="done")]
+    new = [_row("0001", "N"), _row("0002", "A"), _row("0003", "A")]
+    aligned, queued, orphans = align(old, new)
+    assert queued == ["0001"] and orphans == []
+    assert sum(1 for r in aligned if r.get("locked")) == 1
+
+
+def test_orphan_never_overwrites_earlier_orphan(tmp_path):
+    from audiobook.chunker import _apply_wav_moves
+    cdir = tmp_path / "chunks"
+    (cdir / "_orphan").mkdir(parents=True)
+    (cdir / "_orphan" / "0005__abcdefabcdef.wav").write_text("old", encoding="utf-8")
+    (cdir / "0005.wav").write_text("new", encoding="utf-8")
+    _apply_wav_moves([], ["0005"], cdir, [{"id": "0005", "hash": "abcdefabcdef00"}])
+    names = sorted(p.read_text(encoding="utf-8") for p in (cdir / "_orphan").iterdir())
+    assert names == ["new", "old"]

@@ -569,7 +569,7 @@ def test_apply_wav_moves_collision_safe(tmp_path):
     assert (cdir / "0003.wav").read_text(encoding="utf-8") == "b"
     assert (cdir / "0004.wav").read_text(encoding="utf-8") == "c"
     assert not (cdir / "0002.wav").exists()  # slot freed for resynthesis
-    assert (cdir / "_orphan" / "0009.wav").read_text(encoding="utf-8") == "orphan"
+    assert (cdir / "_orphan" / "0009__nohash.wav").read_text(encoding="utf-8") == "orphan"
 
 
 def test_sentinel_round_trip():

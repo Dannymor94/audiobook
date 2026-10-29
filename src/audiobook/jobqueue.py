@@ -150,6 +150,34 @@ def _unlock(fh) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
+LOCK_HELD_ENV = "AUDIOBOOK_LOCK_HELD"  # set by `queue run` for its child jobs
+
+
+@contextmanager
+def heavy_command_lock(name: str) -> Iterator[None]:
+    """Non-blocking heavy.lock for a heavy command run by hand (synth, qc, chunk…).
+    Two heavy jobs on one section rewrite each other's manifest; a manual synth
+    next to a queued one must refuse, not wait silently. A job started by the
+    queue worker already runs under the worker's lock (LOCK_HELD_ENV=1)."""
+    import os
+    if os.environ.get(LOCK_HELD_ENV) == "1":
+        yield
+        return
+    path = queue_root() / "heavy.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("a+", encoding="utf-8")
+    try:
+        if not _try_lock(fh):
+            raise SystemExit(f"{name}: занято — идёт задача очереди или другой тяжёлый "
+                             "процесс (heavy.lock). Поставь в очередь: ./run.sh queue add -- …")
+        try:
+            yield
+        finally:
+            _unlock(fh)
+    finally:
+        fh.close()
+
+
 @contextmanager
 def exclusive_lock(path: Path, poll: float = 0.5,
                    on_wait: Callable[[], None] | None = None) -> Iterator[None]:
@@ -178,6 +206,7 @@ def subprocess_runner(job: dict, log_path: Path) -> int:
     cmd = [sys.executable, "-m", "audiobook", *job["args"]]
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
+    env[LOCK_HELD_ENV] = "1"  # the worker holds heavy.lock for this child
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"$ {' '.join(cmd)}\n")
         log.flush()
