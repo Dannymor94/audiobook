@@ -91,6 +91,16 @@ def main(argv: list[str] | None = None) -> int:
     gc = gsub.add_parser("compare", help="пары A/B → out/golden/compare_A_B/")
     gc.add_argument("tag_a")
     gc.add_argument("tag_b")
+    pf = sub.add_parser("preflight", help="проверка машины перед работой: ресурсы, процессы, git, doctor")
+    pf.add_argument("--min-free-gb", type=float, default=16.0, help="минимум available RAM (default 16)")
+    pf.add_argument("--max-load", type=float, default=4.0, help="максимум load за 1 мин (default 4)")
+    pf.add_argument("--no-models", action="store_true", help="doctor без проверки весов")
+    qp = sub.add_parser("queue", help="очередь тяжёлых задач (замок out/queue/heavy.lock)")
+    qs = qp.add_subparsers(dest="queue_cmd", required=True)
+    qa = qs.add_parser("add", help="queue add -- <аргументы run.sh>; synth/chunk только с --section")
+    qa.add_argument("job_args", nargs="*")
+    qs.add_parser("list", help="задачи в очереди и выполненные")
+    qs.add_parser("run", help="воркер: выполнять pending по одной, пока очередь не опустеет")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -158,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.golden_cmd == "render":
             return golden.run_render(load_config(), a.tag, a.workers)
         return golden.run_compare(load_config(), a.tag_a, a.tag_b)
+    if a.cmd == "preflight":
+        from .preflight import run as preflight
+        return 0 if preflight(load_config(), a.max_load, a.min_free_gb, a.no_models) else 1
+    if a.cmd == "queue":
+        from .jobqueue import cli as queue_cli
+        return queue_cli(a.queue_cmd, getattr(a, "job_args", []))
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
