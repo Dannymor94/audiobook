@@ -5,7 +5,9 @@
 
 The JSON comes from the review page (``./run.sh review``). Each marked item
 becomes one journal entry; re-importing the same file adds nothing (dedupe on
-title + file). Unmarked items are skipped; a comment without a mark counts as
+page_id — or the title for an old JSON without it — + file + hash prefix), while
+the same file name on another page or another run is a new entry. Unmarked
+items are skipped; a comment without a mark counts as
 «?». The journal says what was heard — it never changes audio, hashes or the
 chunk cache; fixes still go to pronounce.yaml / read_rules / redo+accept.
 """
@@ -20,7 +22,7 @@ from audiobook import paths
 LABELS = ("ok", "bad", "unsure")
 ISSUES = ("ударение", "акцент", "каша", "темп", "артефакт", "другое")
 _ALIASES = {"хорошо": "ok", "плохо": "bad", "?": "unsure"}
-FIELDS = ("date", "title", "file", "section", "chunk", "hash_prefix", "item",
+FIELDS = ("date", "title", "page_id", "file", "section", "chunk", "hash_prefix", "item",
           "label", "issue", "note")
 
 HEADER = """\
@@ -30,7 +32,9 @@ HEADER = """\
 # Поля записи:
 #   date         дата импорта (ГГГГ-ММ-ДД)
 #   title        название страницы прослушки (папка, из которой слушали)
-#   file         wav относительно папки страницы; пара (title, file) уникальна
+#   page_id      хеш страницы (папка + список wav); у старых записей пуст
+#   file         wav относительно папки страницы; (page_id или title, file,
+#                hash_prefix) уникальны
 #   section      секция книги (из разметки или --section)
 #   chunk        id чанка, если известен
 #   hash_prefix  первые 8 символов хеша чанка, если известен
@@ -66,8 +70,8 @@ def _write(entries: list[dict], path: Path) -> None:
     tmp.replace(path)
 
 
-def _hash_prefix(meta: dict, file: str) -> str:
-    h = str(meta.get("hash") or "")
+def _hash_prefix(meta: dict, file: str, item_hash: str = "") -> str:
+    h = str(item_hash or meta.get("hash") or "")
     if not h:
         stem = Path(file).stem
         if len(stem) == 16 and all(c in "0123456789abcdef" for c in stem):
@@ -80,6 +84,7 @@ def entries_from_json(data: dict, section: str | None, today: str) -> tuple[list
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
         raise SystemExit("это не разметка прослушки: нет списка items")
     title = str(data.get("title") or "")
+    pid = str(data.get("page_id") or "")
     out, skipped = [], 0
     for it in data["items"]:
         if not isinstance(it, dict) or not it.get("file"):
@@ -100,16 +105,26 @@ def entries_from_json(data: dict, section: str | None, today: str) -> tuple[list
         out.append({
             "date": today,
             "title": title,
+            "page_id": pid,
             "file": file,
-            "section": section or str(meta.get("section") or data.get("section") or ""),
-            "chunk": str(meta.get("chunk") or ""),
-            "hash_prefix": _hash_prefix(meta, file),
+            "section": section or str(it.get("section") or meta.get("section")
+                                      or data.get("section") or ""),
+            "chunk": str(it.get("chunk") or meta.get("chunk") or ""),
+            "hash_prefix": _hash_prefix(meta, file, str(it.get("hash") or "")),
             "item": str(meta.get("item") or Path(file).stem),
             "label": label,
             "issue": issue,
             "note": comment,
         })
     return out, skipped
+
+
+def dedupe_key(e: dict) -> tuple[str, str, str, str]:
+    """(namespace, page, file, hash prefix): page_id when the page had one,
+    else the title (journal entries and JSON from before page_id)."""
+    pid = str(e.get("page_id") or "")
+    page = ("page", pid) if pid else ("title", str(e.get("title") or ""))
+    return (*page, str(e.get("file") or ""), str(e.get("hash_prefix") or ""))
 
 
 def import_json(path: Path, section: str | None = None, journal: Path | None = None,
@@ -128,10 +143,10 @@ def import_json(path: Path, section: str | None = None, journal: Path | None = N
     today = today or datetime.date.today().isoformat()
     new, unmarked = entries_from_json(data, section, today)
     entries = load(journal)
-    seen = {(e.get("title"), e.get("file")) for e in entries}
+    seen = {dedupe_key(e) for e in entries}
     added = 0
     for e in new:
-        key = (e["title"], e["file"])
+        key = dedupe_key(e)
         if key in seen:
             continue
         seen.add(key)

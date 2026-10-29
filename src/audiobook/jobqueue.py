@@ -6,11 +6,24 @@ Layout (under out/queue/):
     logs/<id>.log       stdout+stderr of each job
     heavy.lock          held exclusively by a running `queue run` worker
 
-Job json: {id, created, args, status, exit_code, ...}. Jobs are ordered by id,
-which starts with a zero-padded nanosecond timestamp.
+Job json: {id, created, args, config, status, exit_code, pid, ...}. Jobs are
+ordered by id, which starts with a zero-padded nanosecond timestamp.
+
+``config`` is fixed at `queue add` time (AUDIOBOOK_CONFIG or config.yaml) and
+handed to the child, so the worker's own environment never changes which
+config a job runs with. ``pid`` is the child's pid while it runs: a job found
+"running" after a worker crash is marked interrupted only if that pid is gone;
+if the child is still alive the worker starts nothing and says so.
+
+Crash order: done/<id>.json is written (temp + rename) before pending/<id>.json
+is removed; a pending file whose done/ twin exists is a leftover and is dropped.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
+import inspect
+import io
 import json
 import os
 import subprocess
@@ -25,7 +38,9 @@ from typing import Callable, Iterator
 from . import paths
 
 GUARDED = ("synth", "chunk")          # never queued for the whole book
-Runner = Callable[[dict, Path], int]
+DEFAULT_CONFIG = "config.yaml"
+CONFIG_ENV = "AUDIOBOOK_CONFIG"
+Runner = Callable[..., int]           # (job, log_path[, on_start=callable(pid)]) -> exit code
 
 
 def queue_root() -> Path:
@@ -58,21 +73,70 @@ def _read_json(path: Path) -> dict:
 
 # ------------------------------------------------------------------ validation
 
-def validate_args(args: list[str]) -> str | None:
+def _main_module():
+    from . import __main__ as main_mod
+    return main_mod
+
+
+def _real_parser() -> argparse.ArgumentParser | None:
+    """The CLI parser of audiobook.__main__ if it exposes a builder."""
+    build = getattr(_main_module(), "build_parser", None)
+    return build() if callable(build) else None
+
+
+def _minimal_parser(cmd: str) -> argparse.ArgumentParser:
+    """Stand-in while __main__ has no parser builder: only --section, with
+    argparse semantics (last occurrence wins, --section=X, abbreviations,
+    a missing value is an error); other options are left to the child."""
+    p = argparse.ArgumentParser(prog=f"audiobook {cmd}", add_help=False)
+    p.add_argument("--section", default=None)
+    return p
+
+
+def _parse(parser: argparse.ArgumentParser, args: list[str],
+           known_only: bool) -> tuple[argparse.Namespace | None, str]:
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            ns = parser.parse_known_args(args)[0] if known_only else parser.parse_args(args)
+    except SystemExit:
+        lines = [ln for ln in err.getvalue().splitlines() if ln.strip()]
+        return None, lines[-1] if lines else "аргументы не разбираются"
+    return ns, ""
+
+
+def validate_args(args: list[str], config: str | None = None) -> str | None:
     """Reason for rejecting the job, or None if it may be queued."""
     if not args:
         return "пустая команда"
     cmd = args[0]
     if cmd == "queue":
         return "queue внутри очереди зависнет на собственном замке"
-    if cmd in GUARDED:
-        has_section = any(
-            (a == "--section" and i + 1 < len(args) and args[i + 1] and not args[i + 1].startswith("-"))
-            or (a.startswith("--section=") and len(a) > len("--section="))
-            for i, a in enumerate(args))
-        if not has_section:
-            return f"{cmd} без --section — это рендер всей книги, в очередь нельзя"
+    real = _real_parser()
+    if real is not None:
+        ns, why = _parse(real, args, known_only=False)
+        if ns is None:
+            return f"не разбирается парсером audiobook: {why}"
+        section = getattr(ns, "section", None)
+    elif cmd in GUARDED:
+        ns, why = _parse(_minimal_parser(cmd), args[1:], known_only=True)
+        if ns is None:
+            return f"{cmd}: {why}"
+        section = ns.section
+    else:
+        section = None
+    if cmd in GUARDED and not (section or "").strip():
+        return f"{cmd} без --section (или с пустым) — это рендер всей книги, в очередь нельзя"
+    main_only = getattr(_main_module(), "_MAIN_CONFIG_ONLY", set())
+    if config not in (None, DEFAULT_CONFIG) and cmd in main_only:
+        return (f"{cmd} с {CONFIG_ENV}={config}: команда пишет в кеш и манифесты книги "
+                "и работает только с config.yaml")
     return None
+
+
+def config_at_add() -> str:
+    """The config a job added now must run with."""
+    return os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG
 
 
 # --------------------------------------------------------------------- storage
@@ -82,12 +146,14 @@ def add_job(args: list[str], root: Path | None = None) -> dict:
     args = list(args)
     if args and args[0] == "--":
         args = args[1:]
-    reason = validate_args(args)
+    config = config_at_add()
+    reason = validate_args(args, config)
     if reason:
         raise ValueError(reason)
     pending, _, _ = _dirs(root)
     job_id = f"{time.time_ns():020d}-{uuid.uuid4().hex[:4]}"
-    job = {"id": job_id, "created": _now(), "args": args, "status": "pending", "exit_code": None}
+    job = {"id": job_id, "created": _now(), "args": args, "config": config,
+           "status": "pending", "exit_code": None}
     _write_json(pending / f"{job_id}.json", job)
     return job
 
@@ -97,8 +163,11 @@ def list_jobs(root: Path | None = None) -> list[dict]:
     root = root or queue_root()
     pending, done, _ = _dirs(root)
     out: list[dict] = []
+    finished = {p.name for p in done.glob("*.json")}
     for d in (pending, done):
         for p in sorted(d.glob("*.json")):
+            if d is pending and p.name in finished:
+                continue  # crash leftover: the job is already in done/
             try:
                 out.append(_read_json(p))
             except (OSError, ValueError):
@@ -201,43 +270,131 @@ def exclusive_lock(path: Path, poll: float = 0.5,
 
 # ---------------------------------------------------------------------- worker
 
-def subprocess_runner(job: dict, log_path: Path) -> int:
-    """Run `python -m audiobook <args>` with output appended to the job log."""
-    cmd = [sys.executable, "-m", "audiobook", *job["args"]]
-    env = dict(os.environ)
+def pid_alive(pid: int | None) -> bool:
+    """Is a process with this pid running? Best effort; a reused pid reads as alive."""
+    if not pid or pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # exists, owned by someone else
+    except OSError:
+        return False
+    return True
+
+
+def child_env(job: dict, base: dict | None = None) -> dict:
+    """Environment of a job's child: the config fixed at add time, the lock flag."""
+    env = dict(os.environ if base is None else base)
     env["PYTHONUTF8"] = "1"
     env[LOCK_HELD_ENV] = "1"  # the worker holds heavy.lock for this child
+    cfg = job.get("config")
+    if cfg == DEFAULT_CONFIG:
+        env.pop(CONFIG_ENV, None)
+    elif cfg:
+        env[CONFIG_ENV] = str(cfg)
+    # no "config" key: a job queued before this field existed keeps the worker's env
+    return env
+
+
+def subprocess_runner(job: dict, log_path: Path,
+                      on_start: Callable[[int], None] | None = None) -> int:
+    """Run `python -m audiobook <args>` with output appended to the job log."""
+    cmd = [sys.executable, "-m", "audiobook", *job["args"]]
+    env = child_env(job)
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"$ {' '.join(cmd)}\n")
+        if job.get("config"):
+            log.write(f"# config: {job['config']}\n")
         log.flush()
-        return subprocess.run(cmd, cwd=str(paths.ROOT), stdout=log, stderr=subprocess.STDOUT,
-                              env=env).returncode
+        proc = subprocess.Popen(cmd, cwd=str(paths.ROOT), stdout=log,
+                                stderr=subprocess.STDOUT, env=env)
+        if on_start is not None:
+            try:
+                on_start(proc.pid)
+            except Exception:  # noqa: BLE001  (bookkeeping must not orphan the child)
+                pass
+        return proc.wait()
+
+
+def _accepts_on_start(runner: Runner) -> bool:
+    try:
+        return "on_start" in inspect.signature(runner).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _finish(job: dict, pending_path: Path, done: Path) -> None:
+    """done/<id>.json first (atomic), then drop pending — a crash in between
+    leaves a pending twin that recovery removes."""
+    _write_json(done / pending_path.name, job)
+    pending_path.unlink(missing_ok=True)
+
+
+def _recover(pending: Path, done: Path, say: Callable[[str], None],
+             alive: Callable[[int | None], bool]) -> tuple[int, list[dict]]:
+    """Clean up after a dead worker. Returns (interrupted count, jobs whose
+    child is still alive — while any exists, nothing new may start)."""
+    interrupted, live = 0, []
+    for p in sorted(pending.glob("*.json")):
+        if (done / p.name).exists():
+            p.unlink(missing_ok=True)  # finished, crash before the pending file went
+            say(f"{p.stem}: уже в done — лишний pending удалён")
+            continue
+        try:
+            job = _read_json(p)
+        except (OSError, ValueError):
+            continue
+        if job.get("status") != "running":
+            continue
+        if alive(job.get("pid")):
+            live.append(job)
+            continue
+        job.update(status="interrupted", exit_code=None, finished=_now())
+        _finish(job, p, done)
+        interrupted += 1
+        say(f"{job['id']}: прерван (воркер упал?) — перенесён в done как interrupted")
+    return interrupted, live
 
 
 def run_worker(root: Path | None = None, runner: Runner | None = None, poll: float = 0.5,
-               say: Callable[[str], None] = print) -> int:
+               say: Callable[[str], None] = print,
+               alive: Callable[[int | None], bool] = pid_alive) -> int:
     """Take pending jobs one by one under the heavy lock until none are left.
 
-    Returns 0 if every job passed, 1 if any failed or was found interrupted.
+    Returns 0 if every job passed, 1 if any failed, was found interrupted, or a
+    job of a dead worker is still running (then nothing new is started).
     """
     root = root or queue_root()
     runner = runner or subprocess_runner
+    pass_pid = _accepts_on_start(runner)
     pending, done, logs = _dirs(root)
     failed = 0
     with exclusive_lock(root / "heavy.lock", poll=poll,
                         on_wait=lambda: say("замок heavy.lock занят другим воркером, жду…")):
-        # The lock is ours, so a job still marked running belongs to a dead worker.
-        for p in sorted(pending.glob("*.json")):
-            try:
-                job = _read_json(p)
-            except (OSError, ValueError):
-                continue
-            if job.get("status") == "running":
-                job.update(status="interrupted", exit_code=None, finished=_now())
-                _write_json(done / p.name, job)
-                p.unlink()
-                failed += 1
-                say(f"{job['id']}: прерван (воркер упал?) — перенесён в done как interrupted")
+        # The lock is ours, so a job still marked running belongs to a dead
+        # worker — but its child may have outlived it.
+        failed, live = _recover(pending, done, say, alive)
+        if live:
+            for job in live:
+                say(f"{job['id']}: ещё выполняется (pid {job.get('pid')}, воркер упал, "
+                    "процесс жив) — новые задачи не запускаю; queue run после его завершения")
+            return 1
 
         skip: set[str] = set()
         while True:
@@ -249,14 +406,21 @@ def run_worker(root: Path | None = None, runner: Runner | None = None, poll: flo
             _write_json(path, job)
             say(f"{job['id']}: {' '.join(job['args'])}")
             log_path = logs / f"{job['id']}.log"
+
+            def on_start(pid: int, job=job, path=path) -> None:
+                job["pid"] = pid
+                _write_json(path, job)
+
             try:
-                code = int(runner(job, log_path))
+                if pass_pid:
+                    code = int(runner(job, log_path, on_start=on_start))
+                else:
+                    code = int(runner(job, log_path))
             except Exception as e:  # noqa: BLE001
                 code = -1
                 job["error"] = f"{type(e).__name__}: {e}"
             job.update(exit_code=code, status="done" if code == 0 else "failed", finished=_now())
-            _write_json(done / path.name, job)
-            path.unlink()
+            _finish(job, path, done)
             if code != 0:
                 failed += 1
             say(f"{job['id']}: {job['status']} (код {code})")
@@ -273,7 +437,8 @@ def cli(sub: str, args: list[str]) -> int:
         except ValueError as e:
             print(f"отклонено: {e}", file=sys.stderr)
             return 2
-        print(f"в очереди: {job['id']}  {' '.join(job['args'])}")
+        cfg = "" if job["config"] == DEFAULT_CONFIG else f"  [{CONFIG_ENV}={job['config']}]"
+        print(f"в очереди: {job['id']}  {' '.join(job['args'])}{cfg}")
         return 0
     if sub == "list":
         jobs = list_jobs()
