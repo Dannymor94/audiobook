@@ -1,8 +1,8 @@
 ---
 id: G01
 title: что за видеокарта на gamebox и можно ли на ней озвучивать
-status: todo
-owner:
+status: doing
+owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []
 ---
