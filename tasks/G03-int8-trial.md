@@ -1,8 +1,8 @@
 ---
 id: G03
 title: int8 против fp32 на golden set — скорость и звук
-status: todo
-owner:
+status: doing
+owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: [T05, G02]
 ---
