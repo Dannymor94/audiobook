@@ -20,7 +20,7 @@ def run(config: dict) -> int:
     configure_cpu_threads(workers=1)
     print(f"device={device}")
     t0 = time.perf_counter()
-    model = load_model(device, voicecfg.variant(config))
+    model = load_model(device, voicecfg.variant(config), voicecfg.quantize(config))
     print(f"load: {time.perf_counter() - t0:.1f}s")
 
     lat_path = voicecfg.latents_path(config)

@@ -1,7 +1,7 @@
 ---
 id: T02
 title: страница прослушки + журнал решений на слух
-status: review
+status: done
 owner: claude-subagent
 machine: code
 branch: task/T02
@@ -67,3 +67,6 @@ CLAUDE.md проекта. Модули: `src/audiobook/review.py`, `src/audioboo
 - Дедуп по (title, file): повторная разметка того же файла на той же странице не заменяет старую запись.
   Хочется «последняя оценка побеждает» — это отдельное решение.
 - Формат `index.tsv` у probe изменён (добавлена колонка); хеши чанков, кеш и манифесты не затронуты.
+
+### Приёмка (Claude)
+Слито в port-validated-settings, полный pytest зелёный. На реальном gamebox не запускалось — проверяется задачами G0x.

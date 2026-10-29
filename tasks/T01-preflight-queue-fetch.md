@@ -1,7 +1,7 @@
 ---
 id: T01
 title: preflight, очередь задач с замком, забор результатов на Mac
-status: review
+status: done
 owner: claude-subagent
 machine: code
 branch: task/T01
@@ -49,3 +49,6 @@ CLAUDE.md проекта (pathlib, encoding="utf-8", spawn, без сети в �
 - Тесты слоя 1: `tests/test_preflight.py`, `tests/test_jobqueue.py` (40 новых тестов; замок проверен двумя spawn-процессами с подставным runner). Итог `pytest -q`: 236 passed, 1 skipped (slow).
 
 Заметки агента: ветка Windows (`msvcrt`) написана, но не запускалась. `preflight` на этой машине показал RED из-за RAM 7.2 ГБ и того, что ветка `task/T01` не запушена; это штатное поведение проверок. Настоящий rsync здесь не установлен, скрипт проверен с подставным rsync в PATH (аргументы и фильтры), реальную передачу с gamebox не проверял.
+
+### Приёмка (Claude)
+Слито в port-validated-settings, полный pytest зелёный. На реальном gamebox не запускалось — проверяется задачами G0x.

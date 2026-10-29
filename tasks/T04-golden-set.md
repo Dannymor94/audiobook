@@ -1,7 +1,7 @@
 ---
 id: T04
 title: постоянный набор трудных чанков (golden set) и сравнение версий
-status: review
+status: done
 owner: claude-subagent
 machine: code
 branch: task/T04
@@ -57,3 +57,6 @@ CLAUDE.md проекта. Модуль `src/audiobook/golden.py`. Переисп
   записей находят чанк (только чанкинг, без синтеза). Реальный `render` с моделью и ffmpeg НЕ запускался.
 - В yaml попал probe-чанк с e-mail автора из книги (`E-mail: ...`) — тег latin; при желании убрать вручную.
 - Файл `text/golden_set.yaml` лежит в `text/`, где уже весь текст книги; в тестах только плейсхолдеры.
+
+### Приёмка (Claude)
+Слито в port-validated-settings, полный pytest зелёный. На реальном gamebox не запускалось — проверяется задачами G0x.

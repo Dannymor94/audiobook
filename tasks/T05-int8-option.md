@@ -1,7 +1,7 @@
 ---
 id: T05
 title: опция int8 (dynamic quantization) для ускорения CPU-рендера
-status: review
+status: done
 owner: claude-subagent
 machine: code
 branch: task/T05
@@ -43,3 +43,6 @@ CLAUDE.md проекта. Замена должна затронуть voicecfg/
   (2) В установленном torch `torch.ao.quantization` помечен deprecated (удалят в 2.10, миграция на
   torchao) — при обновлении torch эта опция сломается первой. (3) Качество int8 не проверено —
   это работа G03; до неё оставлять `none`.
+
+### Приёмка (Claude)
+Слито в port-validated-settings, полный pytest зелёный. На реальном gamebox не запускалось — проверяется задачами G0x.
