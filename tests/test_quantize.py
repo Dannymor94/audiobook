@@ -120,7 +120,7 @@ def test_load_model_int8_calls_quantize_dynamic(fake_qwen, monkeypatch):
     calls = []
     sentinel = object()
 
-    def fake_qd(model, spec, dtype=None):
+    def fake_qd(model, spec, dtype=None, **kwargs):
         calls.append((model, spec, dtype))
         return sentinel
 

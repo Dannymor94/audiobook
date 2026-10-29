@@ -122,7 +122,7 @@ def load_model(device: str | None = None,
     if quantize == "int8":
         # Experimental: int8 weights for every Linear (dynamic activation quant).
         model.model = torch.ao.quantization.quantize_dynamic(
-            model.model, {torch.nn.Linear}, dtype=torch.qint8)
+            model.model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
     _model = model
     _model_key = key
     return model
