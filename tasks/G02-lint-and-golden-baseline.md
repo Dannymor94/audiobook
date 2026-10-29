@@ -1,7 +1,7 @@
 ---
 id: G02
 title: отчёт о тексте для автора + базовая версия golden set
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: [T03, T04]
@@ -82,3 +82,5 @@ golden base-ref_ch1: записей 45, найдено чанков 45, к си�
 ```
 Скопировано на Mac: `~/Downloads/audiobook/2026-10-29/golden/base-ref_ch1/golden.mp3`, `index.tsv`, 45 wav
 
+### Приёмка (Claude)
+lint и base-ref_ch1 готовы, страницы прослушки на Mac. Закрыто.

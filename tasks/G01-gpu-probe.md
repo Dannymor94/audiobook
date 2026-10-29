@@ -1,7 +1,7 @@
 ---
 id: G01
 title: что за видеокарта на gamebox и можно ли на ней озвучивать
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []
@@ -103,3 +103,6 @@ GPU — AMD Radeon RX 580 (Ellesmere/Polaris, gfx803). `/dev/kfd` присутс
 PyTorch в окружении audiobook (`2.14.0+cu130`) — CUDA-сборка, но видит 0 CUDA-устройств и HIP отсутствует. Значит, XTTS/CoquiTTS работают только на CPU.
 
 Для PyTorch + RX 580: официальный ROCm прекратил поддержку gfx803 на 6.x. Варианты — ROCm 5.7 или unofficial wheel с патчем для Polaris. Vulkan-бэкенд PyTorch (torch-directml / torch.vulkan) — нестабилен и не поддерживает XTTS. Практический вывод: в обозримой перспективе рендер остаётся на CPU; GPU задействован только для llama.
+
+### Приёмка (Claude)
+RX 580 (Polaris, gfx803): ROCm/PyTorch эту архитектуру не поддерживают, Vulkan в PyTorch нет. Рендер — только CPU. Закрыто.
