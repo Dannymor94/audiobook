@@ -8,6 +8,7 @@
 
 ## Веса (один раз, на Mac с сетью)
 - XTTS-v2: снять `HF_HUB_OFFLINE`, запустить `./run.sh bench` — скачает в `models/tts`.
+- Фонемная модель для `phoneme-check` (эксперимент, ~1.3 ГБ, Apache-2.0): `uv run python scripts/fetch_phoneme_model.py` — скачает в `models/hf/hub`. Рантайм остаётся оффлайн.
 - RUAccent: `RUAccent(workdir="models/ruaccent")` при первом вызове.
 - whisper: `faster-whisper` модель `small` → `models/whisper/small` (ct2-конвертированная).
 

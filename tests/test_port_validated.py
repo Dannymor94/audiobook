@@ -620,3 +620,39 @@ def test_assemble_index_and_suspect_times(tmp_path):
     assert idx["0001"] == (0, 200) and idx["0002"] == (1500, 200)  # 1 s + 0.5 s pause
     (it,) = collect(rows, idx)
     assert it["t_ms"] == pytest.approx(1500 - 200 + 700)  # word at 0.7 s in raw chunk
+
+
+# ── phoneme-check (pure logic; no model) ──────────────────────────────────────
+
+def test_parse_expect():
+    from audiobook.phoneme_check import parse_expect
+    assert parse_expect("запИть") == ("запить", 1)
+    assert parse_expect("тебЯ") == ("тебя", 1)
+    assert parse_expect("слёзы") == ("слёзы", 0)
+    with pytest.raises(ValueError):
+        parse_expect("запить")
+
+
+def test_expected_j():
+    from audiobook.phoneme_check import expected_j
+    assert expected_j("тебя") == 0 and expected_j("дыши") == 0
+    assert expected_j("ёлка") == 1 and expected_j("заесть") == 1
+    assert expected_j("чьи") == 1 and expected_j("мой") == 1
+
+
+def test_analyze_verdicts():
+    from audiobook.phoneme_check import analyze
+    # запИть: [z ɐ pʲ i tʲ] — 2nd vowel full → ok
+    assert analyze("запИть", ["z", "ɐ", "pʲ", "i", "tʲ"])["verdict"] == "ok"
+    # зАпить read as [z a pʲ ɪ tʲ] — expected stressed vowel reduced → STRESS?
+    assert analyze("запИть", ["z", "a", "pʲ", "ɪ", "tʲ"])["verdict"] == "STRESS?"
+    # теб-й-а: extra glide → J+
+    assert analyze("тебЯ", ["tʲ", "ɪ", "bʲ", "j", "a"])["verdict"] == "J+"
+    # vowel count mismatch → ?
+    assert analyze("тебЯ", ["tʲ", "bʲ", "a"])["verdict"] == "?"
+
+
+def test_ctc_greedy():
+    from audiobook.phoneme_check import ctc_greedy
+    id2tok = {0: "<pad>", 1: "a", 2: "b", 3: "|"}
+    assert ctc_greedy([1, 1, 0, 1, 2, 2, 3, 0], id2tok, 0) == ["a", "a", "b"]
