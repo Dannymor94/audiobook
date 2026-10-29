@@ -83,6 +83,8 @@ def run(no_models: bool = False, config: dict | None = None) -> bool:
     except Exception as e:  # noqa: BLE001
         r.check("qwen-tts импортируется", False, str(e))
 
+    r.info("quantize", voicecfg.quantize(config or {}))
+
     if not no_models:
         variant = voicecfg.variant(config or {})
         qwen_dir = voicecfg.hub_dir(variant)

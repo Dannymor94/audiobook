@@ -73,6 +73,7 @@ _LANG_NAMES = {
 }
 
 _model = None
+_model_key: tuple | None = None  # (device, variant, quantize) the cached _model was built for
 
 
 def _local_snapshot(variant: str = voicecfg.DEFAULT_VARIANT) -> Path:
@@ -97,22 +98,33 @@ def _local_snapshot(variant: str = voicecfg.DEFAULT_VARIANT) -> Path:
 
 
 def load_model(device: str | None = None,
-               variant: str = voicecfg.DEFAULT_VARIANT):
-    global _model
-    if _model is not None:
-        return _model
+               variant: str = voicecfg.DEFAULT_VARIANT,
+               quantize: str = "none"):
+    global _model, _model_key
+    if quantize not in voicecfg.QUANTIZE_MODES:
+        raise SystemExit(f"load_model: недопустимый quantize {quantize!r}")
     dev = device or pick_device()
     # Qwen's custom generate() mixes CPU/MPS tensors — run on cuda or cpu only.
     # cpu is the Windows render target anyway.
     if dev == "mps":
         dev = "cpu"
+    if quantize == "int8" and dev != "cpu":
+        raise SystemExit(f"quantize=int8 работает только на cpu (device={dev})")
+    key = (dev, variant, quantize)
+    if _model is not None and (_model_key is None or _model_key == key):
+        return _model
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     snapshot = _local_snapshot(variant)  # raises with a clear message if weights absent
     from qwen_tts import Qwen3TTSModel  # heavy + noisy import: keep it lazy
     model = Qwen3TTSModel.from_pretrained(str(snapshot), dtype=torch.float32)
     model.model.to(dev)
+    if quantize == "int8":
+        # Experimental: int8 weights for every Linear (dynamic activation quant).
+        model.model = torch.ao.quantization.quantize_dynamic(
+            model.model, {torch.nn.Linear}, dtype=torch.qint8)
     _model = model
+    _model_key = key
     return model
 
 
@@ -550,6 +562,7 @@ def worker_config(config: dict, num_workers: int = 1) -> dict:
     return {
         "device": pick_device(),
         "variant": v,
+        "quantize": voicecfg.quantize(config),
         "latents_path": str(lat),
         "temperature": config["model"]["temperature"],
         "language": config["model"]["language"],
