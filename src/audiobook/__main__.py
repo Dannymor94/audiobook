@@ -77,6 +77,18 @@ def main(argv: list[str] | None = None) -> int:
     ph.add_argument("--dir", required=True, help="папка с *.wav (например out/pron_test/…)")
     ph.add_argument("--expect", nargs="+", required=True,
                     help="слова с ударной гласной заглавной: запИть тебЯ дышИ")
+    gd = sub.add_parser("golden",
+                        help="постоянный набор трудных чанков: init | render | compare")
+    gsub = gd.add_subparsers(dest="golden_cmd", required=True)
+    gi = gsub.add_parser("init", help="создать text/golden_set.yaml")
+    gi.add_argument("--force", action="store_true", help="перезаписать существующий файл")
+    gi.add_argument("--max", type=int, default=40, help="максимум чанков от probe (default 40)")
+    gr = gsub.add_parser("render", help="рендер набора → out/golden/<tag>/")
+    gr.add_argument("--tag", required=True, help="имя прогона (например baseline)")
+    gr.add_argument("--workers", type=int, default=1, help="воркеров синтеза (default 1)")
+    gc = gsub.add_parser("compare", help="пары A/B → out/golden/compare_A_B/")
+    gc.add_argument("tag_a")
+    gc.add_argument("tag_b")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -134,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "phoneme-check":
         from .phoneme_check import run as phoneme_check
         return phoneme_check(load_config(), a.dir, a.expect)
+    if a.cmd == "golden":
+        from . import golden
+        if a.golden_cmd == "init":
+            return golden.run_init(load_config(), a.force, a.max)
+        if a.golden_cmd == "render":
+            return golden.run_render(load_config(), a.tag, a.workers)
+        return golden.run_compare(load_config(), a.tag_a, a.tag_b)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)

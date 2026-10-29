@@ -1,0 +1,137 @@
+# Golden set: {section, match, why}. match — подстрока текста чанка.
+# Создаётся командой `golden init`; править руками можно.
+- section: 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+  match: Глава тринадцатая.
+  why: заголовок главы
+- section: 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+  match: Я тебя чувствую
+  why: короткая цитата-вставка
+- section: 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+  match: Заесть
+  why: ряд однословных предложений
+- section: 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+  match: Шаг первый.
+  why: метка шага
+- section: 20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu
+  match: Дыши
+  why: короткая императивная фраза
+- section: 40_glava_33_glubokaya_tekhnika_integratsii_
+  match: Почувствуй, как чувствует он. Какая обувь на
+  why: homograph:голоса, homograph:лица, homograph:стены, one_word_run
+- section: 46_ob_avtore
+  match: 'E-mail: aisaev20@mail.ru'
+  why: latin:E-mail, latin:aisaev, latin:mail.ru
+- section: 24_glava_17_vozvrashchenie_v_telo_istseleni
+  match: Заметь ступни, ноги, живот, грудь, плечи, руки,
+  why: homograph:ноги, homograph:руки
+- section: 48_prilozhenie_1_karta_geroya_bystraya_samo
+  match: На сайте доступна расширенная «Карта героя»
+  why: homograph:сорок, latin:PDF
+- section: 39_glava_32_put_geroya_tvoya_zhizn_kak_mif
+  match: Напиши это. Как герой, который стоит перед
+  why: homograph:стоит, one_word_run
+- section: 09_glava_2_roditelskie_golosa_ili_otkuda_be
+  match: Потому что дети слышат не только слова. Они
+  why: homograph:слова, one_word_run
+- section: 11_glava_4_bolevoe_telo_vulkan_kotoryj_drem
+  match: 'Оно видит движение в кустах и кричит: «ТИГР!'
+  why: caps_word, homograph:понял
+- section: 17_glava_10_nejrobiologiya_travmy_pochemu_t
+  match: 'Как в лесу: ты видишь изогнутую палку, детектор'
+  why: caps_word, homograph:потом
+- section: 28_glava_21_vstrecha_s_tenyu_pochemu_nas_be
+  match: Алёна пришла к психологу с этим бешенством. И
+  why: homograph:поняла, one_word_run
+- section: 52_lichnost_za_2_minuty
+  match: ПАУЗА.
+  why: caps_word
+- section: 15_glava_8_vnutrennij_vzroslyj_tot_kto_mozh
+  match: один. Еда.
+  why: one_word_run
+- section: 15_glava_8_vnutrennij_vzroslyj_tot_kto_mozh
+  match: два. Здоровье.
+  why: one_word_run
+- section: 15_glava_8_vnutrennij_vzroslyj_tot_kto_mozh
+  match: три. Отношения.
+  why: one_word_run
+- section: 41_glava_34_ezhednevnye_praktiki_i_ritualy_
+  match: Ритуалы для души
+  why: homograph:души
+- section: 30_glava_23_karta_istseleniya_poshagovaya_i
+  match: два. Узнаю маску.
+  why: homograph:узнаю
+- section: 49_prilozhenie_2_polnaya_karta_emotsij_chuv
+  match: Инстинкт АГРЕССИИ
+  why: caps_word
+- section: 49_prilozhenie_2_polnaya_karta_emotsij_chuv
+  match: Инстинкт ПОЗНАНИЯ
+  why: caps_word
+- section: 57_kniga_prodolzhaetsya
+  match: КНИГА ПРОДОЛЖАЕТСЯ
+  why: caps_word
+- section: 12_glava_5_drevo_boli_karta_tvoikh_glubin
+  match: Ветви — взрослый опыт
+  why: homograph:ветви
+- section: 46_ob_avtore
+  match: 'Сайт: isaev.vnedrum.ru'
+  why: latin:isaev.vnedrum.ru
+- section: 40_glava_33_glubokaya_tekhnika_integratsii_
+  match: «Лентяй». Сними. Это не ты.
+  why: one_word_run
+- section: 07_vvedenie_tvoya_zhizn_eto_lift_kuda_ty_ed
+  match: Четыре уровня твоего внутреннего дома
+  why: homograph:дома
+- section: 49_prilozhenie_2_polnaya_karta_emotsij_chuv
+  match: Дыши в это место (двенадцатая глава).
+  why: homograph:дыши
+- section: 29_glava_22_zavisimosti_kak_my_pytaemsya_za
+  match: Вместо ухода в телефон — обнять себя руками.
+  why: homograph:обнять
+- section: 36_glava_29_kak_ponyat_chto_vzroslyj_prosnu
+  match: «Сегодня я спокойно принял решение, без
+  why: homograph:принял
+- section: 31_glava_24_snyatie_maski_vstrecha_s_tem_kt
+  match: 'Мазохист: «Я страдаю, чтобы тебя простили и'
+  why: homograph:приняли
+- section: 40_glava_33_glubokaya_tekhnika_integratsii_
+  match: Выпей воды. Сделай несколько шагов. Вернись в
+  why: homograph:воды
+- section: 35_glava_28_tri_istorii_istseleniya_alena_l
+  match: Постепенно пустота внутри начала заполняться.
+  why: homograph:начала
+- section: 11_glava_4_bolevoe_telo_vulkan_kotoryj_drem
+  match: Через двадцать минут она уже не могла
+  why: homograph:начался
+- section: 30_glava_23_karta_istseleniya_poshagovaya_i
+  match: Если нет волны — не ищи её. Если нет боли — не
+  why: homograph:волны
+- section: 08_glava_1_zver_vnutri_nas_instinkty_eto_ne
+  match: В детстве этот инстинкт кричит громко. Помнишь,
+  why: homograph:засыпать
+- section: 07_vvedenie_tvoya_zhizn_eto_lift_kuda_ty_ed
+  match: Я иду по цветущей набережной. Это моя пятьдесят
+  why: abbrev:БПЛА
+- section: 12_glava_5_drevo_boli_karta_tvoikh_glubin
+  match: Это безопасные уровни для самостоятельной
+  why: latin:IV
+- section: 07_vvedenie_tvoya_zhizn_eto_lift_kuda_ty_ed
+  match: Инфляция, неопределённость, будущее, которое
+  why: abbrev:СМИ
+- section: 11_glava_4_bolevoe_telo_vulkan_kotoryj_drem
+  match: Главный риск. Травма может стать твоей
+  why: abbrev:ПТСР
+- section: 47_bonusnye_materialy_k_knige_ty_ne_poloman
+  match: Дорогой читатель. Ты прошёл путь вместе с этой
+  why: homograph:углубить
+- section: 30_glava_23_karta_istseleniya_poshagovaya_i
+  match: Когда хочется написать или позвонить, чтобы
+  why: homograph:позвонить
+- section: 39_glava_32_put_geroya_tvoya_zhizn_kak_mif
+  match: Это не просто упражнение. Это ритуал. Ты будешь
+  why: homograph:писать
+- section: 37_glava_30_prednaznachenie_kak_tvoj_dar_na
+  match: В служении. Твой вклад — в том, что ты
+  why: homograph:красивее
+- section: 08_glava_1_zver_vnutri_nas_instinkty_eto_ne
+  match: 'Стадный инстинкт шепчет: «Не высовывайся, будь'
+  why: latin:XXI

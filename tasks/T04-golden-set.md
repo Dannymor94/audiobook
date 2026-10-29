@@ -1,7 +1,7 @@
 ---
 id: T04
 title: постоянный набор трудных чанков (golden set) и сравнение версий
-status: doing
+status: review
 owner: claude-subagent
 machine: code
 branch: task/T04
@@ -33,3 +33,27 @@ depends_on: []
 CLAUDE.md проекта. Модуль `src/audiobook/golden.py`. Переиспользуй probe.py/assemble/master.
 
 ## Отчёт
+
+Сделано: `src/audiobook/golden.py`, команда `golden init|render|compare` в `__main__.py`,
+`tests/test_golden.py` (7 тестов слоя 1, фейковый engine, `master_wav` подменён),
+`text/golden_set.yaml` (сгенерирован `golden init`: 45 записей = 5 фиксированных + 40 от probe).
+
+- `init [--force] [--max 40]`: фиксированные записи ch13 («Глава тринадцатая.», «Я тебя чувствую»,
+  «Заесть», «Шаг первый.», «Дыши») + `probe.scan/select`; match для probe-записей — первые ~48
+  символов текста чанка (по границе слова). Без `--force` существующий файл не трогает (код 1).
+- `render --tag NAME [--workers 1]`: чанки секций строятся в памяти (`build_manifest` текущим
+  конфигом), берётся первый чанк с match; wav float в `out/golden/NAME/<hash16>.wav` (атомарно,
+  resume по существованию), `index.tsv`, `golden.mp3` (паузы 1 с), `settings.json`. Цикл вынесен в
+  `render_items(..., engine)` — для тестов engine подставляется. Упавший чанк не кешируется, код 1.
+- `compare A B`: пары `NN_A.wav`/`NN_B.wav`, `compare.mp3` (A, 0.6 с, B, 1.5 с), `index.tsv`;
+  записи без wav в одном из тегов пропускаются с предупреждением.
+
+Заметки агента:
+- Пары A/B сопоставляются по (section, match), а не по hash (он разный при смене настроек).
+  Для этого в `settings.json` добавлен список `entries` (n, section, match, why, hash16) — это сверх
+  ТЗ; в `settings.json` также попал `leadin`, т.к. влияет на звук.
+- `index.tsv` render: n — порядковый номер среди найденных чанков, не позиция в yaml.
+- Проверено: `pytest -q` — 203 passed, 1 skipped; `golden init` на реальном тексте отработал, все 45
+  записей находят чанк (только чанкинг, без синтеза). Реальный `render` с моделью и ffmpeg НЕ запускался.
+- В yaml попал probe-чанк с e-mail автора из книги (`E-mail: ...`) — тег latin; при желании убрать вручную.
+- Файл `text/golden_set.yaml` лежит в `text/`, где уже весь текст книги; в тестах только плейсхолдеры.
