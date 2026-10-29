@@ -77,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     ph.add_argument("--dir", required=True, help="папка с *.wav (например out/pron_test/…)")
     ph.add_argument("--expect", nargs="+", required=True,
                     help="слова с ударной гласной заглавной: запИть тебЯ дышИ")
+    sub.add_parser("lint-text",
+                   help="проверка text/*.norm.txt: пропущенная ё, опечатки, что читать по буквам → out/lint/text_lint.md")
     ac = sub.add_parser("accept", help="установить кандидат и заблокировать чанк")
     ac.add_argument("section")
     ac.add_argument("chunk_id")
@@ -134,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "phoneme-check":
         from .phoneme_check import run as phoneme_check
         return phoneme_check(load_config(), a.dir, a.expect)
+    if a.cmd == "lint-text":
+        from .text_lint import run as lint_text
+        return lint_text(load_config())
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
