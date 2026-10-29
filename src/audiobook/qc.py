@@ -221,6 +221,8 @@ def run(config: dict, section: str | None = None) -> int:
     manifest_path = sec_dir / "manifest.jsonl"
     if not manifest_path.exists():
         raise SystemExit(f"нет манифеста для секции {section}: {sec_dir}")
+    from audiobook.synth import ensure_manifest_current
+    ensure_manifest_current(config, section)  # re-synth uses live settings
     chunks_dir = sec_dir / "chunks"
     rows = _read_manifest(manifest_path)
     threshold = float(config["qc"]["cer_threshold"])
@@ -291,6 +293,7 @@ def run(config: dict, section: str | None = None) -> int:
                 wav = eng.synth(synth_text, new_seed, **({"leadin": phrase} if phrase else {}))
                 if wav is None:  # capped/timeout — leave qc_fail, becomes manual
                     log.warning("qc re-synth failed (cap/timeout) chunk %s", r["id"])
+                    r["seed"] = new_seed  # next round tries the next seed, not this one again
                     continue
                 wav_path = chunks_dir / f"{r['id']}.wav"
                 tmp = wav_path.parent / (wav_path.name + ".part")

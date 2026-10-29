@@ -748,3 +748,90 @@ def test_orphan_never_overwrites_earlier_orphan(tmp_path):
     _apply_wav_moves([], ["0005"], cdir, [{"id": "0005", "hash": "abcdefabcdef00"}])
     names = sorted(p.read_text(encoding="utf-8") for p in (cdir / "_orphan").iterdir())
     assert names == ["new", "old"]
+
+
+# ── review fixes: render safety ──────────────────────────────────────────────
+
+def test_needs_render_rules():
+    from audiobook.synth import needs_render
+    assert needs_render({"status": "pending"}, False)
+    assert needs_render({"status": "done"}, False)            # wav lost → render
+    assert not needs_render({"status": "done"}, True)
+    assert not needs_render({"status": "manual"}, True)       # QC decided → leave
+    assert not needs_render({"status": "qc_fail"}, True)
+    assert needs_render({"status": "timeout"}, True)
+    assert not needs_render({"status": "pending", "locked": True}, True)
+
+
+def test_parallel_worker_always_sends_sentinel(monkeypatch, tmp_path):
+    import queue
+    from audiobook import synth, worker
+
+    class Boom:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def synth(self, *a, **k): raise RuntimeError("model error")
+
+    monkeypatch.setattr(worker, "TimeoutSynth", Boom)
+    q = queue.Queue()
+    row = {"id": "0001", "text": "Тестовая фраза.", "hash": "a" * 40, "seed_override": None}
+    with pytest.raises(RuntimeError):
+        synth._render_group_worker({}, 1, "", 0, [row], str(tmp_path), q, _cfg())
+    assert q.get_nowait() is None
+
+
+def test_enum_pause_guard(monkeypatch, tmp_path):
+    from audiobook.synth import worker_config
+    monkeypatch.setattr(paths, "ROOT", tmp_path)
+    (tmp_path / "ref").mkdir()
+    (tmp_path / "ref" / "ref1.latents.pt").write_bytes(b"x")
+    with pytest.raises(SystemExit, match="enum_pause_ms"):
+        worker_config(_cfg(pauses_ms={"enum_pause_ms": 250}))
+
+
+def test_pauses_from_config():
+    from audiobook.chunker import build_chunks
+    units = [{"type": "paragraph", "text": "Первое предложение абзаца. Второе предложение абзаца тут."},
+             {"type": "paragraph", "text": "Следующий абзац теста, достаточно длинный."}]
+    cfg = _cfg(pauses_ms={"paragraph": 1111, "chapter": 2222},
+               chunking={"target": 30, "cap": 60, "min_len": 5})
+    got = [c["pause_after_ms"] for c in build_chunks(units, cfg)]
+    assert got[-1] == 2222 and 1111 in got
+
+
+def test_accept_refuses_candidates_of_other_text(monkeypatch, tmp_path):
+    from audiobook.redo import _retire_stale_candidates, run_accept
+    from audiobook.synth import _write_manifest
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    sec = tmp_path / "out" / "sections" / "s"
+    sec.mkdir(parents=True)
+    _write_manifest(sec / "manifest.jsonl",
+                    [{"id": "0001", "text": "Новый текст.", "hash": "b" * 40, "status": "done",
+                      "locked": False, "seed_override": None, "duration_ms": 1}])
+    rd = tmp_path / "out" / "redo" / "s" / "0001"
+    rd.mkdir(parents=True)
+    sf.write(str(rd / "variant_01__seed+100.wav"), np.zeros(240, dtype=np.float32), 24000)
+    with pytest.raises(SystemExit, match="другого текста"):   # legacy: no meta.json
+        run_accept(_cfg(), "s", "0001", 1)
+    (rd / "meta.json").write_text('{"hash": "' + "a" * 40 + '"}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="другого текста"):   # meta of the old text
+        run_accept(_cfg(), "s", "0001", 1)
+    # redo for the new text retires old candidates (moved, not deleted)
+    _retire_stale_candidates(rd, {"hash": "b" * 40, "text": "Новый текст."})
+    assert not list(rd.glob("variant_*.wav"))
+    assert list(rd.glob("_old_*/variant_01__seed+100.wav"))
+
+
+def test_ensure_manifest_current_detects_stale(monkeypatch, tmp_path):
+    from audiobook import chunker
+    from audiobook.synth import ensure_manifest_current
+    monkeypatch.setattr(paths, "TEXT", tmp_path / "text")
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    para = "Тестовый абзац достаточной длины, чтобы секция не считалась пустой."
+    _write_section(tmp_path / "text", "01", "odin", para)
+    chunker.run(_cfg(), "01_odin")
+    ensure_manifest_current(_cfg(), "01_odin")  # fresh → ok
+    _write_section(tmp_path / "text", "01", "odin", para.replace("Тестовый", "Другой"))
+    with pytest.raises(SystemExit, match="устарел"):
+        ensure_manifest_current(_cfg(), "01_odin")

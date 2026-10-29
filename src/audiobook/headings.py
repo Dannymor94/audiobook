@@ -77,7 +77,7 @@ def _master_concat(raw: Path, out_mp3: Path, config: dict) -> None:
     eq = m.get("eq_filters", "")
     ff = _ff()
 
-    meas = _loudnorm_measure(ff, raw, I, tp, lra, eq)
+    meas = _loudnorm_measure(ff, raw, I, tp, lra, eq, int(m['highpass_hz']))
     mid = f",{eq}" if eq else ""
     af = (
         f"highpass=f={int(m['highpass_hz'])}{mid},"

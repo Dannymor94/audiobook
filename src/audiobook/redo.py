@@ -25,6 +25,38 @@ def _write_manifest(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
+def _meta_path(out_dir: Path) -> Path:
+    return out_dir / "meta.json"
+
+
+def _retire_stale_candidates(out_dir: Path, row: dict) -> None:
+    """Candidates belong to one chunk TEXT (hash), not to a chunk id: a re-chunk
+    can give id 0042 another text. If the folder holds candidates for another
+    hash (or legacy ones without meta.json), move them to _old_<hash12>/ —
+    never delete — and record the current hash."""
+    meta = _meta_path(out_dir)
+    have = sorted(out_dir.glob("variant_*.wav"))
+    old_hash = None
+    if meta.exists():
+        old_hash = json.loads(meta.read_text(encoding="utf-8")).get("hash")
+    if have and old_hash != row["hash"]:
+        dst = out_dir / f"_old_{(old_hash or 'legacy')[:12]}"
+        n = 1
+        while dst.exists():
+            dst = out_dir / f"_old_{(old_hash or 'legacy')[:12]}_{n}"
+            n += 1
+        dst.mkdir()
+        for f in have:
+            f.replace(dst / f.name)
+        if meta.exists():
+            meta.replace(dst / meta.name)
+        print(f"  старые кандидаты (другой текст чанка) перенесены в {dst.name}/")
+    tmp = meta.parent / (meta.name + ".tmp")
+    tmp.write_text(json.dumps({"hash": row["hash"], "text": row["text"]},
+                              ensure_ascii=False), encoding="utf-8")
+    tmp.replace(meta)
+
+
 def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> int:
     sec_dir = _sec_dir(section)
     manifest_path = sec_dir / "manifest.jsonl"
@@ -36,8 +68,11 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     if row is None:
         raise SystemExit(f"chunk {chunk_id!r} not found in {section}")
 
+    from audiobook.synth import ensure_manifest_current
+    ensure_manifest_current(config, section)
     out_dir = paths.OUT / "redo" / section / chunk_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    _retire_stale_candidates(out_dir, row)
 
     import soundfile as sf
 
@@ -102,6 +137,13 @@ def run_accept(config: dict, section: str, chunk_id: str, variant: int) -> int:
     row = next((r for r in rows if r["id"] == chunk_id), None)
     if row is None:
         raise SystemExit(f"chunk {chunk_id!r} not found")
+    meta = _meta_path(redo_dir)
+    cand_hash = (json.loads(meta.read_text(encoding="utf-8")).get("hash")
+                 if meta.exists() else None)
+    if cand_hash != row["hash"]:
+        raise SystemExit(
+            f"accept: кандидаты в {redo_dir} сделаны для другого текста чанка {chunk_id} "
+            f"(или до появления meta.json) — сначала ./run.sh redo {section} {chunk_id}")
 
     import soundfile as sf
     from audiobook.synth import _SAMPLE_RATE, seed_for_chunk

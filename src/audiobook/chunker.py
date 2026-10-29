@@ -485,6 +485,11 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     pauses = (config or {}).get("pauses_ms") or {}
     level_pause = {int(k): int(v) for k, v in (pauses.get("heading_level") or {}).items()}
     p_step = pauses.get("step_label")
+    # config.pauses_ms is the source of truth; module constants are defaults
+    p_sent = int(pauses.get("sentence", PAUSE_SENTENCE))
+    p_par = int(pauses.get("paragraph", PAUSE_PARAGRAPH))
+    p_stack = int(pauses.get("stack", PAUSE_STACK))
+    p_sec = int(pauses.get("chapter", PAUSE_SECTION))
     chunks: list[dict] = []
     for u in units:
         t = u["type"]
@@ -492,7 +497,7 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
             pause = level_pause.get(u["level"], _HEADING_PAUSE.get(u["level"], 600))
             chunks.extend(_heading_chunks(u["text"], pause, pauses))
         elif t == "stack":
-            pause = PAUSE_STACK if not u["last_in_stack"] else PAUSE_PARAGRAPH
+            pause = p_stack if not u["last_in_stack"] else p_par
             chunks.append({"text": u["text"], "pause_after_ms": pause})
         else:  # paragraph, flow, chain, prose_with_arrow
             text = u["text"]
@@ -502,10 +507,10 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
                     chunks.append({"text": label, "pause_after_ms": int(p_step)})
             pieces = chunk_prose(text, lim)
             for i, p in enumerate(pieces):
-                pause = PAUSE_SENTENCE if i < len(pieces) - 1 else PAUSE_PARAGRAPH
+                pause = p_sent if i < len(pieces) - 1 else p_par
                 chunks.append({"text": p, "pause_after_ms": pause})
     if chunks:
-        chunks[-1]["pause_after_ms"] = PAUSE_SECTION
+        chunks[-1]["pause_after_ms"] = p_sec
     return chunks
 
 

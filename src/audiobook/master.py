@@ -19,10 +19,13 @@ def _ff() -> str:
 
 
 def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float,
-                      eq: str = "") -> dict:
-    """Pass 1: run loudnorm in analysis mode, parse its JSON report."""
+                      eq: str = "", highpass_hz: int = 80) -> dict:
+    """Pass 1: run loudnorm in analysis mode, parse its JSON report. The filter
+    chain before loudnorm must equal pass 2's, or the measurement is of
+    different audio."""
     mid = f",{eq}" if eq else ""
-    af = f"highpass=f=80{mid},loudnorm=I={I}:TP={tp}:LRA={lra}:print_format=json"
+    af = (f"highpass=f={int(highpass_hz)}{mid},"
+          f"loudnorm=I={I}:TP={tp}:LRA={lra}:print_format=json")
     p = subprocess.run([ff, "-hide_banner", "-i", str(src), "-af", af, "-f", "null", "-"],
                        capture_output=True, text=True)
     err = p.stderr
@@ -49,12 +52,13 @@ def master_wav(src: Path, out: Path, config: dict) -> dict:
     pass-1 loudnorm measurement."""
     ff = _ff()
     m = config["master"]
-    I, tp, lra = float(m["lufs"]), float(m["true_peak"]), 11.0
+    # LRA above the input's keeps loudnorm in linear mode (no dynamic pumping)
+    I, tp, lra = float(m["lufs"]), float(m["true_peak"]), float(m.get("lra", 11.0))
     sr = int(m["sample_rate"])
     hp = int(m["highpass_hz"])
     eq = m.get("eq_filters", "")
 
-    meas = _loudnorm_measure(ff, src, I, tp, lra, eq)
+    meas = _loudnorm_measure(ff, src, I, tp, lra, eq, hp)
     # Pass 2: apply with measured values (accurate, near-linear normalization).
     mid = f",{eq}" if eq else ""
     af = (

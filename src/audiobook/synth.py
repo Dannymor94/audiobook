@@ -392,6 +392,32 @@ def _write_manifest(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
+def needs_render(row: dict, wav_exists: bool) -> bool:
+    """Render a chunk only if it has no wav, or it is still pending/timed out.
+    A wav that QC already judged (qc_fail / manual) or a human accepted (locked)
+    is never re-rendered here: re-running synth to resume must not replace the
+    manual queue with fresh takes at the base seed."""
+    if not wav_exists:
+        return not row.get("locked")
+    if row.get("locked"):
+        return False
+    return row.get("status") in (None, "pending", "timeout")
+
+
+def ensure_manifest_current(config: dict, section: str) -> None:
+    """Stop if the manifest's hashes no longer match the current text, config,
+    pronounce.yaml and ё map. The model input is built from the LIVE settings
+    while the cache key is the stored hash — rendering on a stale manifest would
+    cache new audio under an old key (or keep old audio for new settings)."""
+    from audiobook.chunker import build_manifest, load_units
+    nn, slug = section.split("_", 1)
+    fresh = build_manifest(load_units(nn, slug), config)
+    rows = _read_manifest(paths.OUT / "sections" / section / "manifest.jsonl")
+    if [(r["id"], r["hash"]) for r in rows] != [(r["id"], r["hash"]) for r in fresh]:
+        raise SystemExit(f"манифест секции {section} устарел (текст, конфиг, pronounce.yaml "
+                         f"или ё изменились) — сначала ./run.sh chunk --section {section}")
+
+
 def render_section(engine, sec_dir: Path, config: dict,
                    first: int | None = None) -> tuple[int, int, int, float]:
     """Synthesise every not-yet-done chunk of one section via ``engine`` (a
@@ -416,7 +442,7 @@ def render_section(engine, sec_dir: Path, config: dict,
     synth_audio_s = 0.0
     for row in rows[:first]:
         wav_path = chunks_dir / f"{row['id']}.wav"
-        if row.get("status") == "done" and wav_path.exists():
+        if not needs_render(row, wav_path.exists()):
             skipped += 1
             continue
         wav, used_seed = _synth_one_chunk(row, config, table, sentinel, engine, retries)
@@ -453,6 +479,15 @@ def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
 
     table = load_table()
     chunks_dir = Path(chunks_dir_str)
+    try:
+        _render_group(wcfg, timeout_s, sentinel, retries, group, chunks_dir, out_q,
+                      config, table, sf, TimeoutSynth)
+    finally:
+        out_q.put(None)  # always, even if a chunk raised — the parent counts these
+
+
+def _render_group(wcfg, timeout_s, sentinel, retries, group, chunks_dir, out_q,
+                  config, table, sf, TimeoutSynth) -> None:
     with TimeoutSynth(wcfg, timeout_s) as engine:
         for row in group:
             wav, used = _synth_one_chunk(row, config, table, sentinel, engine, retries)
@@ -467,7 +502,6 @@ def _render_group_worker(wcfg, timeout_s, sentinel, retries, group,
             out_q.put({"id": row["id"], "status": "done", "seed": used,
                        "duration_ms": round(len(wav) / _SAMPLE_RATE * 1000),
                        "audio_s": len(wav) / _SAMPLE_RATE})
-    out_q.put(None)
 
 
 def _plan_parallel(rows: list[dict], chunks_dir: Path, num_workers: int
@@ -477,8 +511,7 @@ def _plan_parallel(rows: list[dict], chunks_dir: Path, num_workers: int
     manifest that claims done but lost its wav is re-synthesised. Round-robin (not
     contiguous) so no worker gets a run of unusually long chunks. Pure — the
     resume/partition correctness is unit-tested without models."""
-    todo = [r for r in rows
-            if not (r.get("status") == "done" and (chunks_dir / f"{r['id']}.wav").exists())]
+    todo = [r for r in rows if needs_render(r, (chunks_dir / f"{r['id']}.wav").exists())]
     skipped = len(rows) - len(todo)
     groups: list[list[dict]] = [[] for _ in range(num_workers)]
     for i, row in enumerate(todo):
@@ -522,9 +555,16 @@ def render_section_parallel(sec_dir: Path, config: dict, wcfg: dict, timeout_s: 
 
     synthesised = timed_out = 0
     synth_audio_s = 0.0
+    import queue as _queue
     live = len(procs)
     while live:
-        res = out_q.get()
+        try:
+            res = out_q.get(timeout=30)
+        except _queue.Empty:
+            if not any(p.is_alive() for p in procs):
+                log.error("parallel render: all workers exited without finishing")
+                break
+            continue
         if res is None:
             live -= 1
             continue
@@ -550,6 +590,11 @@ def worker_config(config: dict, num_workers: int = 1) -> dict:
     load the same weights and the same voice prompt."""
     v = voicecfg.variant(config)
     limit = _MAX_WORKERS.get(v)
+    if config.get("pauses_ms", {}).get("enum_pause_ms"):
+        raise SystemExit(
+            "pauses_ms.enum_pause_ms > 0 не поддерживается: разбиение на фрагменты "
+            "теряет фразовые правки pronounce.yaml и не попадает в хеш (ревью). "
+            "Оставь 0, перечисления правятся через text_prep/pronounce.")
     if limit is not None and num_workers > limit:
         raise SystemExit(
             f"synth: модель {v} — не больше {limit} воркеров "
@@ -582,6 +627,7 @@ def run(config: dict, section: str | None = None, num_workers: int = 1,
     rcfg = config.get("render", {})
     timeout_s = rcfg.get("chunk_timeout_s", 120)
     wcfg = worker_config(config, num_workers)
+    ensure_manifest_current(config, section)
 
     t0 = time.perf_counter()
     if num_workers > 1:
