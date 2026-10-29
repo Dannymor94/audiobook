@@ -31,9 +31,44 @@ def mmss(ms: float) -> str:
 def read_index(path: Path) -> dict[str, tuple[int, int]]:
     out = {}
     for line in path.read_text(encoding="utf-8").splitlines()[1:]:
-        cid, start, lead = line.split("\t")
+        if not line.strip():
+            continue
+        cid, start, lead = line.split("\t")[:3]
         out[cid] = (int(start), int(lead))
     return out
+
+
+def read_index_identity(path: Path) -> list[tuple[str, str, str]] | None:
+    """[(id, hash16, seed)] from an index with those columns; None for an old
+    3-column index (then only the mtime/id check is possible)."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or "hash16" not in lines[0].split("\t"):
+        return None
+    out = []
+    for ln in lines[1:]:
+        if ln.strip():
+            f = ln.split("\t")
+            out.append((f[0], f[3], f[4] if len(f) > 4 else ""))
+    return out
+
+
+def manifest_identity(rows: list[dict], first: int | None) -> list[tuple[str, str, str]]:
+    return [(str(r["id"]), str(r.get("hash", ""))[:16], str(r.get("seed_override") or r.get("seed") or ""))
+            for r in (rows[:first] if first else rows)]
+
+
+def check_identity(index_ident: list[tuple[str, str, str]], rows: list[dict],
+                   first: int | None) -> str | None:
+    """Exact check: the assembled audio is the manifest's audio iff every chunk
+    has the same id, hash and seed. A later qc that only adds flag_words passes."""
+    want = manifest_identity(rows, first)
+    if [i[0] for i in index_ident] != [w[0] for w in want]:
+        return check_index([i[0] for i in index_ident], rows, first, 1.0, 0.0)
+    diff = [i[0] for i, w in zip(index_ident, want) if i != w]
+    if diff:
+        return ("после assemble чанки перерендерены (другой хеш или seed): "
+                + ", ".join(diff[:5]) + (" …" if len(diff) > 5 else ""))
+    return None
 
 
 def check_index(index_ids: list[str], rows: list[dict], first: int | None,
@@ -88,8 +123,12 @@ def run(config: dict, section: str | None, first: int | None = None) -> int:
                          + (f" --first {first}" if first else ""))
     manifest = sec_dir / "manifest.jsonl"
     rows = _read_manifest(manifest)
-    why = check_index(read_index_ids(idx_path), rows, first,
-                      idx_path.stat().st_mtime, manifest.stat().st_mtime)
+    ident = read_index_identity(idx_path)
+    if ident is not None:
+        why = check_identity(ident, rows, first)
+    else:
+        why = check_index(read_index_ids(idx_path), rows, first,
+                          idx_path.stat().st_mtime, manifest.stat().st_mtime)
     if why:
         raise SystemExit(f"suspects: {idx_path.name} не от текущего манифеста: {why}. "
                          "Сначала assemble --section " + section

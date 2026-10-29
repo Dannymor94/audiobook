@@ -67,12 +67,26 @@ def assemble_section(sec_dir: Path, config: dict,
     chunks_dir = sec_dir / "chunks"
     section, stats = join_chunks(rows, chunks_dir, config)
     out = sec_dir / f"{preview_name(first)}.wav"
-    with open(sec_dir / f"{preview_name(first)}.index.tsv", "w", encoding="utf-8") as f:
-        f.write("id\tstart_ms\tlead_ms\n")
-        for st in stats:
-            f.write(f"{st['id']}\t{st['start_ms']}\t{st['lead_ms']}\n")
+    write_index(sec_dir / f"{preview_name(first)}.index.tsv", rows, stats)
     sf.write(str(out), section, _SR, subtype="FLOAT")  # float: no clipping before master
     return out, stats
+
+
+INDEX_COLUMNS = ("id", "start_ms", "lead_ms", "hash16", "seed")
+
+
+def write_index(path: Path, rows: list[dict], stats: list[dict]) -> None:
+    """<stem>.index.tsv: where each chunk sits in the section, plus the chunk's
+    hash16 and seed — the audio identity suspects checks against the manifest
+    (a qc re-take keeps the hash but changes the seed). Atomic write."""
+    tmp = path.with_name(path.name + ".part")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\t".join(INDEX_COLUMNS) + "\n")
+        for row, st in zip(rows, stats):
+            seed = row.get("seed_override") or row.get("seed") or ""
+            f.write(f"{st['id']}\t{st['start_ms']}\t{st['lead_ms']}\t"
+                    f"{str(row.get('hash', ''))[:16]}\t{seed}\n")
+    tmp.replace(path)
 
 
 def join_chunks(rows: list[dict], chunks_dir: Path,

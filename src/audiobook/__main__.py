@@ -25,8 +25,8 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def main(argv: list[str] | None = None) -> int:
-    paths.apply_env_defaults()
+def build_parser() -> argparse.ArgumentParser:
+    """The whole CLI parser; jobqueue uses it to validate `queue add` args."""
     p = argparse.ArgumentParser(prog="audiobook")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor", help="проверка окружения")
@@ -88,7 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     gi.add_argument("--max", type=int, default=40, help="максимум чанков от probe (default 40)")
     gr = gsub.add_parser("render", help="рендер набора → out/golden/<tag>/")
     gr.add_argument("--tag", required=True, help="имя прогона (например baseline)")
-    gr.add_argument("--workers", type=int, default=1, help="воркеров синтеза (default 1)")
+    gr.add_argument("--workers", type=int, default=1,
+                    help="игнорируется: golden всегда рендерит одним воркером")
     gc = gsub.add_parser("compare", help="пары A/B → out/golden/compare_A_B/")
     gc.add_argument("tag_a")
     gc.add_argument("tag_b")
@@ -129,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
         if name in ("synth", "assemble", "master"):
             s.add_argument("--first", type=int, default=None,
                            help="только первые N чанков секции (превью → preview_firstN)")
-    a = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    paths.apply_env_defaults()
+    a = build_parser().parse_args(argv)
     if a.cmd in _MAIN_CONFIG_ONLY and os.environ.get("AUDIOBOOK_CONFIG"):
         print(f"{a.cmd}: AUDIOBOOK_CONFIG задан — эта команда пишет в кеш и манифесты "
               "книги и работает только с config.yaml", file=sys.stderr)

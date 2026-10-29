@@ -179,7 +179,7 @@ def test_two_workers_never_overlap_and_take_each_job_once(tmp_path):
     q = tmp_path / "q"
     events, release = tmp_path / "events.txt", tmp_path / "release"
     waiting = tmp_path / "waiting_B"
-    ids = [jq.add_job(["doctor", str(i)], q)["id"] for i in range(4)]
+    ids = [jq.add_job(["probe", "--max", str(i)], q)["id"] for i in range(4)]
 
     ctx = mp.get_context("spawn")
     a = ctx.Process(target=_worker_proc, args=(str(q), str(events), str(release), "A", str(tmp_path / "waiting_A")))
