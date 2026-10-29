@@ -6,9 +6,21 @@ import sys
 from . import paths
 
 
+def config_path():
+    """config.yaml, or AUDIOBOOK_CONFIG (relative to the project root) for an
+    A/B trial with a temporary copy — never for the book render."""
+    import os
+    from pathlib import Path
+    env = os.environ.get("AUDIOBOOK_CONFIG")
+    if not env:
+        return paths.ROOT / "config.yaml"
+    p = Path(env)
+    return p if p.is_absolute() else paths.ROOT / p
+
+
 def load_config() -> dict:
     import yaml
-    with open(paths.ROOT / "config.yaml", encoding="utf-8") as f:
+    with open(config_path(), encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

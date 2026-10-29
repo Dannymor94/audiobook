@@ -656,3 +656,11 @@ def test_ctc_greedy():
     from audiobook.phoneme_check import ctc_greedy
     id2tok = {0: "<pad>", 1: "a", 2: "b", 3: "|"}
     assert ctc_greedy([1, 1, 0, 1, 2, 2, 3, 0], id2tok, 0) == ["a", "a", "b"]
+
+
+def test_config_path_env(monkeypatch, tmp_path):
+    from audiobook import __main__ as cli
+    monkeypatch.delenv("AUDIOBOOK_CONFIG", raising=False)
+    assert cli.config_path() == paths.ROOT / "config.yaml"
+    monkeypatch.setenv("AUDIOBOOK_CONFIG", "out/trial.yaml")
+    assert cli.config_path() == paths.ROOT / "out" / "trial.yaml"
