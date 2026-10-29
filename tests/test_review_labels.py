@@ -134,19 +134,20 @@ def test_review_probe_dir_with_hash_column(tmp_path):
     h1, h2 = "a" * 16, "b" * 16
     for h in (h1, h2):
         _wav(d / "chunks" / f"{h}.wav")
-    _wav(d / "chunks" / ("c" * 16 + ".wav"))                  # not in the index: still listed
+    _wav(d / "chunks" / ("c" * 16 + ".wav"))                  # not in the index: ignored
     (d / "index.tsv").write_text(
         "start\tsection\tchunk\ttags\ttext\thash\n"
         f"0:00\t01_sec\t0002\thomograph:x\tПлейсхолдер два.\t{h2}\n"
         f"0:05\t01_sec\t0001\tlatin:PDF\tПлейсхолдер один.\t{h1}\n", encoding="utf-8")
     text = _page(review.build_review(d))
-    files = [f"chunks/{h}.wav" for h in (h2, h1, "c" * 16)]
+    files = [f"chunks/{h}.wav" for h in (h2, h1)]
     _assert_selfcontained(text, files)
     data = _data(text)
     assert data["kind"] == "probe"
-    assert [i["file"] for i in data["items"]] == files       # index (listening) order first
+    assert [i["file"] for i in data["items"]] == files       # index (listening) order, index only
+    assert "c" * 16 not in text
     assert data["items"][0]["meta"]["chunk"] == "0002" and "homograph:x" in text
-    assert "Плейсхолдер один." in text and data["items"][2]["meta"].get("chunk") is None
+    assert "Плейсхолдер один." in text
 
 
 def test_review_probe_maps_hash_via_manifests(tmp_path):
@@ -340,3 +341,195 @@ def test_cli_review_and_labels(tmp_path, journal, capsys):
     assert "добавлено 3" in capsys.readouterr().out
     assert main(["labels", "show", "--section", "S"]) == 0
     assert "всего 3" in capsys.readouterr().out
+
+
+# ── page identity (labels must not collide across pages / runs) ──────────────
+
+def test_review_page_id_differs_for_same_title_and_is_stable(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    d1 = tmp_path / "out" / "pron_test" / "run1"
+    d2 = tmp_path / "out" / "pron_test" / "run2"
+    for d in (d1, d2):
+        _wav(d / "1.wav")
+    t1 = _page(review.build_review(d1, "одно имя"))
+    t2 = _page(review.build_review(d2, "одно имя"))
+    p1, p2 = _data(t1)["page_id"], _data(t2)["page_id"]
+    assert p1 and p2 and p1 != p2 and len(p1) == 10
+    assert _data(_page(review.build_review(d1, "одно имя")))["page_id"] == p1   # rebuilt page
+    assert 'DATA.title + ":" + (DATA.page_id' in t1                # storage key = title + page_id
+    assert "page_id: DATA.page_id" in t1                            # exported JSON carries it
+    assert '"_" + DATA.page_id' in t1                               # download name too
+    # same folder, same name, other audio (a re-run) → another page
+    _wav(d1 / "1.wav", n=4800)
+    assert _data(_page(review.build_review(d1, "одно имя")))["page_id"] != p1
+
+
+def test_review_items_carry_section_chunk_hash(tmp_path):
+    d = tmp_path / "probe"
+    h = "e" * 16
+    _wav(d / "chunks" / f"{h}.wav")
+    (d / "index.tsv").write_text("start\tsection\tchunk\ttags\ttext\thash\n"
+                                 f"0:00\t03_sec\t0004\tx\tПлейсхолдер.\t{h}\n", encoding="utf-8")
+    it = _data(_page(review.build_review(d)))["items"][0]
+    assert (it["section"], it["chunk"], it["hash"]) == ("03_sec", "0004", h)
+    t = _page(d / "review.html")
+    assert "hash: it.hash" in t and "section: it.section" in t and "chunk: it.chunk" in t
+
+
+def test_review_probe_without_index_is_generic(tmp_path):
+    d = tmp_path / "probe"
+    _wav(d / "chunks" / ("a" * 16 + ".wav"))
+    kind, groups = review.collect(d)                         # no index → not "probe", wav still listed
+    assert kind != "probe" and [it["file"] for g in groups for it in g] == ["chunks/" + "a" * 16 + ".wav"]
+
+
+def test_review_probe_old_index_ignores_unmapped_wavs(tmp_path):
+    out_root = tmp_path / "out"
+    d = out_root / "probe"
+    _wav(d / "chunks" / ("d" * 16 + ".wav"))
+    _wav(d / "chunks" / ("f" * 16 + ".wav"))                  # in no manifest, not in index
+    (d / "index.tsv").write_text(
+        "start\tsection\tchunk\ttags\ttext\n0:00\t02_sec\t0009\tcaps_word\tПлейсхолдер.\n",
+        encoding="utf-8")
+    sec = out_root / "sections" / "02_sec"
+    sec.mkdir(parents=True)
+    (sec / "manifest.jsonl").write_text(
+        json.dumps({"id": "0009", "text": "Плейсхолдер.", "hash": "d" * 40}) + "\n", encoding="utf-8")
+    data = _data(_page(review.build_review(d)))
+    assert [i["file"] for i in data["items"]] == ["chunks/" + "d" * 16 + ".wav"]
+
+
+def test_review_ref_compare_hash16_names_map_to_chunks(tmp_path):
+    out_root = tmp_path / "out"
+    d = out_root / "ref_compare" / "01_sec"
+    sec = out_root / "sections" / "01_sec"
+    sec.mkdir(parents=True)
+    rows = [{"id": "0001", "text": "Плейсхолдер один.", "hash": "1" * 40},
+            {"id": "0002", "text": "Плейсхолдер два.", "hash": "2" * 40}]
+    (sec / "manifest.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    for cand in ("alpha_1", "beta_2"):
+        for r in rows:
+            _wav(d / cand / f"{r['hash'][:16]}.wav")
+    _wav(d / "_old_20260101-000000" / ("9" * 16 + ".wav"))   # archived: not a candidate
+    data = _data(_page(review.build_review(d)))
+    assert data["kind"] == "ref-compare"
+    assert [(i["meta"]["candidate"], i["meta"]["chunk"]) for i in data["items"]] == [
+        ("alpha_1", "0001"), ("beta_2", "0001"), ("alpha_1", "0002"), ("beta_2", "0002")]
+    assert data["items"][0]["meta"]["text"] == "Плейсхолдер один."
+    assert data["items"][0]["hash"] == "1" * 16
+
+
+def test_labels_same_file_on_other_page_is_kept(tmp_path, journal):
+    items = [{"file": "1.wav", "label": "ok", "meta": {}}]
+    a = tmp_path / "a.json"
+    a.write_text(json.dumps({"title": "t", "page_id": "p1", "items": items}), encoding="utf-8")
+    b = tmp_path / "b.json"
+    b.write_text(json.dumps({"title": "t", "page_id": "p2", "items": items}), encoding="utf-8")
+    assert labels.import_json(a, None, today="2026-01-02") == (1, 0, 0)
+    assert labels.import_json(b, None, today="2026-01-02") == (1, 0, 0)   # same title+file, other page
+    assert labels.import_json(a, None, today="2026-01-03") == (0, 1, 0)   # same page: duplicate
+    assert [e["page_id"] for e in labels.load()] == ["p1", "p2"]
+
+
+def test_labels_same_file_other_hash_is_kept(tmp_path, journal):
+    def page(h):
+        return [{"file": "chunks/x.wav", "hash": h, "section": "05_sec", "chunk": "0003",
+                 "label": "bad", "meta": {}}]
+    src = tmp_path / "h.json"
+    src.write_text(json.dumps({"title": "t", "page_id": "p", "items": page("a" * 16)}), encoding="utf-8")
+    labels.import_json(src, None, today="2026-01-02")
+    src.write_text(json.dumps({"title": "t", "page_id": "p", "items": page("b" * 16)}), encoding="utf-8")
+    assert labels.import_json(src, None, today="2026-01-02")[0] == 1
+    e1, e2 = labels.load()
+    assert (e1["hash_prefix"], e2["hash_prefix"]) == ("a" * 8, "b" * 8)
+    assert e1["section"] == "05_sec" and e1["chunk"] == "0003"          # item-level fields
+
+
+def test_labels_old_json_without_page_id_still_dedupes_on_title(tmp_path, journal):
+    src = _labels_json(tmp_path)                                         # no page_id
+    assert labels.import_json(src, None, today="2026-01-02")[0] == 3
+    assert all(e["page_id"] == "" for e in labels.load())
+    assert labels.import_json(src, None, today="2026-01-03")[:2] == (0, 3)
+    # an old journal written before page_id existed loads and dedupes too
+    entries = labels.load()
+    for e in entries:
+        e.pop("page_id")
+    labels._write(entries, journal)
+    assert labels.import_json(src, None, today="2026-01-04")[:2] == (0, 3)
+
+
+def test_labels_import_of_real_page_export(tmp_path, journal):
+    """JSON shaped exactly like the page's build(): page_id + item fields."""
+    d = tmp_path / "p"
+    _wav(d / "1.wav")
+    data = _data(_page(review.build_review(d, "страница")))
+    export = {"title": data["title"], "page_id": data["page_id"], "kind": data["kind"],
+              "items": [{"file": it["file"], "section": it.get("section", ""),
+                         "chunk": it.get("chunk", ""), "hash": it.get("hash", ""),
+                         "label": "ok", "issue": "", "comment": "", "meta": it["meta"]}
+                        for it in data["items"]]}
+    src = tmp_path / "e.json"
+    src.write_text(json.dumps(export, ensure_ascii=False), encoding="utf-8")
+    assert labels.import_json(src, None, today="2026-01-02") == (1, 0, 0)
+    assert labels.load()[0]["page_id"] == data["page_id"]
+
+
+# ── pron-test: a previous run is moved aside, never deleted ──────────────────
+
+def test_pron_test_previous_run_moved_to_old(tmp_path, capsys):
+    from audiobook.pron_test import archive_previous_run
+    out, _ = _pron_dir(tmp_path)                             # 1..4.wav + meta.tsv
+    (out / "all.mp3").write_bytes(b"mp3")
+    (out / "review.html").write_text("page", encoding="utf-8")
+    (out / "notes.txt").write_text("keep", encoding="utf-8")
+    old = archive_previous_run(out)
+    assert old is not None and old.parent == out and old.name.startswith("_old_")
+    assert sorted(p.name for p in old.iterdir()) == [
+        "1.wav", "2.wav", "3.wav", "4.wav", "all.mp3", "meta.tsv", "review.html"]
+    assert sorted(p.name for p in out.iterdir() if p.is_file()) == ["notes.txt"]
+    assert "перенесены" in capsys.readouterr().out
+    assert archive_previous_run(out) is None                 # nothing left to move
+    # new run with fewer takes: no stale 3.wav/4.wav next to the new ones
+    row = {"id": "0007", "text": "Плейсхолдер.", "hash": "b" * 40, "seed_override": None}
+    res = render_variants(_Eng(), row, _CFG, variant_tables({}, "Слово", ["-"]), seeds=2)
+    write_results(out, [(row, res)])
+    assert sorted(p.name for p in out.glob("*.wav")) == ["1.wav", "2.wav"]
+    kind, groups = review.collect(out)
+    assert kind == "pron-test" and len(groups) == 2
+
+
+def test_pron_test_run_archives_before_rendering(tmp_path, monkeypatch):
+    import audiobook.master as master_mod
+    import audiobook.pronounce as pron_mod
+    import audiobook.synth as synth_mod
+    import audiobook.worker as worker_mod
+    from audiobook import pron_test
+    from audiobook.synth import _write_manifest
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    sec = tmp_path / "out" / "sections" / "01_sec"
+    sec.mkdir(parents=True)
+    _write_manifest(sec / "manifest.jsonl",
+                    [{"id": "0001", "text": "Плейсхолдер Слово тут.", "hash": "a" * 40}])
+    out = tmp_path / "out" / "pron_test" / "01_sec_0001_Слово"
+    _wav(out / "9.wav")                                       # leftover of an older, longer run
+
+    class Ctx:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            assert not (out / "9.wav").exists()               # moved before the engine starts
+            return _Eng()
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(worker_mod, "TimeoutSynth", Ctx)
+    monkeypatch.setattr(synth_mod, "worker_config", lambda c, w: {})
+    monkeypatch.setattr(pron_mod, "load_table", lambda: {})
+    monkeypatch.setattr(master_mod, "master_wav", lambda src, dst, cfg: dst.write_bytes(b"m"))
+    cfg = dict(_CFG, render={"chunk_timeout_s": 5})
+    assert pron_test.run(cfg, "01_sec", "Слово", ["-"], seeds=1) == 0
+    (old,) = [p for p in out.iterdir() if p.is_dir()]
+    assert (old / "9.wav").exists() and sorted(p.name for p in out.glob("*.wav")) == ["1.wav"]

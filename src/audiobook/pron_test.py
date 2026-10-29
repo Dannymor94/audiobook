@@ -7,7 +7,10 @@ Each variant is the current pronounce table with ``word`` → that spelling
 ("-" = no entry, the plain word). The chunk is found by whole-word match
 (or given with --chunk). Same seed for every variant, so the spelling is the
 only difference. Writes out/pron_test/<section>_<id>_<word>/<n>.wav and all.mp3
-(variants in --try order, each in --seeds takes, 1.2 s apart). Never touches text/pronounce.yaml, the
+(variants in --try order, each in --seeds takes, 1.2 s apart). Leftovers of a previous
+run in the same folder (n.wav, meta.tsv, all.mp3, review.html) are moved to
+_old_<timestamp>/ before rendering — never deleted, never mixed with the new
+takes (a shorter --try list would otherwise leave stale n.wav). Never touches text/pronounce.yaml, the
 manifest or the chunk cache — the chosen spelling is then added to
 pronounce.yaml by hand (it enters only the affected chunks' hashes).
 
@@ -81,6 +84,23 @@ def _mmss(t: float) -> str:
     return f"{m}:{sec:02d}"
 
 
+_LEFTOVER_RE = re.compile(r"\d+\.wav")
+LEFTOVER_FILES = ("meta.tsv", "meta.tsv.part", "all.mp3", "all.wav", "review.html")
+
+
+def previous_run_files(out_dir: Path) -> list[Path]:
+    """Files a previous pron-test run left in ``out_dir``."""
+    if not out_dir.is_dir():
+        return []
+    nums = sorted(p for p in out_dir.iterdir() if p.is_file() and _LEFTOVER_RE.fullmatch(p.name))
+    return nums + [out_dir / n for n in LEFTOVER_FILES if (out_dir / n).is_file()]
+
+
+def archive_previous_run(out_dir: Path) -> Path | None:
+    from audiobook.review import archive_stale
+    return archive_stale(out_dir, previous_run_files(out_dir))
+
+
 def write_results(out_dir: Path, results: list[tuple[dict, list]]) -> list[np.ndarray]:
     """Write <n>.wav per variant/take plus meta.tsv (n, chunk, variant, take,
     start, synth_text) next to them — the review page reads it for captions.
@@ -142,6 +162,7 @@ def run(config: dict, section: str, word: str, variants: list[str],
     tag = picked[0]["id"] if len(picked) == 1 else f"{len(picked)}chunks"
     out_dir = paths.OUT / "pron_test" / f"{section}_{tag}_{word}"
     out_dir.mkdir(parents=True, exist_ok=True)
+    archive_previous_run(out_dir)
     timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
     with TimeoutSynth(worker_config(config, 1), timeout_s) as engine:
         results = [(row, render_variants(engine, row, config, tables, seeds))

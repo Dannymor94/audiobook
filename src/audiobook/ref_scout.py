@@ -9,14 +9,19 @@ Steps: decode → whisper segments (phrase bounds + draft text) → windows of
 consecutive segments → rate (chars/s, CER-normalized text) and pitch spread
 (p10–p90 of F0 in semitones) → keep windows within the rate band, rank by
 spread, pick K non-overlapping → cut to ref/candidates/scout_MMSS.wav with a
-.draft.txt next to it. Drafts are NEVER used for latents: a human listens,
+.draft.txt next to it (scout_MMSS_2.wav… if that name is taken: an existing
+candidate is never overwritten). The cut snaps to the nearest pause but never
+crosses the end of the previous / the start of the next whisper segment. Drafts are NEVER used for latents: a human listens,
 fixes the text and renames it to .txt (then `ref-compare`).
 
 Also writes out/ref_scout/report.tsv (all windows) and listen_all.mp3
-(the picks back to back, 1.5 s apart) for a quick audition.
+(the picks back to back, 1.5 s apart) for a quick audition. The decoded source
+is cached as out/ref_scout/source_<key>_16k.wav / _24k.wav, key = hash of the
+source path, size and mtime — another recording never reuses a stale decode.
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,15 +105,28 @@ def pick(cands: list[Window], target_rate: float, tol: float, k: int) -> list[Wi
 
 
 def snap_to_silence(y: np.ndarray, sr: int, t: float, side: str,
-                    reach: float = 0.8, inside: float = 0.15) -> tuple[float, float]:
+                    reach: float = 0.8, inside: float = 0.15,
+                    bound: float | None = None) -> tuple[float, float]:
     """Move a cut point to the quietest 20 ms spot nearby. Whisper segment edges
     are not silence-aligned (adjacent segments share an edge, gap 0.00 s) and
     clipped the onset of scout_2526's first word. For a start we search
     [t-reach, t+inside], for an end [t-inside, t+reach]: the quietest spot there
     is the pause between words, so the cut never splits a word.
     Returns (time, depth_db) — depth of that spot vs the median frame level;
-    around -20 dB or lower is a real pause, near 0 dB means none was found."""
+    around -20 dB or lower is a real pause, near 0 dB means none was found.
+
+    ``bound`` is a hard limit on the outward reach: for a start the end of the
+    previous segment (the cut never goes earlier), for an end the start of the
+    next segment (never later) — so a cut never takes in a neighbour's words.
+    When segments abut (gap 0) the start cannot move earlier than ``t``."""
     lo, hi = (t - reach, t + inside) if side == "start" else (t - inside, t + reach)
+    if bound is not None:
+        if side == "start":
+            lo = max(lo, bound)
+        else:
+            hi = min(hi, bound)
+    if not lo < hi:
+        return t, 0.0  # no room inside the bounds: keep the segment edge
     a, b = max(0, int(lo * sr)), min(len(y), int(hi * sr))
     frame, hop = int(0.02 * sr), int(0.005 * sr)
     seg = y[a:b]
@@ -128,6 +146,26 @@ def mmss(t: float) -> str:
     return f"{m:02d}{s:02d}"
 
 
+def source_key(src: Path) -> str:
+    """Short hash of the source path + size + mtime: names the decode cache."""
+    st = src.stat()
+    raw = f"{src.resolve()}\x00{st.st_size}\x00{st.st_mtime_ns}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def free_name(cdir: Path, base: str) -> str:
+    """``base`` if no candidate file of that name exists, else base_2, base_3…
+    (wav, confirmed .txt or .draft.txt all count as taken)."""
+    def taken(n: str) -> bool:
+        return any((cdir / f"{n}{ext}").exists() for ext in (".wav", ".txt", ".draft.txt"))
+    if not taken(base):
+        return base
+    k = 2
+    while taken(f"{base}_{k}"):
+        k += 1
+    return f"{base}_{k}"
+
+
 # ── audio / models ────────────────────────────────────────────────────────────
 
 def _ff() -> str:
@@ -138,8 +176,10 @@ def _ff() -> str:
 
 
 def _decode(src: Path, out: Path, sr: int) -> None:
+    tmp = out.with_name(f"{out.stem}.part{out.suffix}")  # ffmpeg picks the format by suffix
     subprocess.run([_ff(), "-hide_banner", "-y", "-i", str(src), "-ac", "1",
-                    "-ar", str(sr), str(out)], capture_output=True, check=True)
+                    "-ar", str(sr), str(tmp)], capture_output=True, check=True)
+    tmp.replace(out)
 
 
 def _segments(wav: Path) -> list[Seg]:
@@ -177,8 +217,9 @@ def run(config: dict, src: str, k: int = 6, tol: float = 0.10) -> int:
 
     work = paths.OUT / "ref_scout"
     work.mkdir(parents=True, exist_ok=True)
-    wav16 = work / "source_16k.wav"
-    wav24 = work / "source_24k.wav"
+    key = source_key(src_p)
+    wav16 = work / f"source_{key}_16k.wav"
+    wav24 = work / f"source_{key}_24k.wav"
     if not wav16.exists():
         _decode(src_p, wav16, _SR)
     if not wav24.exists():
@@ -210,11 +251,13 @@ def run(config: dict, src: str, k: int = 6, tol: float = 0.10) -> int:
     listen: list[np.ndarray] = []
     print(f"цель темпа (текущий референс): {target:.2f} симв/с")
     for w in chosen:
-        name = f"scout_{mmss(w.start)}"
-        a, da = snap_to_silence(full, 24_000, w.start, "start")
-        b, db = snap_to_silence(full, 24_000, w.end, "end")
+        name = free_name(cdir, f"scout_{mmss(w.start)}")
+        a, da = snap_to_silence(full, 24_000, w.start, "start", bound=w.prev_end)
+        b, db = snap_to_silence(full, 24_000, w.end, "end", bound=w.next_start)
         clip = full[int(a * 24_000):int(b * 24_000)]
-        sf.write(str(cdir / f"{name}.wav"), clip, 24_000, subtype="PCM_16")
+        tmp = cdir / f"{name}.wav.part"
+        sf.write(str(tmp), clip, 24_000, subtype="PCM_16", format="WAV")
+        tmp.replace(cdir / f"{name}.wav")
         (cdir / f"{name}.draft.txt").write_text(w.text + "\n", encoding="utf-8")
         listen += [clip, gap]
         print(f"{name}  {mmss(w.start)[:2]}:{mmss(w.start)[2:]}  {w.dur:4.1f} с  "

@@ -372,7 +372,7 @@ def test_ref_compare_render_resumable_no_silence(tmp_path):
     out = tmp_path / "cand"
     cfg = _cfg(render={"timeout_retries": 1})
     assert render_candidate(Eng(), rows, cfg, out) == 1
-    assert (out / "0001.wav").exists() and not (out / "0002.wav").exists()
+    assert (out / f"{'1' * 16}.wav").exists() and not (out / f"{'2' * 16}.wav").exists()
     before = Eng.calls
     render_candidate(Eng(), rows[:1], cfg, out)
     assert Eng.calls == before  # resumed: nothing re-synthesised

@@ -7,7 +7,11 @@ is checked by ear on the same material with one command.
   golden init            build the list: one chunk per probe tag + fixed entries
   golden render --tag T  out/golden/T/<hash16>.wav (resume), index.tsv, golden.mp3,
                          settings.json (snapshot of the settings that shape the sound)
-  golden compare A B     out/golden/compare_A_B/NN_A.wav, NN_B.wav, compare.mp3, index.tsv
+  golden compare A B     out/golden/compare_A_B/NN_A.wav, NN_B.wav, compare.mp3 and
+                         index.tsv (n, file_a, file_b, section, chunk, why, text,
+                         tag_a, tag_b, start, hash_a, hash_b) — the review page
+                         reads it for captions. Files of a previous compare are
+                         moved to _old_<timestamp>/ first (never deleted).
 
 Chunks are built in memory with the current config (like probe): nothing is
 written to the manifests or the chunk cache. Only chosen chunks are synthesised.
@@ -18,6 +22,8 @@ import json
 import re
 import shutil
 from pathlib import Path
+
+from audiobook.review import archive_stale, read_tsv
 
 import numpy as np
 
@@ -218,7 +224,8 @@ def render_items(resolved: list[tuple[dict, dict]], config: dict, out_dir: Path,
     _write_atomic(out_dir / "index.tsv", "".join(lines))
 
     snap = settings_snapshot(config)
-    snap["entries"] = [{k: it[k] for k in ("n", "section", "match", "why", "hash16")}
+    snap["entries"] = [{k: it[k] for k in ("n", "section", "chunk", "match", "why",
+                                           "hash16", "text")}
                        for it in items]
     _write_atomic(out_dir / "settings.json",
                   json.dumps(snap, ensure_ascii=False, indent=2) + "\n")
@@ -234,7 +241,13 @@ def render_items(resolved: list[tuple[dict, dict]], config: dict, out_dir: Path,
 
 
 def run_render(config: dict, tag: str, workers: int = 1, engine=None) -> int:
+    """``workers`` is accepted for CLI compatibility only: the render loop is
+    serial (one chunk at a time), so more workers would only hold more model
+    copies in RAM. Always one worker; >1 prints a warning."""
     check_tag(tag)
+    if workers and workers > 1:
+        print(f"ВНИМАНИЕ: --workers {workers} игнорируется — golden рендерит чанки "
+              "по одному, воркер всегда один")
     entries = load_entries()
     resolved = resolve(entries, config)
     out_dir = golden_dir() / tag
@@ -248,7 +261,7 @@ def run_render(config: dict, tag: str, workers: int = 1, engine=None) -> int:
             timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
             # int8 quantize_dynamic on 1.7B takes several minutes; allow up to 30 min on respawn
             start_timeout_s = max(1800, timeout_s * 3)
-            with TimeoutSynth(worker_config(config, workers), timeout_s,
+            with TimeoutSynth(worker_config(config, 1), timeout_s,
                               start_timeout_s=start_timeout_s) as eng:
                 items = render_items(resolved, config, out_dir, eng)
         else:
@@ -267,7 +280,35 @@ def _load_tag(tag: str) -> list[dict]:
     sj = d / "settings.json"
     if not sj.exists():
         raise SystemExit(f"нет {sj}: сначала `golden render --tag {tag}`")
-    return json.loads(sj.read_text(encoding="utf-8")).get("entries", [])
+    entries = json.loads(sj.read_text(encoding="utf-8")).get("entries", [])
+    # renders made before chunk/text went into settings.json: take them from index.tsv
+    if any("chunk" not in e or "text" not in e for e in entries) and (d / "index.tsv").exists():
+        by_h = {r.get("hash16", ""): r for r in read_tsv(d / "index.tsv")}
+        for e in entries:
+            r = by_h.get(e.get("hash16", ""), {})
+            e.setdefault("chunk", r.get("chunk", ""))
+            e.setdefault("text", r.get("text", ""))
+    return entries
+
+
+_STALE_RE = re.compile(r"\d+_.+")
+COMPARE_COLUMNS = ["n", "file_a", "file_b", "section", "chunk", "why", "text",
+                   "tag_a", "tag_b", "start", "hash_a", "hash_b"]
+
+
+def _one_line(s: str) -> str:
+    return " ".join(str(s).split())  # tsv cell: no tabs/newlines
+
+
+def stale_compare_files(out_dir: Path) -> list[Path]:
+    """NN_* files of a previous compare plus the files that describe them."""
+    if not out_dir.is_dir():
+        return []
+    nn = [p for p in out_dir.iterdir() if p.is_file() and _STALE_RE.fullmatch(p.name)]
+    if not nn:
+        return []
+    extra = [out_dir / n for n in ("index.tsv", "compare.mp3", "review.html")]
+    return sorted(nn) + [p for p in extra if p.is_file()]
 
 
 def run_compare(config: dict, a: str, b: str) -> int:
@@ -276,9 +317,10 @@ def run_compare(config: dict, a: str, b: str) -> int:
     by_b = {(e["section"], e["match"]): e for e in eb}
     out_dir = golden_dir() / f"compare_{a}_{b}"
     out_dir.mkdir(parents=True, exist_ok=True)
+    archive_stale(out_dir, stale_compare_files(out_dir))
 
     parts: list[np.ndarray] = []
-    lines = ["n\tsection\twhy\tstart\twav_a\twav_b\n"]
+    lines = ["\t".join(COMPARE_COLUMNS) + "\n"]
     t = 0.0
     n = 0
     for e in ea:
@@ -287,18 +329,24 @@ def run_compare(config: dict, a: str, b: str) -> int:
         if key not in by_b:
             print(f"  ПРОПУСК: нет в {b}: {e['section']} {e['match']!r}")
             continue
-        pb = golden_dir() / b / f"{by_b[key]['hash16']}.wav"
+        eb_ = by_b[key]
+        pb = golden_dir() / b / f"{eb_['hash16']}.wav"
         missing = [x for x, p in ((a, pa), (b, pb)) if not p.exists()]
         if missing:
             print(f"  ПРОПУСК: нет wav в {', '.join(missing)}: {e['section']} {e['match']!r}")
             continue
         n += 1
-        na, nb = out_dir / f"{n:02d}_{a}.wav", out_dir / f"{n:02d}_{b}.wav"
+        na, nb = out_dir / f"{n:02d}_A.wav", out_dir / f"{n:02d}_B.wav"
         shutil.copyfile(pa, na)
         shutil.copyfile(pb, nb)
         wa, _ = sf.read(str(pa), dtype="float32")
         wb, _ = sf.read(str(pb), dtype="float32")
-        lines.append(f"{n}\t{e['section']}\t{e['why']}\t{mmss(t)}\t{na.name}\t{nb.name}\n")
+        chunk = e.get("chunk", "")
+        if eb_.get("chunk") and eb_.get("chunk") != chunk:
+            chunk = f"{chunk}/{eb_['chunk']}"  # re-chunked between the tags
+        cells = [str(n), na.name, nb.name, e["section"], chunk, e.get("why", ""),
+                 e.get("text", "") or e["match"], a, b, mmss(t), e["hash16"], eb_["hash16"]]
+        lines.append("\t".join(_one_line(c) for c in cells) + "\n")
         parts += [wa, np.zeros(int(COMPARE_A_B_S * _SAMPLE_RATE), dtype=np.float32),
                   wb, np.zeros(int(COMPARE_ITEM_S * _SAMPLE_RATE), dtype=np.float32)]
         t += (len(wa) + len(wb)) / _SAMPLE_RATE + COMPARE_A_B_S + COMPARE_ITEM_S
@@ -312,5 +360,6 @@ def run_compare(config: dict, a: str, b: str) -> int:
         master_wav(raw, out_dir / "compare.mp3", config)
     finally:
         raw.unlink(missing_ok=True)
-    print(f"сравнение {a} / {b}: {n} пар → {out_dir / 'compare.mp3'}  ({out_dir / 'index.tsv'})")
+    print(f"сравнение {a} (A) / {b} (B): {n} пар → {out_dir / 'compare.mp3'}  "
+          f"({out_dir / 'index.tsv'})")
     return 0

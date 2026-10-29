@@ -22,10 +22,13 @@ from . import paths
 DEFAULT_MAX_LOAD = 4.0
 DEFAULT_MIN_FREE_GB = 16.0
 
-# Commands of `python -m audiobook` that load models or burn CPU for minutes.
+# Commands of `python -m audiobook` that load models or burn CPU for minutes
+# (a superset of __main__._HEAVY, checked by a test). Entries are regex parts:
+# `golden render` synthesises, `golden init|compare` do not.
 HEAVY_SUBCOMMANDS = (
-    "synth", "qc", "probe", "bench", "calibrate", "pick-ref", "ref-compare",
-    "ref-scout", "pron-test", "redo", "headings", "phoneme-check",
+    "synth", "qc", "chunk", "accept", "probe", "bench", "calibrate", "pick-ref",
+    "ref-compare", "ref-scout", "pron-test", "redo", "headings", "phoneme-check",
+    r"golden\s+render",
 )
 HEAVY_RE = re.compile(
     r"whisper|transcri|llama-server|"

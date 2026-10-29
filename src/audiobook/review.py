@@ -4,17 +4,26 @@
 
 Every wav gets a player, buttons хорошо / плохо / ?, an issue select and a
 comment box; marks live in the browser (localStorage) and leave it as
-labels_<title>.json ("Скачать разметку" or "Копировать JSON"), which
+labels_<title>_<page_id>.json ("Скачать разметку" or "Копировать JSON"), which
 ``./run.sh labels import`` appends to the text journal text/labels.yaml.
+
+Page identity: ``page_id`` = short hash of the folder name chain (relative to
+out/, else the last three names) + the sorted wav list with size and mtime.
+It keys the browser storage (title + page_id) and goes into the exported JSON,
+so two pages with the same title (or a re-run with the same file names) never
+share marks and the journal does not drop them as duplicates.
 
 The page has no external URLs (opens from file://), wav paths are relative to
 the page. Folder kinds are detected from file names:
 
   pron-test   n.wav + meta.tsv (n, chunk, variant, take, start, synth_text)
   redo        variant_XX__seed+N.wav  (out/redo/<section>/<chunk>/)
-  probe       chunks/<hash16>.wav + index.tsv (hash16 column, or via manifests)
-  golden      NN_A.wav / NN_B.wav pairs, shown side by side
-  ref-compare <candidate>/<chunk>.wav subfolders, one row per chunk
+  probe       chunks/<hash16>.wav listed in index.tsv (hash column, or via
+              manifests for an old index); wavs not in the index are ignored
+  golden      NN_A.wav / NN_B.wav pairs side by side, captions from index.tsv
+              (n, file_a, file_b, section, chunk, why, text, tag_a, tag_b)
+  ref-compare <candidate>/<hash16>.wav (or legacy <chunk id>.wav) subfolders,
+              one row per chunk
   generic     any other *.wav
 
 Nothing here touches models, manifests or the chunk cache.
@@ -22,11 +31,16 @@ Nothing here touches models, manifests or the chunk cache.
 from __future__ import annotations
 
 import csv
+import datetime
+import hashlib
 import html
 import json
 import re
 from pathlib import Path
+from typing import Callable
 from urllib.parse import quote
+
+from audiobook import paths
 
 ISSUES = ["ударение", "акцент", "каша", "темп", "артефакт", "другое"]
 KIND_NAMES = {
@@ -38,7 +52,8 @@ KIND_NAMES = {
     "generic": "wav-файлы",
 }
 # meta keys shown as small chips under the file name, in this order
-CHIP_KEYS = ["section", "chunk", "variant", "take", "seed_offset", "start", "tags"]
+CHIP_KEYS = ["tag", "section", "chunk", "variant", "take", "seed_offset", "start", "tags", "why"]
+OLD_PREFIX = "_old_"  # archived runs (see archive_stale); never listed on a page
 
 
 # ── reading the folder ────────────────────────────────────────────────────────
@@ -57,9 +72,38 @@ def read_tsv(path: Path) -> list[dict]:
     return [dict(zip(head, r)) for r in rows[1:] if any(c.strip() for c in r)]
 
 
+def _archived(p: Path, base: Path) -> bool:
+    return any(part.startswith(OLD_PREFIX) for part in p.relative_to(base).parts[:-1])
+
+
 def _wavs(folder: Path, recursive: bool = False) -> list[Path]:
     it = folder.rglob("*.wav") if recursive else folder.glob("*.wav")
-    return sorted((p for p in it if p.is_file()), key=lambda p: _natural(p.name))
+    return sorted((p for p in it if p.is_file() and not _archived(p, folder)),
+                  key=lambda p: _natural(p.name))
+
+
+def _subdirs(folder: Path) -> list[Path]:
+    return [d for d in folder.iterdir() if d.is_dir() and not d.name.startswith(OLD_PREFIX)]
+
+
+def archive_stale(folder: Path, files: list[Path],
+                  say: Callable[[str], None] = print) -> Path | None:
+    """Move the files of a previous run into folder/_old_<timestamp>/ — moved,
+    never deleted. Returns the archive folder, or None if there was nothing."""
+    files = [f for f in files if f.is_file()]
+    if not files:
+        return None
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = folder / f"{OLD_PREFIX}{stamp}"
+    k = 2
+    while dest.exists():
+        dest = folder / f"{OLD_PREFIX}{stamp}_{k}"
+        k += 1
+    dest.mkdir(parents=True)
+    for f in files:
+        f.rename(dest / f.name)
+    say(f"файлы прошлого прогона ({len(files)} шт.) перенесены в {dest}")
+    return dest
 
 
 def _rel(base: Path, p: Path) -> str:
@@ -131,44 +175,68 @@ def _kind_redo(folder: Path, wavs: list[Path]) -> list[list[dict]]:
 
 
 def _kind_probe(folder: Path, wav_dir: Path, index_path: Path | None) -> list[list[dict]]:
+    """Only wavs named by the index are listed, in index (listening) order;
+    other wavs in chunks/ (older picks, other configs) are ignored. An old
+    index without a hash column is mapped via the section manifests."""
     index = read_tsv(index_path) if index_path and index_path.exists() else []
-    base = folder.resolve()
-    hashes = _manifest_hashes(base.parent) if base.name != "chunks" else \
-        _manifest_hashes(base.parent.parent)
-    by_key = {(r.get("section", ""), r.get("chunk", "")): r for r in index}
-    placed: dict[str, dict] = {}  # hash16 -> index row
+    present = {w.stem: w for w in _wavs(wav_dir)}
+    strict = any(r.get("hash") for r in index)
+    by_key: dict[tuple[str, str], str] = {}
+    if not strict:
+        base = folder.resolve()
+        out_root = base.parent.parent if base.name == "chunks" else base.parent
+        by_key = {key: h for h, key in _manifest_hashes(out_root).items()}
+    groups, seen = [], set()
     for r in index:
-        if r.get("hash"):
-            placed[r["hash"]] = r
-    by_hash: dict[str, dict] = {}
-    for w in _wavs(wav_dir):
-        row = placed.get(w.stem)
-        if row is None and w.stem in hashes:
-            row = by_key.get(hashes[w.stem])
-        by_hash[w.stem] = row or {}
-    order = {id(r): i for i, r in enumerate(index)}
-    wavs = sorted(_wavs(wav_dir), key=lambda w: (
-        order.get(id(by_hash[w.stem]), len(index)), _natural(w.name)))
-    groups = []
-    for w in wavs:
-        r = by_hash[w.stem]
+        h = r.get("hash", "") if strict else by_key.get((r.get("section", ""), r.get("chunk", "")), "")
+        if not h or h in seen or h not in present:
+            continue
+        seen.add(h)
+        w = present[h]
         meta = {"section": r.get("section", ""), "chunk": r.get("chunk", ""),
                 "start": r.get("start", ""), "tags": r.get("tags", ""),
-                "text": r.get("text", ""), "hash": w.stem}
-        if r:
-            name = f"{r.get('start', '')} · {r.get('section', '')} {r.get('chunk', '')}".strip(" ·")
-            item = f"{r.get('section', '')}/{r.get('chunk', '')}"
-        else:
-            name, item = w.name, w.stem
-        groups.append([_item(_rel(folder, w), name, meta, item)])
+                "text": r.get("text", ""), "hash": h}
+        name = f"{r.get('start', '')} · {r.get('section', '')} {r.get('chunk', '')}".strip(" ·")
+        groups.append([_item(_rel(folder, w), name, meta,
+                             f"{r.get('section', '')}/{r.get('chunk', '')}")])
     return groups
 
 
+_PAIR_RE = re.compile(r"(.+)_([AB])\.wav")
+
+
 def _kind_golden(folder: Path, wavs: list[Path]) -> list[list[dict]]:
+    """Pairs in index.tsv order (golden compare: n, file_a, file_b, section,
+    chunk, why, text, tag_a, tag_b); captions name the tags. Wavs not in the
+    index (or no index at all) are paired by name."""
+    idx = folder / "index.tsv"
+    index = [r for r in (read_tsv(idx) if idx.exists() else [])
+             if r.get("file_a") or r.get("file_b")]
+    names = {w.name for w in wavs}
+    groups: list[list[dict]] = []
+    used: set[str] = set()
+    for r in index:
+        grp = []
+        for side in ("A", "B"):
+            f = r.get(f"file_{side.lower()}", "")
+            m = _PAIR_RE.fullmatch(f)
+            if f not in names or f in used or not m:
+                continue
+            used.add(f)
+            pair, tag = m.group(1), r.get(f"tag_{side.lower()}", "")
+            meta = {"pair": pair, "side": side, "tag": tag, "section": r.get("section", ""),
+                    "chunk": r.get("chunk", ""), "why": r.get("why", ""),
+                    "text": r.get("text", ""), "start": r.get("start", ""),
+                    "hash": r.get(f"hash_{side.lower()}", "")}
+            caption = f"{pair} · {side}" + (f" · {tag}" if tag else "")
+            item = f"{pair}_{side}" + (f" ({tag})" if tag else "")
+            grp.append(_item(f, caption, meta, item))
+        if grp:
+            groups.append(grp)
     pairs: dict[str, list[Path]] = {}
     for w in wavs:
-        pairs.setdefault(re.fullmatch(r"(.+)_[AB]\.wav", w.name).group(1), []).append(w)
-    groups = []
+        if w.name not in used:
+            pairs.setdefault(_PAIR_RE.fullmatch(w.name).group(1), []).append(w)
     for key in sorted(pairs, key=_natural):
         grp = []
         for w in sorted(pairs[key], key=lambda p: p.name):
@@ -180,21 +248,29 @@ def _kind_golden(folder: Path, wavs: list[Path]) -> list[list[dict]]:
 
 
 def _kind_refcmp(folder: Path, subdirs: list[Path]) -> list[list[dict]]:
+    """Candidate wavs are named <hash16>.wav (legacy: <chunk id>.wav); the
+    manifest maps a hash16 back to the chunk id and text."""
     f = folder.resolve()
     section, rows = "", {}
     if f.parent.name == "ref_compare":  # out/ref_compare/<section>/
         section = f.name
         rows = _manifest_rows(f.parent.parent, section)
-    by_chunk: dict[str, list[Path]] = {}
+    by_hash = {str(r.get("hash", ""))[:16]: r for r in rows.values() if r.get("hash")}
+    order = {cid: i for i, cid in enumerate(rows)}
+    by_chunk: dict[str, list[tuple[Path, str]]] = {}
     for d in subdirs:
         for w in _wavs(d):
-            by_chunk.setdefault(w.stem, []).append(w)
+            if w.stem in by_hash:
+                cid, h = str(by_hash[w.stem]["id"]), w.stem
+            else:
+                cid, h = w.stem, ""
+            by_chunk.setdefault(cid, []).append((w, h))
     groups = []
-    for cid in sorted(by_chunk, key=_natural):
+    for cid in sorted(by_chunk, key=lambda c: (order.get(c, len(order)), _natural(c))):
         grp = []
-        for w in by_chunk[cid]:
+        for w, h in by_chunk[cid]:
             meta = {"section": section, "chunk": cid, "candidate": w.parent.name,
-                    "text": rows.get(cid, {}).get("text", "")}
+                    "text": rows.get(cid, {}).get("text", ""), "hash": h}
             grp.append(_item(_rel(folder, w), w.parent.name, meta, f"{w.parent.name}/{cid}"))
         groups.append(grp)
     return groups
@@ -227,14 +303,15 @@ def collect(folder: Path, meta_rows: list[dict] | None = None) -> tuple[str, lis
         return "pron-test", _kind_pron(folder, meta_rows)
     if top and all(re.fullmatch(r"variant_\d+__seed\+\d+\.wav", w.name) for w in top):
         kind, groups = "redo", _kind_redo(folder, top)
-    elif (folder / "chunks").is_dir() and _wavs(folder / "chunks"):
+    elif ((folder / "chunks").is_dir() and _wavs(folder / "chunks")
+          and (folder / "index.tsv").exists()):
         kind, groups = "probe", _kind_probe(folder, folder / "chunks", folder / "index.tsv")
     elif folder.name == "chunks" and top and (folder.parent / "index.tsv").exists():
         kind, groups = "probe", _kind_probe(folder, folder, folder.parent / "index.tsv")
     elif top and all(re.fullmatch(r".+_[AB]\.wav", w.name) for w in top):
         kind, groups = "golden", _kind_golden(folder, top)
-    elif not top and any(_wavs(d) for d in folder.iterdir() if d.is_dir()):
-        subdirs = sorted((d for d in folder.iterdir() if d.is_dir() and _wavs(d)),
+    elif not top and any(_wavs(d) for d in _subdirs(folder)):
+        subdirs = sorted((d for d in _subdirs(folder) if _wavs(d)),
                          key=lambda d: _natural(d.name))
         kind, groups = "ref-compare", _kind_refcmp(folder, subdirs)
     else:
@@ -285,7 +362,28 @@ def _safe_name(title: str) -> str:
     return s or "review"
 
 
-def render(title: str, kind: str, groups: list[list[dict]]) -> str:
+def page_id(folder: Path, files: list[str]) -> str:
+    """Short hash of the folder name chain + the sorted wav list (size, mtime in
+    whole seconds — survives rsync -a). Same folder and same audio → same id
+    (marks in the browser survive a rebuilt page); another folder with the
+    same title, or a re-run with the same file names → another id."""
+    base = Path(folder).resolve()
+    try:
+        chain = base.relative_to(paths.OUT.resolve()).parts
+    except ValueError:
+        chain = base.parts[-3:]
+    h = hashlib.sha1("\x1f".join(chain).encode("utf-8"))
+    for f in sorted(files):
+        try:
+            st = (Path(folder) / f).stat()
+            size, mtime = st.st_size, int(st.st_mtime)
+        except OSError:
+            size, mtime = -1, -1
+        h.update(f"\x00{f}\x00{size}\x00{mtime}".encode("utf-8"))
+    return h.hexdigest()[:10]
+
+
+def render(title: str, kind: str, groups: list[list[dict]], pid: str = "") -> str:
     flat = [it for g in groups for it in g]
     body, i = [], 0
     for g in groups:
@@ -295,8 +393,11 @@ def render(title: str, kind: str, groups: list[list[dict]]) -> str:
             i += 1
         cls = "grp pair" if len(g) > 1 else "grp"
         body.append(f'<section class="{cls}">{"".join(cells)}</section>')
-    data = {"title": title, "safe": _safe_name(title), "kind": kind,
-            "items": [{"file": it["file"], "meta": it["meta"]} for it in flat]}
+    data = {"title": title, "safe": _safe_name(title), "kind": kind, "page_id": pid,
+            "items": [{"file": it["file"], "meta": it["meta"],
+                       **{k: it["meta"][k] for k in ("section", "chunk", "hash")
+                          if it["meta"].get(k)}}
+                      for it in flat]}
     blob = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
     return (TEMPLATE.replace("__TITLE__", html.escape(title))
             .replace("__KIND__", html.escape(KIND_NAMES.get(kind, kind)))
@@ -319,7 +420,8 @@ def build_review(folder: Path, title: str | None = None,
     out = folder / "review.html"
     tmp = folder / "review.html.part"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(render(title, kind, groups))
+        f.write(render(title, kind, groups,
+                       page_id(folder, [it["file"] for g in groups for it in g])))
     tmp.replace(out)
     return out
 
@@ -418,7 +520,7 @@ __ITEMS__
 <script>
 (function () {
   var DATA = JSON.parse(document.getElementById("data").textContent);
-  var KEY = "audiobook-review:" + DATA.title;
+  var KEY = "audiobook-review:" + DATA.title + ":" + (DATA.page_id || "");
   var NAMES = {ok: "хорошо", bad: "плохо", unsure: "?"};
   var state = {};
 
@@ -492,10 +594,12 @@ __ITEMS__
   function build() {
     var items = DATA.items.map(function (it) {
       var s = state[it.file] || {};
-      return {file: it.file, label: s.label || "", issue: s.issue || "",
+      return {file: it.file, section: it.section || "", chunk: it.chunk || "",
+              hash: it.hash || "", label: s.label || "", issue: s.issue || "",
               comment: s.comment || "", meta: it.meta};
     });
-    return JSON.stringify({title: DATA.title, items: items}, null, 2);
+    return JSON.stringify({title: DATA.title, page_id: DATA.page_id || "", kind: DATA.kind,
+                           items: items}, null, 2);
   }
   function showBox() {
     var box = document.getElementById("box");
@@ -512,7 +616,7 @@ __ITEMS__
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
-      a.download = "labels_" + DATA.safe + ".json";
+      a.download = "labels_" + DATA.safe + (DATA.page_id ? "_" + DATA.page_id : "") + ".json";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

@@ -14,9 +14,12 @@ Latents are computed once per candidate and model variant
 held twice in RAM. Seeds come from each chunk's hash, identical across
 candidates, so the reference is the only thing that differs.
 
-Out: out/ref_compare/<section>/<name>_<tag>.mp3 (+ chunk wavs in <name>_<tag>/ for
-resume); <tag> hashes the clip + confirmed text, so a corrected transcript gets
-fresh latents and a fresh render instead of the stale ones.
+Out: out/ref_compare/<section>/<name>_<tag>.mp3 (+ chunk wavs <hash16>.wav in
+<name>_<tag>/ for resume). Latents are keyed by the clip + confirmed text
+(candidate_tag); the render <tag> also hashes the model id (variant, int8),
+the temperature and the hashes of the rendered rows (render_tag) — so a
+corrected transcript, another model or temperature, or re-chunked text gets a
+fresh render instead of silently reusing the stale one.
 """
 from __future__ import annotations
 
@@ -53,6 +56,24 @@ def candidate_tag(wav: Path, txt: Path) -> str:
     h = hashlib.sha1(wav.read_bytes())
     h.update(b"\x00" + txt.read_text(encoding="utf-8").strip().encode("utf-8"))
     return h.hexdigest()[:8]
+
+
+def render_tag(wav: Path, txt: Path, config: dict, rows: list[dict]) -> str:
+    """Tag of one candidate's render: candidate_tag + model id + temperature +
+    the rows' chunk hashes. Any of them changing gives a new output folder."""
+    import hashlib
+    h = hashlib.sha1(candidate_tag(wav, txt).encode("utf-8"))
+    h.update(b"\x00" + voicecfg.model_id(config).encode("utf-8"))
+    h.update(b"\x00" + str((config.get("model") or {}).get("temperature")).encode("utf-8"))
+    for r in rows:
+        h.update(b"\x00" + str(r.get("hash", "")).encode("utf-8"))
+    return h.hexdigest()[:8]
+
+
+def chunk_wav_name(row: dict) -> str:
+    """Chunk wav of a candidate render: <hash16>.wav (a chunk id is reused
+    after re-chunking, its hash is not)."""
+    return f"{str(row['hash'])[:16]}.wav"
 
 
 def latents_file(wav: Path, variant: str, tag: str) -> Path:
@@ -105,7 +126,7 @@ def transcribe_drafts(cdir: Path) -> int:
 
 
 def render_candidate(engine, rows: list[dict], config: dict, out_dir: Path) -> int:
-    """Synth each row into out_dir/<id>.wav (skip existing — resumable). Returns
+    """Synth each row into out_dir/<hash16>.wav (skip existing — resumable). Returns
     the number of failed chunks; a failed chunk gets no wav (never silence)."""
     from audiobook.pronounce import load_table
     from audiobook.synth import _SAMPLE_RATE, _synth_one_chunk
@@ -115,7 +136,7 @@ def render_candidate(engine, rows: list[dict], config: dict, out_dir: Path) -> i
     retries = config.get("render", {}).get("timeout_retries", 2)
     failed = 0
     for row in rows:
-        wav_path = out_dir / f"{row['id']}.wav"
+        wav_path = out_dir / chunk_wav_name(row)
         if wav_path.exists():
             continue
         wav, _seed = _synth_one_chunk(row, config, table, sentinel, engine, retries)
@@ -162,7 +183,7 @@ def run(config: dict, section: str | None, first: int | None,
     timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
     out_root = paths.OUT / "ref_compare" / section
     for base_name, wav, txt in cands:
-        name = f"{base_name}_{candidate_tag(wav, txt)}"  # new text → new render
+        name = f"{base_name}_{render_tag(wav, txt, config, rows)}"  # new text/model/rows → new render
         mp3 = out_root / f"{name}.mp3"
         if mp3.exists():
             print(f"{name}: уже есть {mp3}")
@@ -176,7 +197,9 @@ def run(config: dict, section: str | None, first: int | None,
             print(f"{name}: {failed} чанк(ов) не синтезировались — mp3 не собран, "
                   "перезапуск догенерирует недостающие")
             continue
-        audio, _stats = join_chunks(rows, chunk_dir, config)
+        # join_chunks reads <id>.wav: present the rows under their wav names
+        named = [dict(r, id=chunk_wav_name(r)[:-len(".wav")]) for r in rows]
+        audio, _stats = join_chunks(named, chunk_dir, config)
         raw = out_root / f"{name}.wav"
         sf.write(str(raw), audio, _SAMPLE_RATE, subtype="PCM_16")
         meas = master_wav(raw, mp3, config)

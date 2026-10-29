@@ -146,3 +146,27 @@ def test_read_git_against_local_remote(tmp_path):
 
 def test_read_git_outside_repo_is_none(tmp_path):
     assert pf.read_git(tmp_path) is None
+
+
+def test_heavy_patterns_cover_golden_render_and_tools():
+    heavy = ["python -m audiobook golden render --tag base",
+             "python -m audiobook golden  render --tag x --workers 2",
+             "python -m audiobook pron-test --section 01 --word x --try -",
+             "python -m audiobook ref-compare --section 01 --first 3",
+             "python -m audiobook phoneme-check --dir out/x --expect а",
+             "python -m audiobook redo 01_sec 0003",
+             "python -m audiobook probe --max 60",
+             "python -m audiobook chunk --section 01",
+             "python -m audiobook accept 01_sec 0003 2"]
+    light = ["python -m audiobook golden init", "python -m audiobook golden compare a b",
+             "python -m audiobook golden-notes", "python -m audiobook review --dir x"]
+    procs = [(200 + i, a) for i, a in enumerate(heavy + light)]
+    found = {a for _, a in pf.foreign_heavy(procs, frozenset())}
+    assert found == set(heavy)
+
+
+def test_heavy_patterns_superset_of_main_heavy_commands():
+    from audiobook import __main__ as m
+    missing = [c for c in sorted(m._HEAVY)
+               if not pf.HEAVY_RE.search(f"python -m audiobook {c} --x")]
+    assert missing == []

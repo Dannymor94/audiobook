@@ -8,6 +8,11 @@ This joins them into section timestamps:
     ./run.sh suspects --section S [--first N]
     → out/sections/S/<stem>.suspects.tsv  and a printed list "m:ss  word  why"
 
+The index must belong to the current manifest: it is refused when it is older
+than manifest.jsonl (synth/qc/redo/accept rewrote the manifest after assemble)
+or when its chunk ids differ from the manifest's (re-chunked) — the times would
+point at the wrong audio. Fix: assemble again.
+
 Whisper hears words, not stress: "conf" catches garbled words (тебья, дышьи,
 каша), "watch" points at known traps whose stress only an ear can confirm.
 """
@@ -29,6 +34,32 @@ def read_index(path: Path) -> dict[str, tuple[int, int]]:
         cid, start, lead = line.split("\t")
         out[cid] = (int(start), int(lead))
     return out
+
+
+def check_index(index_ids: list[str], rows: list[dict], first: int | None,
+                idx_mtime: float, manifest_mtime: float) -> str | None:
+    """Reason (Russian) why the index does not match the manifest, or None."""
+    if idx_mtime < manifest_mtime:
+        return ("index.tsv старше manifest.jsonl — манифест менялся после assemble "
+                "(synth/qc/redo/accept)")
+    want = [str(r["id"]) for r in (rows[:first] if first else rows)]
+    if index_ids != want:
+        extra = [i for i in index_ids if i not in set(want)]
+        lost = [i for i in want if i not in set(index_ids)]
+        detail = []
+        if extra:
+            detail.append(f"нет в манифесте: {', '.join(extra[:5])}")
+        if lost:
+            detail.append(f"нет в index.tsv: {', '.join(lost[:5])}")
+        if not detail:
+            detail.append("другой порядок чанков")
+        return "чанки index.tsv не совпадают с манифестом (" + "; ".join(detail) + ")"
+    return None
+
+
+def read_index_ids(path: Path) -> list[str]:
+    return [ln.split("\t", 1)[0] for ln in path.read_text(encoding="utf-8").splitlines()[1:]
+            if ln.strip()]
 
 
 def collect(rows: list[dict], index: dict[str, tuple[int, int]]) -> list[dict]:
@@ -55,7 +86,14 @@ def run(config: dict, section: str | None, first: int | None = None) -> int:
     if not idx_path.exists():
         raise SystemExit(f"нет {idx_path.name} — сначала assemble"
                          + (f" --first {first}" if first else ""))
-    rows = _read_manifest(sec_dir / "manifest.jsonl")
+    manifest = sec_dir / "manifest.jsonl"
+    rows = _read_manifest(manifest)
+    why = check_index(read_index_ids(idx_path), rows, first,
+                      idx_path.stat().st_mtime, manifest.stat().st_mtime)
+    if why:
+        raise SystemExit(f"suspects: {idx_path.name} не от текущего манифеста: {why}. "
+                         "Сначала assemble --section " + section
+                         + (f" --first {first}" if first else ""))
     if not any("flag_words" in r for r in rows):
         raise SystemExit("в манифесте нет flag_words — сначала qc (новой версии)")
     items = collect(rows, read_index(idx_path))
