@@ -1,7 +1,7 @@
 ---
 id: G02
 title: отчёт о тексте для автора + базовая версия golden set
-status: doing
+status: review
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: [T03, T04]
@@ -74,6 +74,11 @@ PREFLIGHT: GREEN
 | zaest | `~/Downloads/audiobook/2026-10-29/pron_test/20_glava_13_bazovyj_navyk_ya_tebya_chuvству_0005_Заесть. Запить. Заснуть/review.html` |
 | redo_0001 | `~/Downloads/audiobook/2026-10-29/redo/20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu/0001/review.html` |
 
-### golden render — в процессе
-`golden base-ref_ch1: записей 45, найдено чанков 45, к синтезу 45` — запущен в фоне, результат будет дополнен.
+### golden render
+```
+golden base-ref_ch1: записей 45, найдено чанков 45, к синтезу 45
+...
+прослушка: /home/danavrata/audiobook/out/golden/base-ref_ch1/golden.mp3  оглавление: /home/danavrata/audiobook/out/golden/base-ref_ch1/index.tsv  (45 из 45)
+```
+Скопировано на Mac: `~/Downloads/audiobook/2026-10-29/golden/base-ref_ch1/golden.mp3`, `index.tsv`, 45 wav
 
