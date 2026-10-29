@@ -18,6 +18,7 @@ from pathlib import Path
 from audiobook import paths
 
 DEFAULT_VARIANT = "0.6B"
+QUANTIZE_MODES = ("none", "int8")
 _HUB_TEMPLATE = "models--Qwen--Qwen3-TTS-12Hz-{variant}-Base"
 
 
@@ -28,13 +29,30 @@ def variant(config: dict) -> str:
     return str((config.get("model") or {}).get("variant", DEFAULT_VARIANT))
 
 
+def quantize(config: dict) -> str:
+    """``model.quantize`` from config ("none" | "int8"), default "none".
+
+    int8 = torch dynamic quantization of the Linear layers (CPU only); an
+    experiment, off by default. Anything else is a config typo → fail loud."""
+    q = (config.get("model") or {}).get("quantize", "none")
+    q = "none" if q is None else str(q).strip().lower()
+    if q not in QUANTIZE_MODES:
+        raise SystemExit(
+            f"model.quantize: недопустимое значение {q!r} "
+            f"(допустимо: {', '.join(QUANTIZE_MODES)})")
+    return q
+
+
 def model_id(config: dict) -> str:
     """Model identity for the chunk hash. 0.6B keeps the bare ``model.name`` so
     existing 0.6B manifests keep their hashes; any other variant is suffixed, so
-    switching variant re-queues every chunk (weights differ → audio differs)."""
+    switching variant re-queues every chunk (weights differ → audio differs).
+    ``quantize: int8`` appends "-int8" so int8 audio never mixes with fp32 in the
+    cache; ``none`` adds nothing, so existing hashes are unchanged."""
     name = config["model"]["name"]
     v = variant(config)
-    return name if v == DEFAULT_VARIANT else f"{name}-{v}"
+    mid = name if v == DEFAULT_VARIANT else f"{name}-{v}"
+    return f"{mid}-int8" if quantize(config) == "int8" else mid
 
 
 def hub_dir(v: str) -> Path:

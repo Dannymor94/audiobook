@@ -26,3 +26,23 @@ def test_xtts_synth_and_whisper_qc(slow, tmp_path):
     got = " ".join(s.text for s in segs).strip().lower()
     cer = 1 - difflib.SequenceMatcher(None, got, text.lower()).ratio()
     assert cer < 0.10, (got, cer)
+
+
+def test_int8_renders_short_placeholder_phrase(slow):
+    """int8 (dynamic quantization) on CPU renders one short placeholder phrase.
+    Layer-3 smoke only: checks a non-silent wav comes out; the audible quality
+    verdict is the G03 golden-set listening, not this test."""
+    import numpy as np
+    import yaml
+
+    from audiobook import paths, voicecfg
+    from audiobook.synth import load_latents, load_model, synthesize
+
+    cfg = yaml.safe_load((paths.ROOT / "config.yaml").read_text(encoding="utf-8"))
+    cfg["model"]["quantize"] = "int8"
+    model = load_model("cpu", voicecfg.variant(cfg), voicecfg.quantize(cfg))
+    latents = load_latents(voicecfg.latents_path(cfg))
+    wav = synthesize(model, "Тестовая фраза для проверки.", latents,
+                     cfg["model"]["seed"], cfg["model"]["temperature"],
+                     cfg["model"]["language"])
+    assert len(wav) > 0 and float(np.abs(wav).max()) > 1e-3

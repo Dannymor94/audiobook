@@ -7,6 +7,10 @@ model:
   # каждую модель: ref/ref1.latents_1.7b.pt. Смена variant = весь кеш заново.
   # RAM ~11.6 GB на воркер → synth --workers не больше 2.
   variant: 1.7B
+  # int8 = dynamic-квантизация Linear (только cpu), эксперимент для ускорения
+  # рендера; звук проверяется на golden set G03. В хеш входит только при int8
+  # (model id → "...-int8"); при none хеши не меняются.
+  quantize: none
   language: ru
   seed: 42                        # база; фактический seed чанка = seed_for_chunk(hash)
   temperature: 1.0               # выбрано на слух: плавнее интонация; цена ~2x RTF из-за разгонов
