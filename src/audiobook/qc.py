@@ -169,6 +169,10 @@ def _norm_word(w: str) -> str:
     return normalize_for_cer(w).replace(" ", "")
 
 
+SHORT_WORD_LEN = 4
+SHORT_WORD_CONF = 0.3
+
+
 def flag_words(words: list[dict], watch: set[str], min_conf: float) -> list[list]:
     """Words worth a human listen: whisper was unsure (garbled, "тебья",
     "дышьи"), or the word is a known stress trap. Whisper hears words, not
@@ -179,7 +183,11 @@ def flag_words(words: list[dict], watch: set[str], min_conf: float) -> list[list
         nw = _norm_word(w["w"])
         if not nw:
             continue
-        if w["p"] < min_conf:
+        # Whisper is routinely unsure about tiny function words (и, в, не, я,
+        # это) — ch13 gave 20 of 32 flags like that, none a real defect. Short
+        # words count only when whisper is very unsure.
+        short = len(nw) <= SHORT_WORD_LEN
+        if w["p"] < (SHORT_WORD_CONF if short else min_conf):
             out.append([w["w"], w["s"], w["p"], "conf"])
         elif nw in watch:
             out.append([w["w"], w["s"], w["p"], "watch"])

@@ -664,3 +664,12 @@ def test_config_path_env(monkeypatch, tmp_path):
     assert cli.config_path() == paths.ROOT / "config.yaml"
     monkeypatch.setenv("AUDIOBOOK_CONFIG", "out/trial.yaml")
     assert cli.config_path() == paths.ROOT / "out" / "trial.yaml"
+
+
+def test_flag_words_short_function_words_need_very_low_conf():
+    from audiobook.qc import flag_words
+    words = [{"w": "и", "s": 0.1, "e": 0.2, "p": 0.49},     # short, mildly unsure → skip
+             {"w": "это", "s": 0.3, "e": 0.5, "p": 0.14},   # short, very unsure → flag
+             {"w": "длинное", "s": 0.6, "e": 1.0, "p": 0.52}]  # long, unsure → flag
+    got = [w for w, *_ in flag_words(words, watch=set(), min_conf=0.6)]
+    assert got == ["это", "длинное"]
