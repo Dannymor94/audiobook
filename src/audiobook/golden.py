@@ -246,7 +246,10 @@ def run_render(config: dict, tag: str, workers: int = 1, engine=None) -> int:
             from audiobook.synth import worker_config
             from audiobook.worker import TimeoutSynth
             timeout_s = config.get("render", {}).get("chunk_timeout_s", 600)
-            with TimeoutSynth(worker_config(config, workers), timeout_s) as eng:
+            # int8 quantize_dynamic on 1.7B takes several minutes; allow up to 30 min on respawn
+            start_timeout_s = max(1800, timeout_s * 3)
+            with TimeoutSynth(worker_config(config, workers), timeout_s,
+                              start_timeout_s=start_timeout_s) as eng:
                 items = render_items(resolved, config, out_dir, eng)
         else:
             items = render_items(resolved, config, out_dir, None)
