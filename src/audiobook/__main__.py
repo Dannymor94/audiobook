@@ -50,6 +50,15 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    ex = sub.add_parser("export", help="готовая книга из section.mp3 → out/export/ (mp3-набор или m4b)")
+    ex.add_argument("--format", choices=("mp3", "m4b"), default="mp3")
+    ex.add_argument("--allow-missing", action="store_true",
+                    help="пропустить неготовые главы (книга будет неполной)")
+    es = sub.add_parser("export-sample", help="отрывок ≤ 5 мин для магазина → out/export/sample.mp3")
+    es.add_argument("--section", required=True)
+    es.add_argument("--start", type=float, default=0.0, help="начало, с (default 0)")
+    es.add_argument("--length", type=float, default=300.0, help="длина, с (≤ 300, default 300)")
+    sub.add_parser("credits", help="вступление/концовка из config credits → out/credits/ (модель)")
     lp = sub.add_parser("listen-plan", help="что послушать человеку: подозрения + начала глав + выборка → out/listen/")
     lp.add_argument("--section", nargs="+", action="extend", default=None, help="только эти секции")
     lp.add_argument("--intro-s", type=float, default=30, help="сколько секунд начала каждой главы (default 30)")
@@ -195,10 +204,11 @@ def main(argv: list[str] | None = None) -> int:
 
 # Commands that write the book's cache/manifests: never with a trial config.
 _MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "redo", "assemble", "master",
-                     "headings"}
+                     "headings", "credits", "export"}
 # Commands that load a model or rewrite a section: one at a time (heavy.lock).
 _HEAVY = {"chunk", "synth", "qc", "accept", "redo", "pron-test", "ref-compare",
-          "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate"}
+          "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate",
+          "credits"}
 
 
 def _dispatch(a) -> int:
@@ -219,6 +229,15 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "export":
+        from .export import run_export
+        return run_export(load_config(), a.format, a.allow_missing)
+    if a.cmd == "export-sample":
+        from .export import run_sample
+        return run_sample(load_config(), a.section, a.start, a.length)
+    if a.cmd == "credits":
+        from .export import run_credits
+        return run_credits(load_config())
     if a.cmd == "listen-plan":
         from .listen import run as listen_plan
         return listen_plan(load_config(), a.section, a.intro_s, a.random)

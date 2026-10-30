@@ -41,3 +41,8 @@
 - `./run.sh loudness [--section S …] [--ref-dir DIR]` — громкость глав против цели master и эталона.
 - `./run.sh pron-audit` — словарь ударений: срабатывания по книге, мёртвые записи, подозрительные правки.
 - Очередь как служба (переживает перезагрузку): `scripts/gamebox/README.md`.
+- `./run.sh listen-plan` — что послушать: подозрения + начала глав + выборка → `out/listen/` (+ `review --dir out/listen`).
+- `./run.sh impact` — сколько перерендерит правка настроек (с `AUDIOBOOK_CONFIG=копия` — без правки основного).
+- `./run.sh pace`, `./run.sh sync --section S|--all`.
+- Выпуск: `./run.sh credits` (модель; тексты в config `credits`), `./run.sh export --format mp3|m4b`,
+  `./run.sh export-sample --section S`.

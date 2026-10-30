@@ -451,3 +451,12 @@ def test_real_ffmpeg_export_m4b_mp3_sample(tmp_path, monkeypatch, slow):
     assert info["format"]["tags"]["genre"] == "Audiobook"
     s = export.sample(CFG, names[1], 0.5, 3.0)
     assert abs(export.probe_duration(s) - 3.0) < 0.1
+
+
+def test_cli_wires_export_commands():
+    from audiobook.__main__ import _HEAVY, _MAIN_CONFIG_ONLY, build_parser
+    p = build_parser()
+    assert p.parse_args(["export", "--format", "m4b"]).format == "m4b"
+    assert p.parse_args(["export-sample", "--section", "x"]).length == 300.0
+    assert p.parse_args(["credits"]).cmd == "credits"
+    assert "credits" in _HEAVY and "credits" in _MAIN_CONFIG_ONLY and "export" in _MAIN_CONFIG_ONLY
