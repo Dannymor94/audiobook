@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    sub.add_parser("notify-test", help="Telegram: отправить «проверка связи» (AUDIOBOOK_TG_TOKEN/CHAT из .env)")
     pg = sub.add_parser("passage", help="A/B отрывка подряд (стыки, контекст, паузы) → out/passage/<tag>/")
     pg.add_argument("--section", required=True)
     pg.add_argument("--start", type=int, default=1, help="номер первого чанка (n, с 1)")
@@ -234,6 +235,9 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "notify-test":
+        from .notify import cli_test
+        return cli_test()
     if a.cmd == "passage":
         from .passage import run as passage
         return passage(load_config(), a.section, a.start, a.count, a.tag)

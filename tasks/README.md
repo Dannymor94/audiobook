@@ -48,3 +48,5 @@
   `./run.sh export-sample --section S`.
 - `./run.sh passage --section S --start N --count K --tag X` — A/B сплошного отрывка (стыки, паузы, контекст);
   с `AUDIOBOOK_CONFIG=копия` — пробные настройки, книга не трогается.
+- Уведомления в Telegram (опционально): `.env` с `AUDIOBOOK_TG_TOKEN`/`AUDIOBOOK_TG_CHAT`, проверка `./run.sh notify-test`
+  (см. `scripts/gamebox/README.md`). Резервная копия на Mac: `scripts/mac/README.md`.
