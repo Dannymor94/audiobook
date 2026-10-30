@@ -115,7 +115,19 @@ def build_parser() -> argparse.ArgumentParser:
     qa = qs.add_parser("add", help="queue add -- <аргументы run.sh>; synth/chunk только с --section")
     qa.add_argument("job_args", nargs="*")
     qs.add_parser("list", help="задачи в очереди и выполненные")
-    qs.add_parser("run", help="воркер: выполнять pending по одной, пока очередь не опустеет")
+    qr = qs.add_parser("run", help="воркер: выполнять pending по одной, пока очередь не опустеет")
+    qr.add_argument("--watch", type=float, default=None, metavar="SECONDS",
+                    help="не выходить на пустой очереди: проверять её каждые SECONDS с (служба)")
+    qr.add_argument("--requeue-interrupted", action="store_true",
+                    help="задачу, прерванную перезагрузкой/падением, вернуть в очередь (до 3 раз)")
+    ld = sub.add_parser("loudness",
+                        help="громкость глав: LUFS / true peak / LRA → out/loudness/report.tsv")
+    ld.add_argument("--section", nargs="+", action="extend", default=None,
+                    help="только эти секции (без флага — все out/sections/*/section.mp3)")
+    ld.add_argument("--ref-dir", nargs="+", action="extend", default=[],
+                    help="папка или файл с эталонными записями (только для сравнения)")
+    sub.add_parser("pron-audit",
+                   help="аудит text/pronounce.yaml: срабатывания по книге, мёртвые записи → out/pron_audit.tsv")
     qsec = qs.add_parser("section", help="вся секция в очередь: chunk→synth→qc→assemble→master→suspects")
     qsec.add_argument("section")
     qsec.add_argument("--workers", type=int, default=2, help="воркеров synth (default 2)")
@@ -248,7 +260,15 @@ def _dispatch(a) -> int:
         from .jobqueue import cli as queue_cli, cli_shortcut
         if a.queue_cmd in ("section", "redo"):
             return cli_shortcut(a)
-        return queue_cli(a.queue_cmd, getattr(a, "job_args", []))
+        return queue_cli(a.queue_cmd, getattr(a, "job_args", []),
+                         watch=getattr(a, "watch", None),
+                         requeue_interrupted=getattr(a, "requeue_interrupted", False))
+    if a.cmd == "loudness":
+        from .loudness import report as loudness
+        return loudness(load_config(), a.section, a.ref_dir)
+    if a.cmd == "pron-audit":
+        from .pron_audit import run as pron_audit
+        return pron_audit(load_config())
     if a.cmd == "review":
         from .review import run as review
         return review(a.dir, a.title, a.meta)

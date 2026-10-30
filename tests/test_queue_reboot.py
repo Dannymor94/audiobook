@@ -180,3 +180,12 @@ def test_systemd_unit_template():
     for s in ("systemctl --user", "loginctl enable-linger", "journalctl --user -u audiobook-queue",
               "queue add"):
         assert s in readme
+
+
+def test_cli_wires_ops_commands():
+    from audiobook.__main__ import build_parser
+    a = build_parser().parse_args(["queue", "run", "--watch", "60", "--requeue-interrupted"])
+    assert (a.watch, a.requeue_interrupted) == (60.0, True)
+    a = build_parser().parse_args(["loudness", "--section", "a", "b", "--ref-dir", "r"])
+    assert a.section == ["a", "b"] and a.ref_dir == ["r"]
+    assert build_parser().parse_args(["pron-audit"]).cmd == "pron-audit"

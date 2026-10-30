@@ -38,3 +38,6 @@
 - `./run.sh status` — вся книга: сделано / ждёт человека / подозрительные / звук свежий, остаток времени.
 - Исправления по слуху: `./run.sh fix plan labels_*.json` → `./run.sh fix queue` → `./run.sh queue run` →
   `./run.sh fix review` (одна страница кандидатов) → `./run.sh accept <S> <id> <N>`.
+- `./run.sh loudness [--section S …] [--ref-dir DIR]` — громкость глав против цели master и эталона.
+- `./run.sh pron-audit` — словарь ударений: срабатывания по книге, мёртвые записи, подозрительные правки.
+- Очередь как служба (переживает перезагрузку): `scripts/gamebox/README.md`.
