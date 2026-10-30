@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    dc = sub.add_parser("decisions", help="страница решений на слух (build) и применение decisions.json (apply)")
+    dcs = dc.add_subparsers(dest="decisions_cmd", required=True)
+    dcs.add_parser("build", help="out/decisions/index.html + media/ (копии звука)")
+    da = dcs.add_parser("apply", help="применить decisions.json к config.yaml и text/pronounce.yaml")
+    da.add_argument("file")
+    da.add_argument("--dry-run", action="store_true", help="только показать изменения")
     sub.add_parser("notify-test", help="Telegram: отправить «проверка связи» (AUDIOBOOK_TG_TOKEN/CHAT из .env)")
     pg = sub.add_parser("passage", help="A/B отрывка подряд (стыки, контекст, паузы) → out/passage/<tag>/")
     pg.add_argument("--section", required=True)
@@ -235,6 +241,11 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "decisions":
+        from . import decisions
+        if a.decisions_cmd == "build":
+            return decisions.run_build(load_config())
+        return decisions.run_apply(load_config(), a.file, a.dry_run)
     if a.cmd == "notify-test":
         from .notify import cli_test
         return cli_test()
