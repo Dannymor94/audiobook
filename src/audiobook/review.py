@@ -26,6 +26,9 @@ the page. Folder kinds are detected from file names:
               one row per chunk
   generic     any other *.wav
 
+``build_combined`` puts several folders on one page (``./run.sh fix review``:
+the redo candidates of every planned chunk, one row per chunk).
+
 Nothing here touches models, manifests or the chunk cache.
 """
 from __future__ import annotations
@@ -424,6 +427,70 @@ def build_review(folder: Path, title: str | None = None,
                        page_id(folder, [it["file"] for g in groups for it in g])))
     tmp.replace(out)
     return out
+
+
+def rel_url(base_dir: Path, target: Path) -> str:
+    """Relative path from ``base_dir`` to ``target`` in URL form, walking up with
+    '..' when needed (pathlib.relative_to cannot walk up before Python 3.12)."""
+    b = Path(base_dir).resolve().parts
+    t = Path(target).resolve().parts
+    k = 0
+    while k < min(len(b), len(t)) and b[k] == t[k]:
+        k += 1
+    return Path(*([".."] * (len(b) - k)), *t[k:]).as_posix()
+
+
+def collect_many(sources: list[tuple[Path, str]],
+                 base: Path) -> tuple[str, list[list[dict]], list[Path]]:
+    """Several folders on one page. Each source folder becomes one row (group)
+    with all its items; captions get the source's prefix; files are relative to
+    ``base`` (the folder of the page). Returns (kind, groups, folders without
+    wavs). Redo candidates are captioned "вариант N" (N = the accept number)."""
+    kinds: set[str] = set()
+    groups: list[list[dict]] = []
+    empty: list[Path] = []
+    for folder, prefix in sources:
+        folder = Path(folder)
+        if not folder.is_dir():
+            empty.append(folder)
+            continue
+        kind, found = collect(folder)
+        items = [it for g in found for it in g]
+        if not items:
+            empty.append(folder)
+            continue
+        kinds.add(kind)
+        row = []
+        for it in items:
+            name = it["name"]
+            variant = it["meta"].get("variant", "")
+            if kind == "redo" and variant.isdigit():
+                name = f"вариант {int(variant)}"
+            caption = f"{prefix} · {name}" if prefix else name
+            row.append({"file": rel_url(base, folder / it["file"]), "name": caption,
+                        "meta": dict(it["meta"], item=caption)})
+        groups.append(row)
+    kind = next(iter(kinds)) if len(kinds) == 1 else "generic"
+    return kind, groups, empty
+
+
+def build_combined(sources: list[tuple[Path, str]], out_html: Path,
+                   title: str) -> tuple[Path | None, list[Path]]:
+    """One review page over several folders (see collect_many), written
+    atomically to ``out_html``. Returns (page path or None if no folder had
+    wavs, folders without wavs)."""
+    out_html = Path(out_html)
+    base = out_html.parent
+    base.mkdir(parents=True, exist_ok=True)
+    kind, groups, empty = collect_many(sources, base)
+    if not groups:
+        return None, empty
+    files = [it["file"] for g in groups for it in g]
+    tmp = out_html.with_name(out_html.name + ".part")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(render(title, kind, groups, page_id(base, files)))
+    tmp.replace(out_html)
+    return out_html, empty
 
 
 def run(folder: str, title: str | None = None, meta: str | None = None) -> int:
