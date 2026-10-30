@@ -95,7 +95,7 @@ def test_takes_phase_picks_best_and_keeps_all(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "TimeoutSynth", FakeEngine)
     monkeypatch.setattr(qc, "load_whisper", lambda: object())
     monkeypatch.setattr(qc, "transcribe_words", fake_words)
-    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s: (t, None))
+    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s, *a: (t, None))
     cfg = {"qc": {"takes": {"count": 3, "short_chars": 40}}}
     rows = [row]
     took, replaced = qc._takes_phase(rows, cfg, sec, chunks, sec / "manifest.jsonl",

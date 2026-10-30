@@ -57,12 +57,13 @@ def render_variants(engine, row: dict, config: dict,
     """[(variant, take, synth_text, wav|None)], variant-major. Take k uses the
     same seed for every variant, so within a take only the spelling differs;
     several takes show whether a stress is the spelling or just seed luck."""
-    from audiobook.synth import prepare_synth_text, seed_for_chunk
+    from audiobook.synth import prepare_synth_text, row_leadin, seed_for_chunk
     sentinel = config["model"].get("sentinel", "")
     base = row.get("seed_override") or seed_for_chunk(row["hash"])
     out = []
     for v, t in tables:
-        synth_text, phrase = prepare_synth_text(row["text"], config, t, sentinel)
+        synth_text, phrase = prepare_synth_text(row["text"], config, t, sentinel,
+                                                row_leadin(row))
         kw = {"leadin": phrase} if phrase else {}
         for k in range(seeds):
             wav = None

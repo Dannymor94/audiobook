@@ -77,7 +77,7 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     import soundfile as sf
 
     from audiobook.pronounce import load_table
-    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, seed_for_chunk, worker_config
+    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, row_leadin, seed_for_chunk, worker_config
     from audiobook.worker import TimeoutSynth
 
     rcfg = config.get("render", {})
@@ -87,7 +87,8 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
     table = load_table()
 
     base_seed = seed_for_chunk(row["hash"])
-    synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+    synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel,
+                                            row_leadin(row))
     synth_kw = {"leadin": phrase} if phrase else {}
 
     print(f"redo {section}/{chunk_id}: {row['text']!r}")

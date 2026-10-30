@@ -529,21 +529,21 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
         t = u["type"]
         if t == "heading":
             pause = level_pause.get(u["level"], _HEADING_PAUSE.get(u["level"], 600))
-            chunks.extend(_heading_chunks(u["text"], pause, pauses))
+            chunks.extend({**h, "kind": "heading"} for h in _heading_chunks(u["text"], pause, pauses))
         elif t == "stack":
             pause = p_stack if not u["last_in_stack"] else p_par
-            chunks.append({"text": u["text"], "pause_after_ms": pause})
+            chunks.append({"text": u["text"], "pause_after_ms": pause, "kind": "stack"})
         else:  # paragraph, flow, chain, prose_with_arrow
             text = u["text"]
             if p_step:
                 label, text = split_step_label(text)
                 if label:
-                    chunks.append({"text": label, "pause_after_ms": int(p_step)})
+                    chunks.append({"text": label, "pause_after_ms": int(p_step), "kind": "step"})
             pieces = chunk_prose(text, lim)
             for i, p in enumerate(pieces):
                 pause = (sentence_pause(p, p_sent, by_end) if i < len(pieces) - 1
                          else p_par)
-                chunks.append({"text": p, "pause_after_ms": pause})
+                chunks.append({"text": p, "pause_after_ms": pause, "kind": "text"})
     if chunks:
         chunks[-1]["pause_after_ms"] = p_sec
     return chunks
@@ -592,12 +592,18 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
     manifest: list[dict] = []
+    prev_prepared, prev_kind = None, None
     for n, c in enumerate(build_chunks(units, config), start=1):
-        # Same order as synth.prepare_synth_text: text_prep → fires → respell.
+        # Same order as synth.prepare_synth_text: text_prep → lead-in → respell.
         # text_prep changes enter the hash through synth_text (pron=…).
         prepared = voicecfg.prepare_text(c["text"], config)
         synth_text = respell(prepared, table)
-        phrase = leadin.fires(prepared, config)
+        kind = c.get("kind", "text")
+        # Context lead-in only inside running text: never for headings/step
+        # labels, never borrowing from one. Default mode → fixed carrier (fires).
+        phrase = leadin.phrase_for(prepared, config, prev_prepared,
+                                   kind in ("text", "stack") and prev_kind in ("text", "stack"))
+        prev_prepared, prev_kind = prepared, kind
         # Enum-pause enters hash only when this chunk actually has splits.
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
@@ -610,6 +616,7 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
                                synth_text, phrase, c_enum_ms),
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
+            "leadin": phrase,       # carrier/context read before the text and cut off (in hash)
             "status": "pending",
             "locked": False,
             "seed_override": None,  # set by `accept`; never enters the hash

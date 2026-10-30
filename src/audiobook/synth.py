@@ -227,8 +227,15 @@ def strip_sentinel(text: str, sentinel: str) -> str:
     return text
 
 
+def row_leadin(row: dict):
+    """The lead-in stored in the manifest row by the chunker (context mode needs
+    the previous chunk, which only the chunker sees); rows from older manifests
+    have none → decide from the text as before."""
+    return row["leadin"] if "leadin" in row else leadin.AUTO
+
+
 def prepare_synth_text(text: str, config: dict, table: dict,
-                       sentinel: str) -> tuple[str, str | None]:
+                       sentinel: str, phrase=leadin.AUTO) -> tuple[str, str | None]:
     """The exact string fed to the model for a chunk, plus the lead-in carrier if
     one fires. Order: text_prep → pad (short chunks) → respell (stress dict) → sentinel — the
     chunk hash (chunker.chunk_hash) is built the same way. Returns
@@ -238,7 +245,8 @@ def prepare_synth_text(text: str, config: dict, table: dict,
     quietly drop the padding and let the drift back in."""
     from audiobook.pronounce import respell
     text = voicecfg.prepare_text(text, config)  # text_prep: quotes / final period
-    phrase = leadin.fires(text, config)
+    if phrase is leadin.AUTO:
+        phrase = leadin.fires(text, config)
     base = leadin.pad(text, phrase) if phrase else text
     return apply_sentinel(respell(base, table), sentinel), phrase
 
@@ -348,7 +356,8 @@ def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
     frags = chunk_fragments(row["text"], config)
 
     if len(frags) == 1:
-        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel)
+        synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel,
+                                                row_leadin(row))
         synth_kw = {"leadin": phrase} if phrase else {}
         for attempt in range(retries + 1):
             used = base + attempt

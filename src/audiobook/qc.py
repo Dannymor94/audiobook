@@ -273,7 +273,7 @@ def run(config: dict, section: str | None = None) -> int:
     # seed (Qwen worker), then re-transcribe them (whisper). Models never overlap.
     from audiobook.pronounce import load_table
     from audiobook.synth import (
-        _SAMPLE_RATE, prepare_synth_text, seed_for_chunk, worker_config,
+        _SAMPLE_RATE, prepare_synth_text, row_leadin, seed_for_chunk, worker_config,
     )
     from audiobook.worker import TimeoutSynth
     import soundfile as sf
@@ -296,7 +296,8 @@ def run(config: dict, section: str | None = None) -> int:
                 new_seed = base + 1
                 # Same pad→respell→sentinel as render, so a re-synth of a short
                 # chunk keeps its lead-in (and gets the carrier trimmed off).
-                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel)
+                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel,
+                                                        row_leadin(r))
                 wav = eng.synth(synth_text, new_seed, **({"leadin": phrase} if phrase else {}))
                 if wav is None:  # capped/timeout — leave qc_fail, becomes manual
                     log.warning("qc re-synth failed (cap/timeout) chunk %s", r["id"])
@@ -359,7 +360,7 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
     """Render extra takes of short/unsure chunks, keep the best by whisper.
     → (chunks given takes, chunks whose take was replaced). See takes.py."""
     from audiobook import takes
-    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, seed_for_chunk
+    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, row_leadin, seed_for_chunk
     from audiobook.worker import TimeoutSynth
     import soundfile as sf
 
@@ -382,7 +383,8 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
     if missing:
         with TimeoutSynth(wcfg, timeout_s) as eng:
             for r, d, s in missing:
-                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel)
+                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel,
+                                                        row_leadin(r))
                 wav = eng.synth(synth_text, s, **({"leadin": phrase} if phrase else {}))
                 if wav is None:
                     log.warning("take %s seed %s: cap/timeout", r["id"], s)

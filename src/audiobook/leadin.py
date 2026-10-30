@@ -50,6 +50,59 @@ def fires(text: str, config: dict) -> str | None:
     return phrase if len(text) <= max_chars else None
 
 
+# ── context mode: the previous sentence as the carrier ─────────────────────────
+
+AUTO = object()   # "no stored lead-in: decide from the chunk's own text"
+
+
+def context_settings(config: dict) -> dict | None:
+    """``render.leadin.context`` → {"max_chars"} when mode is "previous", else None."""
+    c = ((config.get("render") or {}).get("leadin") or {}).get("context") or {}
+    if str(c.get("mode", "off")).lower() != "previous":
+        return None
+    return {"max_chars": int(c.get("max_chars", 80))}
+
+
+def context_tail(prev_text: str, max_chars: int) -> str | None:
+    """The end of the previous chunk to read before this one: its last whole
+    sentences that fit ``max_chars``; if even the last sentence is longer, its
+    last words up to the limit (starting at a word). None if nothing usable."""
+    import re
+    t = " ".join(prev_text.split())
+    if not t:
+        return None
+    sents = re.split(r"(?<=[.!?…])\s+", t)
+    out = ""
+    for s in reversed(sents):
+        cand = f"{s} {out}".strip()
+        if len(cand) > max_chars:
+            break
+        out = cand
+    if out:
+        return out
+    words = sents[-1].split()
+    tail: list[str] = []
+    for w in reversed(words):
+        if len(" ".join([w, *tail])) > max_chars:
+            break
+        tail.insert(0, w)
+    return " ".join(tail) or None
+
+
+def phrase_for(prepared: str, config: dict, prev_prepared: str | None,
+               may_use_context: bool) -> str | None:
+    """Lead-in for one chunk. Context mode: the tail of the previous chunk when
+    this chunk continues the text (``may_use_context``: not a heading/step label,
+    previous chunk is text); otherwise — and always in the default mode — the
+    fixed carrier for short chunks (``fires``)."""
+    ctx = context_settings(config)
+    if ctx and may_use_context and prev_prepared:
+        tail = context_tail(prev_prepared, ctx["max_chars"])
+        if tail:
+            return tail
+    return fires(prepared, config)
+
+
 def pad(text: str, phrase: str) -> str:
     """Prepend the carrier. Kept trivial and separate so the hash and the synth
     path build the padded string identically."""

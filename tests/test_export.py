@@ -346,7 +346,7 @@ def test_credit_rows_hash_like_book(tmp_path, monkeypatch):
 def test_render_credits_cache_and_retire(tmp_path, monkeypatch):
     from audiobook import synth
     names = _book(tmp_path, monkeypatch)
-    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s: (t, None))
+    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s, *a: (t, None))
     _FakeEngine.calls, _FakeEngine.fail = [], False
     log: list = []
     cfg = json.loads(json.dumps(CREDITS_CFG))
@@ -393,7 +393,7 @@ def test_render_credits_cache_and_retire(tmp_path, monkeypatch):
 def test_render_credits_failed_synth_writes_nothing(tmp_path, monkeypatch):
     from audiobook import synth
     _book(tmp_path, monkeypatch)
-    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s: (t, None))
+    monkeypatch.setattr(synth, "prepare_synth_text", lambda t, c, tb, s, *a: (t, None))
     _FakeEngine.calls, _FakeEngine.fail = [], True
     try:
         with pytest.raises(SystemExit, match="не синтезировался"):
