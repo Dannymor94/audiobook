@@ -17,6 +17,12 @@ if the child is still alive the worker starts nothing and says so.
 
 Crash order: done/<id>.json is written (temp + rename) before pending/<id>.json
 is removed; a pending file whose done/ twin exists is a leftover and is dropped.
+
+`queue run --requeue-interrupted`: a job found "running" with a dead pid (the
+box rebooted) goes back to pending with ``attempts`` += 1 instead of to done;
+after MAX_INTERRUPTED interruptions it is moved to done as interrupted.
+`queue run --watch N`: after the queue drains, poll it every N seconds forever,
+holding heavy.lock only while jobs run (scripts/gamebox/audiobook-queue.service).
 """
 from __future__ import annotations
 
@@ -41,6 +47,7 @@ GUARDED = ("synth", "chunk")          # never queued for the whole book
 DEFAULT_CONFIG = "config.yaml"
 CONFIG_ENV = "AUDIOBOOK_CONFIG"
 Runner = Callable[..., int]           # (job, log_path[, on_start=callable(pid)]) -> exit code
+MAX_INTERRUPTED = 3                   # requeue_interrupted: give up after this many
 
 
 def queue_root() -> Path:
@@ -347,9 +354,15 @@ def _finish(job: dict, pending_path: Path, done: Path) -> None:
 
 
 def _recover(pending: Path, done: Path, say: Callable[[str], None],
-             alive: Callable[[int | None], bool]) -> tuple[int, list[dict]]:
+             alive: Callable[[int | None], bool],
+             requeue: bool = False) -> tuple[int, list[dict]]:
     """Clean up after a dead worker. Returns (interrupted count, jobs whose
-    child is still alive — while any exists, nothing new may start)."""
+    child is still alive — while any exists, nothing new may start).
+
+    A dead "running" job counts one more interrupted attempt (``attempts``).
+    With ``requeue`` it goes back to pending (every render step resumes from
+    the cache, so a re-run is safe) until MAX_INTERRUPTED attempts; then, and
+    always without ``requeue``, it is moved to done as interrupted."""
     interrupted, live = 0, []
     for p in sorted(pending.glob("*.json")):
         if (done / p.name).exists():
@@ -365,21 +378,102 @@ def _recover(pending: Path, done: Path, say: Callable[[str], None],
         if alive(job.get("pid")):
             live.append(job)
             continue
-        job.update(status="interrupted", exit_code=None, finished=_now())
+        attempts = int(job.get("attempts") or 0) + 1
+        if requeue and attempts < MAX_INTERRUPTED:
+            job.pop("pid", None)
+            job.update(status="pending", attempts=attempts, requeued=_now())
+            _write_json(p, job)
+            say(f"{job['id']}: прерван (перезагрузка/падение воркера) — снова в очереди, "
+                f"прерываний {attempts} из {MAX_INTERRUPTED}")
+            continue
+        job.update(status="interrupted", exit_code=None, finished=_now(), attempts=attempts)
         _finish(job, p, done)
         interrupted += 1
-        say(f"{job['id']}: прерван (воркер упал?) — перенесён в done как interrupted")
+        tail = f" (прерываний: {attempts})" if requeue else ""
+        say(f"{job['id']}: прерван (воркер упал?) — перенесён в done как interrupted{tail}")
     return interrupted, live
 
 
 def run_worker(root: Path | None = None, runner: Runner | None = None, poll: float = 0.5,
                say: Callable[[str], None] = print,
-               alive: Callable[[int | None], bool] = pid_alive) -> int:
+               alive: Callable[[int | None], bool] = pid_alive,
+               requeue_interrupted: bool = False,
+               watch: float | None = None,
+               max_cycles: int | None = None,
+               stop: Callable[[], bool] | None = None,
+               sleep: Callable[[float], None] = time.sleep) -> int:
     """Take pending jobs one by one under the heavy lock until none are left.
 
     Returns 0 if every job passed, 1 if any failed, was found interrupted, or a
     job of a dead worker is still running (then nothing new is started).
+
+    ``requeue_interrupted``: a job left "running" by a dead worker (reboot) is
+    put back to pending instead of done — see _recover.
+
+    ``watch`` (seconds): do not exit when the queue is empty; poll it every
+    ``watch`` seconds forever. heavy.lock is taken only while there is work and
+    released while idle, so a manual heavy command can run between jobs (it
+    refuses, as before, while a job runs). ``max_cycles`` / ``stop`` end the
+    loop (tests); the return value is then the last drain's.
     """
+    if watch is None:
+        return _drain(root, runner, poll, say, alive, requeue_interrupted)
+    return _watch_loop(root, runner, poll, say, alive, requeue_interrupted,
+                       float(watch), max_cycles, stop, sleep)
+
+
+def _scan(root: Path, alive: Callable[[int | None], bool]) -> tuple[bool, list[dict]]:
+    """Lock-free look at pending/: (is there anything to take or recover,
+    jobs marked running whose pid is alive). A live running job belongs to
+    another worker (or a dead worker's surviving child): wait, don't queue up
+    on the lock behind it."""
+    pending, done, _ = _dirs(root)
+    work, live = False, []
+    for p in sorted(pending.glob("*.json")):
+        if (done / p.name).exists():
+            work = True  # crash leftover: recovery drops it
+            continue
+        try:
+            job = _read_json(p)
+        except (OSError, ValueError):
+            continue
+        st = job.get("status")
+        if st == "running" and alive(job.get("pid")):
+            live.append(job)
+        elif st in ("pending", "running"):
+            work = True
+    return work, live
+
+
+def _watch_loop(root, runner, poll, say, alive, requeue, watch, max_cycles, stop,
+                sleep) -> int:
+    root = root or queue_root()
+    code, cycles = 0, 0
+    state = ""          # what was last announced while idle; avoid journal spam
+    while True:
+        work, live = _scan(root, alive)
+        if live:
+            now = "live:" + ",".join(j["id"] for j in live)
+            if now != state:
+                for job in live:
+                    say(f"{job['id']}: выполняется (pid {job.get('pid')}) — жду завершения")
+            state = now
+        elif work:
+            code = _drain(root, runner, poll, say, alive, requeue)
+            state = ""
+        elif state != "idle":
+            say(f"жду новые задачи (проверка каждые {watch:g} с)")
+            state = "idle"
+        cycles += 1
+        if (max_cycles is not None and cycles >= max_cycles) or (stop is not None and stop()):
+            return code
+        sleep(watch)
+
+
+def _drain(root: Path | None, runner: Runner | None, poll: float,
+           say: Callable[[str], None], alive: Callable[[int | None], bool],
+           requeue: bool = False) -> int:
+    """One pass of run_worker: hold heavy.lock until no pending job is left."""
     root = root or queue_root()
     runner = runner or subprocess_runner
     pass_pid = _accepts_on_start(runner)
@@ -389,7 +483,7 @@ def run_worker(root: Path | None = None, runner: Runner | None = None, poll: flo
                         on_wait=lambda: say("замок heavy.lock занят другим воркером, жду…")):
         # The lock is ours, so a job still marked running belongs to a dead
         # worker — but its child may have outlived it.
-        failed, live = _recover(pending, done, say, alive)
+        failed, live = _recover(pending, done, say, alive, requeue)
         if live:
             for job in live:
                 say(f"{job['id']}: ещё выполняется (pid {job.get('pid')}, воркер упал, "
@@ -494,7 +588,8 @@ def cli_shortcut(a) -> int:
     return 0
 
 
-def cli(sub: str, args: list[str]) -> int:
+def cli(sub: str, args: list[str], watch: float | None = None,
+        requeue_interrupted: bool = False) -> int:
     if sub == "add":
         try:
             job = add_job(args)
@@ -513,6 +608,15 @@ def cli(sub: str, args: list[str]) -> int:
             print(f"{j['id']}  {j.get('status', '?'):<11}{code}  {' '.join(j.get('args', []))}")
         return 0
     if sub == "run":
-        return run_worker()
+        if watch is not None and watch <= 0:
+            print("queue run --watch: нужно число секунд > 0", file=sys.stderr)
+            return 2
+        try:
+            return run_worker(requeue_interrupted=requeue_interrupted, watch=watch)
+        except KeyboardInterrupt:
+            if watch is None:
+                raise
+            print("воркер остановлен (Ctrl-C)", file=sys.stderr)
+            return 130
     print(f"queue {sub}: неизвестная подкоманда", file=sys.stderr)
     return 2

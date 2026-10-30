@@ -1,0 +1,24 @@
+# systemd --user unit: the audiobook job queue worker on gamebox.
+# Install and use: scripts/gamebox/README.md. %h = the user's home directory;
+# the project is expected at %h/audiobook — edit both paths if it lives elsewhere.
+[Unit]
+Description=audiobook: очередь тяжёлых задач (queue run --watch)
+
+[Service]
+Type=simple
+WorkingDirectory=%h/audiobook
+# uv is usually in ~/.local/bin, which a user service does not have on PATH.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# print() into the journal without block buffering
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/audiobook/run.sh queue run --watch 60 --requeue-interrupted
+Restart=on-failure
+RestartSec=30
+# stop/restart sends SIGTERM to the worker AND the running job; that job is
+# found "running" with a dead pid on the next start and requeued (resumes from
+# the cache).
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
