@@ -30,6 +30,16 @@ def load_table(path: Path | None = None) -> dict[str, str]:
     return {str(k): str(v) for k, v in data.items()}
 
 
+def build_pattern(table: dict[str, str]) -> re.Pattern | None:
+    """The single alternation respell() uses: longest keys first, whole-word.
+    None for an empty table. Shared with pron_audit so the audit counts exactly
+    the matches respell() replaces."""
+    if not table:
+        return None
+    keys = sorted(table, key=len, reverse=True)
+    return re.compile(r"\b(?:" + "|".join(re.escape(k) for k in keys) + r")\b")
+
+
 def respell(text: str, table: dict[str, str]) -> str:
     """Replace each source string with its respelling, whole-word only.
 
@@ -40,8 +50,7 @@ def respell(text: str, table: dict[str, str]) -> str:
     boundaries (\\b, Unicode-aware) keep 'Отзывы' from firing inside a longer
     word. Identity when nothing matches — that is what keeps the hash stable.
     """
-    if not table:
+    pat = build_pattern(table)
+    if pat is None:
         return text
-    keys = sorted(table, key=len, reverse=True)
-    pat = re.compile(r"\b(?:" + "|".join(re.escape(k) for k in keys) + r")\b")
     return pat.sub(lambda m: table[m.group(0)], text)
