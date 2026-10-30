@@ -11,6 +11,9 @@ WorkingDirectory=%h/audiobook
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # print() into the journal without block buffering
 Environment=PYTHONUNBUFFERED=1
+# Optional Telegram notifications: AUDIOBOOK_TG_TOKEN / AUDIOBOOK_TG_CHAT in the
+# git-ignored .env (the leading '-' = no error if the file is missing).
+EnvironmentFile=-%h/audiobook/.env
 ExecStart=%h/audiobook/run.sh queue run --watch 60 --requeue-interrupted
 Restart=on-failure
 RestartSec=30

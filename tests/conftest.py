@@ -23,6 +23,9 @@ def windows_like_env(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
     monkeypatch.setenv("AUDIOBOOK_DEVICE", "cpu")
+    # A developer's .env must never make a test post to Telegram.
+    monkeypatch.delenv("AUDIOBOOK_TG_TOKEN", raising=False)
+    monkeypatch.delenv("AUDIOBOOK_TG_CHAT", raising=False)
     monkeypatch.setenv("TTS_HOME", str(ROOT / "models" / "tts"))
     monkeypatch.setenv("HF_HOME", str(ROOT / "models" / "hf"))
     yield fake_home
