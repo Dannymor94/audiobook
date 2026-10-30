@@ -35,3 +35,6 @@
 - `./run.sh queue section <S> [--first N]` — вся секция: chunk → synth → qc (с дублями) → assemble → master → suspects.
 - `./run.sh queue redo <S> <id> [<id> …] [--candidates 3]` — кандидаты для нескольких чанков.
 - `./run.sh queue run` — выполнить очередь. `./run.sh queue list` — что в ней.
+- `./run.sh status` — вся книга: сделано / ждёт человека / подозрительные / звук свежий, остаток времени.
+- Исправления по слуху: `./run.sh fix plan labels_*.json` → `./run.sh fix queue` → `./run.sh queue run` →
+  `./run.sh fix review` (одна страница кандидатов) → `./run.sh accept <S> <id> <N>`.

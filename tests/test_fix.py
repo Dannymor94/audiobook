@@ -321,3 +321,11 @@ def test_infer_kind():
     assert fix.infer_kind("chunks/" + "a" * 16 + ".wav") == "probe"
     assert fix.infer_kind("alpha/" + "a" * 16 + ".wav") == "ref-compare"
     assert fix.infer_kind("0003.wav") == "generic"
+
+
+def test_cli_wires_fix():
+    from audiobook.__main__ import build_parser
+    a = build_parser().parse_args(["fix", "plan", "a.json", "--since", "2026-10-30"])
+    assert (a.fix_cmd, a.files, a.since) == ("plan", ["a.json"], "2026-10-30")
+    assert build_parser().parse_args(["fix", "queue"]).candidates == 3
+    assert build_parser().parse_args(["fix", "review"]).fix_cmd == "review"

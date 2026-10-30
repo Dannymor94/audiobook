@@ -35,6 +35,15 @@ def build_parser() -> argparse.ArgumentParser:
     bn.add_argument("--workers", type=int, default=1, help="параллельных воркеров (default 1)")
     bn.add_argument("--threads", type=int, default=None,
                     help="потоков torch на воркер (default: render.cpu_threads или cpu/воркеры)")
+    fx = sub.add_parser("fix", help="разметка на слух → план → redo в очередь → страница выбора")
+    fxs = fx.add_subparsers(dest="fix_cmd", required=True)
+    fp = fxs.add_parser("plan", help="план из labels_*.json и/или журнала → out/fix/plan.json")
+    fp.add_argument("files", nargs="*", help="labels_*.json (без файлов — журнал text/labels.yaml)")
+    fp.add_argument("--journal", action="store_true", help="добавить журнал text/labels.yaml к файлам")
+    fp.add_argument("--since", default=None, help="записи журнала не раньше ГГГГ-ММ-ДД")
+    fq = fxs.add_parser("queue", help="redo каждого чанка плана в очередь (всё или ничего)")
+    fq.add_argument("--candidates", type=int, default=3, help="новых кандидатов на чанк (default 3)")
+    fxs.add_parser("review", help="одна страница с кандидатами чанков плана → out/fix/review.html")
     sub.add_parser("status", help="статус книги: что отрендерено, что ждёт человека, сколько осталось")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
@@ -174,6 +183,13 @@ def _dispatch(a) -> int:
     if a.cmd == "doctor":
         from .doctor import run as doctor
         return 0 if doctor(a.no_models, load_config()) else 1
+    if a.cmd == "fix":
+        from . import fix
+        if a.fix_cmd == "plan":
+            return fix.cmd_plan(a.files, a.journal, a.since)
+        if a.fix_cmd == "queue":
+            return fix.cmd_queue(a.candidates)
+        return fix.cmd_review()
     if a.cmd == "status":
         from .status import run as status
         return status(load_config())
