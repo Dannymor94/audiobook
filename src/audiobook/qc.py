@@ -214,11 +214,12 @@ def _ms_per_char(row: dict) -> float:
 
 def _measure(model, wav_path: Path, text: str, watch: set[str], min_conf: float) -> dict:
     """Whisper metrics of one wav against the chunk text."""
-    from audiobook.takes import word_stats
+    from audiobook.takes import wav_peak, word_stats
     txt, words = transcribe_words(model, wav_path)
     min_p, mean_p = word_stats(words, _norm_word)
     return {"transcript": txt, "flag_words": flag_words(words, watch, min_conf),
-            "cer": round(cer(text, txt), 4), "min_p": min_p, "mean_p": mean_p}
+            "cer": round(cer(text, txt), 4), "min_p": min_p, "mean_p": mean_p,
+            "peak": wav_peak(wav_path)}
 
 
 def run(config: dict, section: str | None = None) -> int:
@@ -395,14 +396,14 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
     wm = load_whisper()
     try:
         for r, d, seeds, why in plan:
-            best_sc = takes.score(r, threshold)
+            best_sc = takes.score(r, threshold, ts["clip_peak"])
             best = None
             for s in seeds:
                 p = d / f"{s}.wav"
                 if not p.exists():
                     continue
                 m = _measure(wm, p, r["text"], watch, min_conf)
-                sc = takes.score(m, threshold)
+                sc = takes.score(m, threshold, ts["clip_peak"])
                 if sc < best_sc:
                     best_sc, best = sc, (s, p, m)
             if best:

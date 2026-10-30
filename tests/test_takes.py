@@ -4,7 +4,7 @@ from pathlib import Path
 from audiobook import takes
 from audiobook.qc import _norm_word
 
-S = {"count": 3, "short_chars": 40, "low_conf": 0.15}
+S = {"count": 3, "short_chars": 40, "low_conf": 0.15, "clip_peak": 0.999}
 
 
 def test_settings_off_by_default_and_on_with_count():
@@ -113,3 +113,20 @@ def test_takes_phase_picks_best_and_keeps_all(tmp_path, monkeypatch):
     assert qc._takes_phase(rows, cfg, sec, chunks, sec / "manifest.jsonl",
                            {}, 10, {}, "", 0.05, set(), 0.6) == (0, 0)
     assert rendered == []
+
+
+def test_clipped_reason_and_score():
+    row = {"id": "3", "text": "x" * 100, "status": "done", "min_p": 0.9, "peak": 1.0}
+    assert takes.reason(row, S) == "clipped"
+    assert takes.reason(dict(row, peak=0.8), S) is None
+    clean = {"cer": 0.01, "flag_words": [], "min_p": 0.8, "mean_p": 0.8, "peak": 0.7}
+    clipped_better_words = {"cer": 0.0, "flag_words": [], "min_p": 0.99, "mean_p": 0.99, "peak": 1.0}
+    assert takes.score(clean, 0.05) < takes.score(clipped_better_words, 0.05)
+
+
+def test_wav_peak(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    p = tmp_path / "a.wav"
+    sf.write(str(p), np.array([0.1, -0.75, 0.3], dtype=np.float32), 24000, subtype="FLOAT")
+    assert takes.wav_peak(p) == 0.75

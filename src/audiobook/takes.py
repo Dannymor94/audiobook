@@ -8,7 +8,9 @@ chunks and keeps the one whisper understands best.
 Which chunks (config ``qc.takes``; absent or count ≤ 1 → off):
   * short: ``len(text) <= short_chars`` — headings, step labels;
   * unsure: some word longer than 4 letters has whisper probability
-    ``< low_conf`` (garbled word).
+    ``< low_conf`` (garbled word);
+  * clipped: the model's own output hit full scale (``peak >= clip_peak``) —
+    the waveform was cut inside the model, mastering cannot undo it.
 Locked chunks (accepted by ear) are never touched.
 
 Takes live in ``<section>/takes/<id>__<hash12>/<seed>.wav``; the chunk's
@@ -34,7 +36,16 @@ def settings(config: dict) -> dict | None:
         return None
     return {"count": count,
             "short_chars": int(t.get("short_chars", 40)),
-            "low_conf": float(t.get("low_conf", 0.15))}
+            "low_conf": float(t.get("low_conf", 0.15)),
+            "clip_peak": float(t.get("clip_peak", 0.999))}
+
+
+def wav_peak(path) -> float:
+    """Absolute sample peak of a (FLOAT) chunk wav."""
+    import numpy as np
+    import soundfile as sf
+    data, _sr = sf.read(str(path), dtype="float32")
+    return round(float(np.max(np.abs(data))), 4) if len(data) else 0.0
 
 
 def word_stats(words: list[dict], norm) -> tuple[float, float]:
@@ -47,7 +58,7 @@ def word_stats(words: list[dict], norm) -> tuple[float, float]:
 
 
 def reason(row: dict, s: dict) -> str | None:
-    """Why this chunk deserves extra takes: "short" | "unsure" | None."""
+    """Why this chunk deserves extra takes: "short" | "unsure" | "clipped" | None."""
     if row.get("locked") or row.get("status") != "done":
         return None
     if int(row.get("takes", 1)) >= s["count"]:
@@ -56,6 +67,8 @@ def reason(row: dict, s: dict) -> str | None:
         return "short"
     if float(row.get("min_p", 1.0)) < s["low_conf"]:
         return "unsure"
+    if float(row.get("peak", 0.0)) >= s.get("clip_peak", 0.999):
+        return "clipped"
     return None
 
 
@@ -70,9 +83,12 @@ def take_dir(sec_dir: Path, row: dict) -> Path:
     return sec_dir / "takes" / f"{row['id']}__{row['hash'][:12]}"
 
 
-def score(m: dict, threshold: float) -> tuple:
-    """Lower is better: passes CER, then fewer unsure words, lower CER, higher
-    worst-word probability, higher mean probability."""
+CLIP_PEAK = 0.999
+
+
+def score(m: dict, threshold: float, clip_peak: float = CLIP_PEAK) -> tuple:
+    """Lower is better: passes CER, then not clipped, fewer unsure words, lower
+    CER, higher worst-word probability, higher mean probability."""
     unsure = sum(1 for f in m.get("flag_words") or [] if f[3] == "conf")
-    return (m["cer"] > threshold, unsure, round(m["cer"], 3),
-            -float(m.get("min_p", 1.0)), -float(m.get("mean_p", 0.0)))
+    return (m["cer"] > threshold, float(m.get("peak", 0.0)) >= clip_peak, unsure,
+            round(m["cer"], 3), -float(m.get("min_p", 1.0)), -float(m.get("mean_p", 0.0)))
