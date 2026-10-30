@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    lp = sub.add_parser("listen-plan", help="что послушать человеку: подозрения + начала глав + выборка → out/listen/")
+    lp.add_argument("--section", nargs="+", action="extend", default=None, help="только эти секции")
+    lp.add_argument("--intro-s", type=float, default=30, help="сколько секунд начала каждой главы (default 30)")
+    lp.add_argument("--random", type=int, default=20, help="случайных фраз по всем секциям (default 20)")
     sub.add_parser("pace", help="темп чтения по главам: отклонения от медианы книги")
     sub.add_parser("status", help="статус книги: что отрендерено, что ждёт человека, сколько осталось")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
@@ -215,6 +219,9 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "listen-plan":
+        from .listen import run as listen_plan
+        return listen_plan(load_config(), a.section, a.intro_s, a.random)
     if a.cmd == "pace":
         from .pace import run as pace
         return pace(load_config())

@@ -477,6 +477,39 @@ def split_step_label(text: str) -> tuple[str | None, str]:
     return (m.group(1), m.group(2)) if m else (None, text)
 
 
+_CLOSERS = "»”\"')]"
+
+
+def end_mark(text: str) -> str:
+    """The terminal punctuation of a chunk, looking past closing quotes and
+    brackets: "?" "!" "…" ":" ";" "." or "" (none). "..." counts as "…"."""
+    t = text.rstrip().rstrip(_CLOSERS).rstrip()
+    if t.endswith("...") or t.endswith("…"):
+        return "…"
+    return t[-1] if t and t[-1] in "?!:;." else ""
+
+
+def sentence_pause(text: str, default: int, by_end: dict) -> int:
+    """Pause after a chunk that ends mid-paragraph: ``pauses_ms.by_end`` by its
+    final mark ("?": 500, "…": 650 …), else the plain sentence pause."""
+    mark = end_mark(text)
+    return int(by_end.get(mark, default)) if mark else default
+
+
+def section_config(config: dict, section: str | None) -> dict:
+    """``config`` with ``pauses_ms.sections.<section>`` merged over ``pauses_ms``
+    (e.g. slower practices). Pauses are not in the chunk hash: changing them
+    needs chunk + assemble, never a re-render."""
+    if not section:
+        return config
+    pauses = dict(config.get("pauses_ms") or {})
+    over = (pauses.get("sections") or {}).get(section)
+    if not over:
+        return config
+    pauses.update(over)
+    return {**config, "pauses_ms": pauses}
+
+
 def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     """Return ordered [{text, pause_after_ms}]. ``config`` supplies chunk length
     limits (``chunking``) and heading split pauses (``pauses_ms``); None = the
@@ -490,6 +523,7 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     p_par = int(pauses.get("paragraph", PAUSE_PARAGRAPH))
     p_stack = int(pauses.get("stack", PAUSE_STACK))
     p_sec = int(pauses.get("chapter", PAUSE_SECTION))
+    by_end = {str(k): int(v) for k, v in (pauses.get("by_end") or {}).items()}
     chunks: list[dict] = []
     for u in units:
         t = u["type"]
@@ -507,7 +541,8 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
                     chunks.append({"text": label, "pause_after_ms": int(p_step)})
             pieces = chunk_prose(text, lim)
             for i, p in enumerate(pieces):
-                pause = p_sent if i < len(pieces) - 1 else p_par
+                pause = (sentence_pause(p, p_sent, by_end) if i < len(pieces) - 1
+                         else p_par)
                 chunks.append({"text": p, "pause_after_ms": pause})
     if chunks:
         chunks[-1]["pause_after_ms"] = p_sec
@@ -702,7 +737,7 @@ def run(config: dict, section: str | None = None) -> int:
         if not normf.exists() or normf.stat().st_size < 50:
             continue  # empty/skipped section
         units = load_units(nn, slug)
-        new_manifest = build_manifest(units, config)
+        new_manifest = build_manifest(units, section_config(config, f"{nn}_{slug}"))
 
         sec_dir = out_root / f"{nn}_{slug}"
         sec_dir.mkdir(parents=True, exist_ok=True)
