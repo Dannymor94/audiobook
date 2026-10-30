@@ -17,9 +17,17 @@ def pick_device(requested: str | None = None) -> str:
     return "cpu"
 
 
-def configure_cpu_threads(workers: int) -> None:
-    """Потоки torch делим между процессами-воркерами, иначе они друг друга душат."""
+def threads_per_worker(workers: int, override: int | None = None) -> int:
+    """torch threads for one worker: ``render.cpu_threads`` if set, else the
+    logical CPU count split between the workers."""
+    if override:
+        return max(1, int(override))
+    return max(1, (os.cpu_count() or 4) // max(1, workers))
+
+
+def configure_cpu_threads(workers: int, override: int | None = None) -> None:
+    """Потоки torch делим между процессами-воркерами, иначе они друг друга душат.
+    ``override`` (render.cpu_threads) задаёт число потоков на воркер явно."""
     import torch
 
-    phys = os.cpu_count() or 4
-    torch.set_num_threads(max(1, phys // max(1, workers)))
+    torch.set_num_threads(threads_per_worker(workers, override))

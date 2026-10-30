@@ -613,6 +613,10 @@ def worker_config(config: dict, num_workers: int = 1) -> dict:
         "language": config["model"]["language"],
         "cap": cap_params(config),
         "num_workers": num_workers,  # TimeoutSynth child divides CPU threads by this
+        # render.cpu_threads: torch threads per worker (None → cpu_count // workers).
+        # Not in the chunk hash; thread count changes FP order, so the same seed may
+        # sound slightly different — keep it fixed once the book render starts.
+        "cpu_threads": (config.get("render") or {}).get("cpu_threads"),
     }
 
 

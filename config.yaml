@@ -29,6 +29,13 @@ reference:
   # Смена референса = весь кеш заново. Прежний: ref/ref1.wav (+ ref1.txt).
   ref_text_path: ref/ref_ch1.txt
 render:
+  # Потоков torch на воркер. Пусто = число логических ядер / число воркеров.
+  # Подбирается `./run.sh bench --workers 2 --threads N`. В хеш не входит.
+  cpu_threads:
+  # Для ./run.sh status: эффективный RTF всей машины (2 воркера) — оценка остатка.
+  eta_rtf: 6.5
+  # Секции, которые не озвучиваем (status их не считает). Решение за человеком.
+  skip_sections: []
   # Per-chunk length cap. Qwen open-end generation can run away (never emit a
   # stop); identical (text, seed) even renders differently in-process vs the
   # spawn worker, so a runaway cannot be tuned away by seed. Instead cap the

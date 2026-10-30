@@ -34,7 +34,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
     # audition. os.cpu_count() matches the calibration/audition environment.
     import os as _os
 
-    _n = str(_os.cpu_count() or 4)
+    _n = str(cfg.get("cpu_threads") or _os.cpu_count() or 4)
     for _var in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "MKL_NUM_THREADS",
                  "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         _os.environ[_var] = _n
@@ -45,7 +45,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
         CapExceeded, load_latents, load_model, max_tokens_for_text, synthesize,
     )
 
-    configure_cpu_threads(workers=cfg.get("num_workers", 1))
+    configure_cpu_threads(workers=cfg.get("num_workers", 1), override=cfg.get("cpu_threads"))
     model = load_model(
         cfg["device"], cfg.get("variant", "0.6B"), cfg.get("quantize", "none"))
     latents = load_latents(cfg["latents_path"])

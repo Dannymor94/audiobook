@@ -31,7 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor", help="проверка окружения")
     d.add_argument("--no-models", action="store_true", help="не проверять веса (CI)")
-    sub.add_parser("bench", help="RTF на 5 чанках")
+    bn = sub.add_parser("bench", help="RTF: N воркеров × T потоков (подбор render.cpu_threads)")
+    bn.add_argument("--workers", type=int, default=1, help="параллельных воркеров (default 1)")
+    bn.add_argument("--threads", type=int, default=None,
+                    help="потоков torch на воркер (default: render.cpu_threads или cpu/воркеры)")
+    sub.add_parser("status", help="статус книги: что отрендерено, что ждёт человека, сколько осталось")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
     ck = sub.add_parser("chunk", help="чанкинг разделов → out/sections/NN/manifest.jsonl")
@@ -170,9 +174,13 @@ def _dispatch(a) -> int:
     if a.cmd == "doctor":
         from .doctor import run as doctor
         return 0 if doctor(a.no_models, load_config()) else 1
+    if a.cmd == "status":
+        from .status import run as status
+        return status(load_config())
     if a.cmd == "bench":
         from .bench import run as bench
-        return bench(load_config())
+        cfg = load_config()
+        return bench(cfg, a.workers, a.threads or (cfg.get("render") or {}).get("cpu_threads"))
     if a.cmd == "pick-ref":
         from .pick_ref import run as pick_ref
         return pick_ref(load_config())
