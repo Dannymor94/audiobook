@@ -103,6 +103,14 @@ def build_parser() -> argparse.ArgumentParser:
     qa.add_argument("job_args", nargs="*")
     qs.add_parser("list", help="задачи в очереди и выполненные")
     qs.add_parser("run", help="воркер: выполнять pending по одной, пока очередь не опустеет")
+    qsec = qs.add_parser("section", help="вся секция в очередь: chunk→synth→qc→assemble→master→suspects")
+    qsec.add_argument("section")
+    qsec.add_argument("--workers", type=int, default=2, help="воркеров synth (default 2)")
+    qsec.add_argument("--first", type=int, default=None, help="только первые N чанков (превью)")
+    qrd = qs.add_parser("redo", help="redo нескольких чанков секции в очередь")
+    qrd.add_argument("section")
+    qrd.add_argument("chunk_ids", nargs="+", help="id чанков, например 0012 0031")
+    qrd.add_argument("--candidates", type=int, default=3)
     rv = sub.add_parser("review",
                         help="страница прослушки с кнопками хорошо/плохо/? → <папка>/review.html")
     rv.add_argument("--dir", required=True, help="папка с *.wav (pron_test, redo, probe, golden…)")
@@ -213,7 +221,9 @@ def _dispatch(a) -> int:
         from .preflight import run as preflight
         return 0 if preflight(load_config(), a.max_load, a.min_free_gb, a.no_models) else 1
     if a.cmd == "queue":
-        from .jobqueue import cli as queue_cli
+        from .jobqueue import cli as queue_cli, cli_shortcut
+        if a.queue_cmd in ("section", "redo"):
+            return cli_shortcut(a)
         return queue_cli(a.queue_cmd, getattr(a, "job_args", []))
     if a.cmd == "review":
         from .review import run as review

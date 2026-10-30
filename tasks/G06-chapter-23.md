@@ -4,7 +4,7 @@ title: одна глава целиком — глава 23, «Шаг один.�
 status: todo
 owner:
 machine: gamebox
-depends_on: [G05, решение человека по temperature]
+depends_on: [G05b, решение человека по temperature]
 ---
 ## Зачем
 Проверка исправленной перечанковки на 36 повторах «Шаг один.», пауз после «Шаг N.»,
@@ -16,14 +16,9 @@ depends_on: [G05, решение человека по temperature]
 ## Шаг 0
 Как в G04, плюс `export S=30_glava_23_karta_istseleniya_poshagovaya_i`
 
-## Шаг 1. Очередь (6 команд по одной)
+## Шаг 1. Очередь — одна команда
 ```
-./run.sh queue add -- chunk --section $S
-./run.sh queue add -- synth --section $S --workers 2
-./run.sh queue add -- qc --section $S
-./run.sh queue add -- assemble --section $S
-./run.sh queue add -- master --section $S
-./run.sh queue add -- suspects --section $S
+./run.sh queue section $S
 ./run.sh queue list
 nohup ./run.sh queue run > out/G06.log 2>&1 &
 ```
@@ -35,5 +30,5 @@ nohup ./run.sh queue run > out/G06.log 2>&1 &
 
 ## Отчёт
 queue list; из логов: chunk (queued/orphaned), synth (synthesised/timeout/wall/RTF),
-qc (recovered/manual/suspect + строки MANUAL), master (LUFS, peak), первая строка suspects;
+qc (recovered/manual/suspect/takes/replaced + строки MANUAL и take), master (LUFS, peak), первая строка suspects;
 пик памяти. `status: review`.

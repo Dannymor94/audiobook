@@ -14,13 +14,13 @@ depends_on: [G06 прослушана человеком]
 Те же, что в G04.
 
 ## Шаг 1
-Для каждой S по порядку — те же 6 команд `queue add`, что в G06:
 ```
-21_glava_14_pyat_klyuchej_kak_otkryt_zakryt
-44_vmesto_poslesloviya_pismo_tebe
-52_lichnost_za_2_minuty
+./run.sh queue section 21_glava_14_pyat_klyuchej_kak_otkryt_zakryt
+./run.sh queue section 44_vmesto_poslesloviya_pismo_tebe
+./run.sh queue section 52_lichnost_za_2_minuty
+./run.sh queue list
+nohup ./run.sh queue run > out/G07.log 2>&1 &
 ```
-Затем один `nohup ./run.sh queue run > out/G07.log 2>&1 &`.
 
 ## Шаг 2. На Mac
 `~/Downloads/audiobook/G07/<S>.mp3` + `<S>.suspects.tsv`.

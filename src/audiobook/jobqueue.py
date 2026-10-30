@@ -430,6 +430,70 @@ def run_worker(root: Path | None = None, runner: Runner | None = None, poll: flo
 
 # ------------------------------------------------------------------------- CLI
 
+# ------------------------------------------------------------------ shortcuts
+
+def section_exists(section: str) -> bool:
+    """A section name is "<nn>_<slug>" of some text/blocks/*.blocks.json."""
+    for jf in (paths.TEXT / "blocks").glob("*.blocks.json"):
+        try:
+            d = _read_json(jf)
+        except (OSError, ValueError):
+            continue
+        if f"{d.get('nn')}_{d.get('slug')}" == section:
+            return True
+    return False
+
+
+def section_jobs(section: str, workers: int = 2, first: int | None = None) -> list[list[str]]:
+    """Whole render of ONE section: chunk → synth → qc → assemble → master → suspects."""
+    f = ["--first", str(first)] if first else []
+    sec = ["--section", section]
+    return [["chunk", *sec],
+            ["synth", *sec, "--workers", str(workers), *f],
+            ["qc", *sec],
+            ["assemble", *sec, *f],
+            ["master", *sec, *f],
+            ["suspects", *sec, *f]]
+
+
+def redo_jobs(section: str, chunk_ids: list[str], candidates: int = 3) -> list[list[str]]:
+    return [["redo", section, cid, "--candidates", str(candidates)] for cid in chunk_ids]
+
+
+def add_many(jobs: list[list[str]], root: Path | None = None) -> list[dict]:
+    """All or nothing: every job is validated before the first one is queued."""
+    config = config_at_add()
+    for args in jobs:
+        reason = validate_args(args, config)
+        if reason:
+            raise ValueError(f"{' '.join(args)}: {reason}")
+    return [add_job(args, root) for args in jobs]
+
+
+def _print_added(jobs: list[dict]) -> None:
+    for job in jobs:
+        cfg = "" if job["config"] == DEFAULT_CONFIG else f"  [{CONFIG_ENV}={job['config']}]"
+        print(f"в очереди: {job['id']}  {' '.join(job['args'])}{cfg}")
+
+
+def cli_shortcut(a) -> int:
+    """queue section / queue redo (argparse namespace from __main__)."""
+    if not section_exists(a.section):
+        print(f"отклонено: нет секции {a.section!r} (см. text/blocks/)", file=sys.stderr)
+        return 2
+    if a.queue_cmd == "section":
+        jobs = section_jobs(a.section, a.workers, a.first)
+    else:
+        jobs = redo_jobs(a.section, a.chunk_ids, a.candidates)
+    try:
+        _print_added(add_many(jobs))
+    except ValueError as e:
+        print(f"отклонено: {e}", file=sys.stderr)
+        return 2
+    print("дальше: ./run.sh queue run")
+    return 0
+
+
 def cli(sub: str, args: list[str]) -> int:
     if sub == "add":
         try:

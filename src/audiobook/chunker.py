@@ -588,7 +588,8 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 # Per-chunk results that belong to the audio, not to the text: carried over
 # with the wav when a re-chunk keeps the chunk (same hash).
 _CARRY = ("status", "locked", "seed_override", "duration_ms", "seed", "cer",
-          "transcript", "flag_words", "ms_per_char", "suspect")
+          "transcript", "flag_words", "ms_per_char", "suspect",
+          "min_p", "mean_p", "takes", "take_base")
 
 
 def align(old: list[dict], new: list[dict]) -> tuple[list[dict], list[str], list[str]]:

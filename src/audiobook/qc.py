@@ -212,6 +212,15 @@ def _ms_per_char(row: dict) -> float:
     return round((row.get("duration_ms") or 0) / n, 1)
 
 
+def _measure(model, wav_path: Path, text: str, watch: set[str], min_conf: float) -> dict:
+    """Whisper metrics of one wav against the chunk text."""
+    from audiobook.takes import word_stats
+    txt, words = transcribe_words(model, wav_path)
+    min_p, mean_p = word_stats(words, _norm_word)
+    return {"transcript": txt, "flag_words": flag_words(words, watch, min_conf),
+            "cer": round(cer(text, txt), 4), "min_p": min_p, "mean_p": mean_p}
+
+
 def run(config: dict, section: str | None = None) -> int:
     if not section:
         raise SystemExit("qc: --section обязателен")
@@ -244,10 +253,7 @@ def run(config: dict, section: str | None = None) -> int:
     wm = load_whisper()
     try:
         for r in candidates:
-            txt, words = transcribe_words(wm, chunks_dir / f"{r['id']}.wav")
-            r["transcript"] = txt
-            r["flag_words"] = flag_words(words, watch, min_conf)
-            r["cer"] = round(cer(r["text"], txt), 4)
+            r.update(_measure(wm, chunks_dir / f"{r['id']}.wav", r["text"], watch, min_conf))
             r["ms_per_char"] = _ms_per_char(r)
             r["status"] = qc_status(r, threshold)
     finally:
@@ -307,16 +313,18 @@ def run(config: dict, section: str | None = None) -> int:
         wm = load_whisper()
         try:
             for r in fails:
-                txt, words = transcribe_words(wm, chunks_dir / f"{r['id']}.wav")
-                r["transcript"] = txt
-                r["flag_words"] = flag_words(words, watch, min_conf)
-                r["cer"] = round(cer(r["text"], txt), 4)
+                r.update(_measure(wm, chunks_dir / f"{r['id']}.wav", r["text"], watch, min_conf))
                 if r["cer"] <= threshold:
                     r["status"] = "done"
                     recovered += 1
         finally:
             _release(wm)
         _write_manifest(manifest_path, rows)
+
+    # Phase 3 — best-of-N takes for short / unsure chunks (qc.takes).
+    took, replaced = _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path,
+                                  wcfg, timeout_s, table, sentinel, threshold,
+                                  watch, min_conf)
 
     # Exhausted retries → manual queue.
     manual = 0
@@ -328,10 +336,98 @@ def run(config: dict, section: str | None = None) -> int:
 
     suspects = [r["id"] for r in candidates if r.get("suspect")]
     print(f"section={section}  chunks={len(candidates)}  "
-          f"recovered={recovered}  manual={manual}  suspect={len(suspects)}")
+          f"recovered={recovered}  manual={manual}  suspect={len(suspects)}  "
+          f"takes={took}  replaced={replaced}")
     for r in rows:
         if r.get("status") == "manual":
             print(f"  MANUAL {r['id']} cer={r.get('cer')}: {r['text']!r}")
     if suspects:
         print(f"  suspect (ms/char > 1.8× median): {suspects}")
     return 0
+
+
+def _copy_atomic(src: Path, dst: Path) -> None:
+    import shutil
+    tmp = dst.with_name(dst.name + ".part")
+    shutil.copyfile(src, tmp)
+    tmp.replace(dst)
+
+
+def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout_s,
+                 table, sentinel, threshold, watch, min_conf) -> tuple[int, int]:
+    """Render extra takes of short/unsure chunks, keep the best by whisper.
+    → (chunks given takes, chunks whose take was replaced). See takes.py."""
+    from audiobook import takes
+    from audiobook.synth import _SAMPLE_RATE, prepare_synth_text, seed_for_chunk
+    from audiobook.worker import TimeoutSynth
+    import soundfile as sf
+
+    ts = takes.settings(config)
+    if not ts:
+        return 0, 0
+    todo = [r for r in rows
+            if (chunks_dir / f"{r['id']}.wav").exists() and takes.reason(r, ts)]
+    if not todo:
+        return 0, 0
+    plan = []
+    for r in todo:
+        cur = r.get("seed") or seed_for_chunk(r["hash"])
+        r.setdefault("take_base", cur)
+        plan.append((r, takes.take_dir(sec_dir, r), takes.take_seeds(r, ts), takes.reason(r, ts)))
+
+    missing = [(r, d, s) for r, d, seeds, _why in plan for s in seeds
+               if not (d / f"{s}.wav").exists()]
+    log.info("takes: %d chunks, %d takes to render", len(plan), len(missing))
+    if missing:
+        with TimeoutSynth(wcfg, timeout_s) as eng:
+            for r, d, s in missing:
+                synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel)
+                wav = eng.synth(synth_text, s, **({"leadin": phrase} if phrase else {}))
+                if wav is None:
+                    log.warning("take %s seed %s: cap/timeout", r["id"], s)
+                    continue
+                d.mkdir(parents=True, exist_ok=True)
+                tmp = d / f"{s}.wav.part"
+                sf.write(str(tmp), wav, _SAMPLE_RATE, subtype="FLOAT", format="WAV")
+                tmp.replace(d / f"{s}.wav")
+
+    replaced = 0
+    wm = load_whisper()
+    try:
+        for r, d, seeds, why in plan:
+            best_sc = takes.score(r, threshold)
+            best = None
+            for s in seeds:
+                p = d / f"{s}.wav"
+                if not p.exists():
+                    continue
+                m = _measure(wm, p, r["text"], watch, min_conf)
+                sc = takes.score(m, threshold)
+                if sc < best_sc:
+                    best_sc, best = sc, (s, p, m)
+            if best:
+                s, p, m = best
+                cur_wav = chunks_dir / f"{r['id']}.wav"
+                cur_seed = r.get("seed") or seed_for_chunk(r["hash"])
+                d.mkdir(parents=True, exist_ok=True)
+                keep = d / f"{cur_seed}.wav"
+                if not keep.exists():
+                    _copy_atomic(cur_wav, keep)      # current take kept, never deleted
+                _copy_atomic(p, cur_wav)
+                r.update(m)
+                r["seed"] = s
+                r["duration_ms"] = round(sf.info(str(cur_wav)).frames / _SAMPLE_RATE * 1000)
+                r["ms_per_char"] = _ms_per_char(r)
+                replaced += 1
+                print(f"  take {r['id']}: seed {cur_seed} → {s}  cer={m['cer']}  "
+                      f"min_p={m['min_p']}  ({why})")
+            r["takes"] = 1 + sum((d / f"{s}.wav").exists() for s in seeds)
+    finally:
+        _release(wm)
+    _write_manifest_rows(manifest_path, rows)
+    return len(plan), replaced
+
+
+def _write_manifest_rows(path, rows) -> None:
+    from audiobook.synth import _write_manifest
+    _write_manifest(path, rows)
