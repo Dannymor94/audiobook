@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: additive backup of gamebox:~/audiobook/out/ every 3 hours.
+  Install: scripts/mac/README.md. Replace PATH_TO_AUDIOBOOK below with the
+  folder of your clone (the one that contains scripts/mac/backup_gamebox.sh).
+  launchd does not expand "~", so the log goes through the shell ($HOME).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.audiobook.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>mkdir -p "$HOME/AudiobookBackup" &amp;&amp; exec "PATH_TO_AUDIOBOOK/scripts/mac/backup_gamebox.sh" gamebox &gt;&gt; "$HOME/AudiobookBackup/backup.log" 2&gt;&amp;1</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>10800</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+</dict>
+</plist>
