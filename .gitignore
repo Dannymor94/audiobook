@@ -13,6 +13,7 @@ bin/
 ref/
 cache/
 out/
+/out
 
 # The manuscript source stays out of git; the processed text layer
 # (chNN.txt/.norm/.acc, read_rules.yaml, pronounce.yaml) is committed.

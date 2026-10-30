@@ -89,6 +89,11 @@ def deliver(text: str, env: Mapping[str, str] | None = None,
         reason = mask(f"{type(e).__name__}: {e}", token)
         log.warning("telegram: не отправлено: %s", reason)
         return False, reason
+    return _submit(req, token, urlopen, deadline)
+
+
+def _submit(req, token: str, urlopen: Callable | None, deadline: float) -> tuple[bool, str]:
+    """POST ``req`` in a daemon thread with a hard deadline. Never raises."""
     opener = urlopen or urllib.request.urlopen
     result: dict[str, object] = {}
 
@@ -121,6 +126,51 @@ def deliver(text: str, env: Mapping[str, str] | None = None,
         reason = mask(str(result.get("err") or "неизвестная ошибка"), token)
     log.warning("telegram: не отправлено: %s", reason)
     return False, reason
+
+
+AUDIO_DEADLINE = 60.0          # a 2–3 MB mp3 over a slow uplink
+MAX_AUDIO_BYTES = 45 * 1024 * 1024   # Bot API limit is 50 MB
+
+
+def multipart(fields: dict[str, str], file_field: str, path: Path,
+              mime: str = "audio/mpeg") -> tuple[bytes, str]:
+    """multipart/form-data body (stdlib only) → (body, content-type)."""
+    import uuid
+    boundary = f"----audiobook{uuid.uuid4().hex}"
+    out = bytearray()
+    for k, v in fields.items():
+        out += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n"
+                f"{v}\r\n").encode("utf-8")
+    fname = path.name.encode("ascii", "replace").decode("ascii")
+    out += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+            f"filename=\"{fname}\"\r\nContent-Type: {mime}\r\n\r\n").encode("utf-8")
+    out += path.read_bytes()
+    out += f"\r\n--{boundary}--\r\n".encode("utf-8")
+    return bytes(out), f"multipart/form-data; boundary={boundary}"
+
+
+def deliver_audio(path: Path, caption: str, title: str = "",
+                  env: Mapping[str, str] | None = None, urlopen: Callable | None = None,
+                  deadline: float = AUDIO_DEADLINE) -> tuple[bool, str]:
+    """Send an mp3 to the chat (sendAudio). Returns (sent, reason). Never raises."""
+    creds = credentials(env)
+    if creds is None:
+        return False, why_disabled(env) or "уведомления выключены"
+    token, chat = creds
+    try:
+        if not path.exists():
+            return False, f"нет файла {path.name}"
+        if path.stat().st_size > MAX_AUDIO_BYTES:
+            return False, f"файл больше {MAX_AUDIO_BYTES // 2**20} МБ"
+        fields = {"chat_id": chat, "caption": _clip(caption, 1000)}
+        if title:
+            fields["title"] = _clip(title, 60)
+        body, ctype = multipart(fields, "audio", path)
+        req = urllib.request.Request(f"{API}/bot{token}/sendAudio", data=body,
+                                     headers={"Content-Type": ctype}, method="POST")
+    except Exception as e:  # noqa: BLE001
+        return False, mask(f"{type(e).__name__}: {e}", token)
+    return _submit(req, token, urlopen, deadline)
 
 
 def send(text: str, env: Mapping[str, str] | None = None,

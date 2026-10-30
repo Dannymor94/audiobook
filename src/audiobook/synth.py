@@ -406,6 +406,8 @@ def needs_render(row: dict, wav_exists: bool) -> bool:
     A wav that QC already judged (qc_fail / manual) or a human accepted (locked)
     is never re-rendered here: re-running synth to resume must not replace the
     manual queue with fresh takes at the base seed."""
+    if row.get("status") == "dup":       # waits for its first copy (reuse.py)
+        return False
     if not wav_exists:
         return not row.get("locked")
     if row.get("locked"):
@@ -642,6 +644,15 @@ def run(config: dict, section: str | None = None, num_workers: int = 1,
     wcfg = worker_config(config, num_workers)
     ensure_manifest_current(config, section)
 
+    from audiobook import reuse
+    use_reuse = reuse.enabled(config)
+    if use_reuse:
+        mrows = _read_manifest(sec_dir / "manifest.jsonl")
+        copied, parked = reuse.before_render(sec_dir, mrows, first=first)
+        _write_manifest(sec_dir / "manifest.jsonl", mrows)
+        if copied or parked:
+            print(f"reuse: скопировано с одинаковых чанков {copied}, ждут первой копии {parked}")
+
     t0 = time.perf_counter()
     if num_workers > 1:
         synthesised, skipped, timed_out, synth_audio_s = render_section_parallel(
@@ -652,6 +663,13 @@ def run(config: dict, section: str | None = None, num_workers: int = 1,
             synthesised, skipped, timed_out, synth_audio_s = render_section(
                 engine, sec_dir, config, first)
     wall = time.perf_counter() - t0
+
+    if use_reuse:
+        mrows = _read_manifest(sec_dir / "manifest.jsonl")
+        filled = reuse.after_render(sec_dir, mrows)
+        _write_manifest(sec_dir / "manifest.jsonl", mrows)
+        if filled:
+            print(f"reuse: заполнено повторов внутри секции {filled}")
 
     rows = _read_manifest(sec_dir / "manifest.jsonl")
     total_audio_s = sum((r.get("duration_ms") or 0) for r in rows) / 1000

@@ -323,3 +323,27 @@ def test_env_is_git_ignored_and_unit_loads_it():
 def test_no_credentials_in_config():
     cfg = (ROOT / "config.yaml").read_text(encoding="utf-8")
     assert "TG_TOKEN" not in cfg and "api.telegram.org" not in cfg
+
+
+def test_deliver_audio_multipart_and_disabled(tmp_path):
+    from audiobook import notify as n
+    mp3 = tmp_path / "plan.mp3"
+    mp3.write_bytes(b"ID3fake")
+    assert n.deliver_audio(mp3, "c", env={})[0] is False
+    seen = {}
+
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"ok": true}'
+
+    def fake_open(req, timeout):
+        seen["url"], seen["body"], seen["ct"] = req.full_url, req.data, req.headers.get("Content-type")
+        return Resp()
+
+    env = {"AUDIOBOOK_TG_TOKEN": "123:abc", "AUDIOBOOK_TG_CHAT": "42"}
+    ok, why = n.deliver_audio(mp3, "Послушать главу", title="план", env=env, urlopen=fake_open)
+    assert ok, why
+    assert seen["url"].endswith("/sendAudio") and "multipart/form-data" in seen["ct"]
+    assert b"ID3fake" in seen["body"] and "Послушать главу".encode() in seen["body"]
+    assert n.deliver_audio(tmp_path / "none.mp3", "c", env=env)[0] is False

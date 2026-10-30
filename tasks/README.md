@@ -50,3 +50,5 @@
   с `AUDIOBOOK_CONFIG=копия` — пробные настройки, книга не трогается.
 - Уведомления в Telegram (опционально): `.env` с `AUDIOBOOK_TG_TOKEN`/`AUDIOBOOK_TG_CHAT`, проверка `./run.sh notify-test`
   (см. `scripts/gamebox/README.md`). Резервная копия на Mac: `scripts/mac/README.md`.
+- Повторы: одинаковые чанки рендерятся один раз (`render.reuse_identical`), копии помечены `reused_from`.
+- После каждой главы в очереди: `listen-plan --tag <S> --notify` → план прослушки главы в Telegram.

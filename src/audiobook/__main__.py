@@ -75,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--section", nargs="+", action="extend", default=None, help="только эти секции")
     lp.add_argument("--intro-s", type=float, default=30, help="сколько секунд начала каждой главы (default 30)")
     lp.add_argument("--random", type=int, default=20, help="случайных фраз по всем секциям (default 20)")
+    lp.add_argument("--tag", default=None, help="папка out/listen/<tag>/ (по главе — имя секции)")
+    lp.add_argument("--notify", action="store_true", help="отправить план в Telegram (если настроен)")
     sub.add_parser("pace", help="темп чтения по главам: отклонения от медианы книги")
     sub.add_parser("status", help="статус книги: что отрендерено, что ждёт человека, сколько осталось")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
@@ -263,7 +265,7 @@ def _dispatch(a) -> int:
         return run_credits(load_config())
     if a.cmd == "listen-plan":
         from .listen import run as listen_plan
-        return listen_plan(load_config(), a.section, a.intro_s, a.random)
+        return listen_plan(load_config(), a.section, a.intro_s, a.random, a.tag, a.notify)
     if a.cmd == "pace":
         from .pace import run as pace
         return pace(load_config())

@@ -235,6 +235,10 @@ def run(config: dict, section: str | None = None) -> int:
     ensure_manifest_current(config, section)  # re-synth uses live settings
     chunks_dir = sec_dir / "chunks"
     rows = _read_manifest(manifest_path)
+    from audiobook import reuse
+    use_reuse = reuse.enabled(config)
+    if use_reuse and reuse.resync(sec_dir, rows):
+        _write_manifest(manifest_path, rows)
     threshold = float(config["qc"]["cer_threshold"])
     max_retries = int(config["qc"]["max_retries"])
 
@@ -286,7 +290,8 @@ def run(config: dict, section: str | None = None) -> int:
 
     recovered = 0
     for _tri in range(1, max_retries + 1):
-        fails = [r for r in rows if r.get("status") == "qc_fail"]
+        # followers (reuse) are never re-synthesised on their own: they mirror the leader
+        fails = [r for r in rows if r.get("status") == "qc_fail" and not r.get("reused_from")]
         if not fails:
             break
         # Re-synth pass (Qwen only).
@@ -328,6 +333,10 @@ def run(config: dict, section: str | None = None) -> int:
                                   wcfg, timeout_s, table, sentinel, threshold,
                                   watch, min_conf)
 
+    if use_reuse:
+        reuse.resync(sec_dir, rows)          # followers = leader's final take
+        _write_manifest(manifest_path, rows)
+
     # Exhausted retries → manual queue.
     manual = 0
     for r in rows:
@@ -368,7 +377,8 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
     if not ts:
         return 0, 0
     todo = [r for r in rows
-            if (chunks_dir / f"{r['id']}.wav").exists() and takes.reason(r, ts)]
+            if (chunks_dir / f"{r['id']}.wav").exists() and takes.reason(r, ts)
+            and not r.get("reused_from")]           # followers copy the leader's choice
     if not todo:
         return 0, 0
     plan = []

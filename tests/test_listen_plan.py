@@ -63,3 +63,31 @@ def test_cli_wires_listen_plan():
     from audiobook.__main__ import build_parser
     a = build_parser().parse_args(["listen-plan", "--random", "5"])
     assert a.random == 5 and a.intro_s == 30 and a.section is None
+
+
+def test_run_with_tag_and_notify(tmp_path, monkeypatch):
+    import json as _json
+    from audiobook import assemble, notify
+    out = tmp_path / "out"
+    sec = out / "sections" / "01_a"
+    sec.mkdir(parents=True)
+    rows = [{"id": "0001", "n": 1, "hash": "a" * 40, "seed": 1, "text": "Первая фраза."}]
+    (sec / "manifest.jsonl").write_text(_json.dumps(rows[0]) + "\n", encoding="utf-8")
+    assemble.write_index(sec / "section.index.tsv", rows,
+                         [{"id": "0001", "start_ms": 0, "lead_ms": 0, "trimmed_ms": 1000}])
+    (sec / "section.mp3").write_bytes(b"fake")
+    monkeypatch.setattr(listen.paths, "OUT", out)
+    monkeypatch.setattr(listen.paths, "ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(listen, "_decode", lambda mp3, sr: np.ones(sr * 3, dtype=np.float32) * 0.1)
+    monkeypatch.setattr(listen.subprocess, "run", lambda cmd, **kw: __import__("pathlib").Path(cmd[-1]).write_bytes(b"m"))
+    sent = {}
+    monkeypatch.setattr(notify, "deliver_audio", lambda p, c, title="": sent.update(p=p, c=c) or (True, "ok"))
+    assert listen.run({"master": {"sample_rate": 8000}}, ["01_a"], intro_s=2, n_random=0,
+                      tag="01_a", notify=True) == 0
+    assert (out / "listen" / "01_a" / "plan.mp3").exists()
+    assert sent["p"] == out / "listen" / "01_a" / "plan.mp3" and "01_a" in sent["c"]
+    try:
+        listen.run({}, ["01_a"], tag="../x")
+        raise AssertionError("bad tag must be refused")
+    except SystemExit:
+        pass

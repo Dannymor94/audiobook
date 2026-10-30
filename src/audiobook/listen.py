@@ -19,6 +19,7 @@ maps the marks back to chunks by hash. Nothing in out/sections is changed.
 from __future__ import annotations
 
 import random
+import re
 import subprocess
 from pathlib import Path
 
@@ -95,7 +96,9 @@ def _section_index(config: dict, section: str) -> tuple[list[dict], dict[str, di
 
 
 def run(config: dict, sections: list[str] | None = None, intro_s: float = 30,
-        n_random: int = 20) -> int:
+        n_random: int = 20, tag: str | None = None, notify: bool = False) -> int:
+    """``tag`` → out/listen/<tag>/ (one plan per chapter); ``notify`` → send the
+    plan mp3 to Telegram (opt-in; no-op without credentials)."""
     import soundfile as sf
     from audiobook.master import encode_args
 
@@ -124,7 +127,9 @@ def run(config: dict, sections: list[str] | None = None, intro_s: float = 30,
     uniq.sort(key=lambda x: (secs.index(x[0]), x[1].get("n", 0), str(x[1]["id"])))
 
     sr = int((config.get("master") or {}).get("sample_rate", 44100))
-    out = paths.OUT / "listen"
+    if tag and not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", tag):
+        raise SystemExit(f"listen-plan: недопустимый --tag {tag!r}")
+    out = paths.OUT / "listen" / tag if tag else paths.OUT / "listen"
     wav_dir = out / "chunks"
     wav_dir.mkdir(parents=True, exist_ok=True)
     gap = np.zeros(int(GAP_S * sr), dtype=np.float32)
@@ -164,6 +169,15 @@ def run(config: dict, sections: list[str] | None = None, intro_s: float = 30,
             kinds[k] += any(x.startswith(k) for x in tags)
     print(f"план прослушки: {len(uniq)} фрагментов, {mmss(t)} "
           f"(начало глав {kinds['начало']}, подозрения {kinds['подозр']}, выборка {kinds['выборка']})")
-    print(f"→ {mp3}\n  оглавление: {idx}\n  разметка: ./run.sh review --dir out/listen  "
+    rel = out.relative_to(paths.OUT).as_posix()
+    print(f"→ {mp3}\n  оглавление: {idx}\n  разметка: ./run.sh review --dir out/{rel}  "
           "→ ./run.sh fix plan <labels.json>")
+    if notify:
+        from audiobook import notify as tg
+        what = ", ".join(secs) if len(secs) <= 2 else f"{len(secs)} секций"
+        caption = (f"Послушать: {what} — {len(uniq)} фрагм., {mmss(t)}\n"
+                   f"начало {kinds['начало']} · подозрения {kinds['подозр']} · выборка {kinds['выборка']}\n"
+                   f"разметка: ./run.sh review --dir out/{rel}")
+        sent, why = tg.deliver_audio(mp3, caption, title=f"план: {what}"[:60])
+        print(f"telegram: {'отправлено' if sent else 'не отправлено — ' + why}")
     return 0
