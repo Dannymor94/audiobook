@@ -16,9 +16,9 @@ def test_write_index_columns_and_atomic(tmp_path):
     p = tmp_path / "section.index.tsv"
     assemble.write_index(p, _rows(), _stats())
     lines = p.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "id\tstart_ms\tlead_ms\thash16\tseed"
-    assert lines[1] == "0001\t0\t10\t" + "a" * 16 + "\t11"
-    assert lines[2] == "0002\t1500\t20\t" + "b" * 16 + "\t99"   # seed_override wins
+    assert lines[0] == "id\tstart_ms\tlead_ms\thash16\tseed\tdur_ms"
+    assert lines[1] == "0001\t0\t10\t" + "a" * 16 + "\t11\t"
+    assert lines[2] == "0002\t1500\t20\t" + "b" * 16 + "\t99\t"   # seed_override wins
     assert not list(tmp_path.glob("*.part"))
     assert suspects.read_index(p) == {"0001": (0, 10), "0002": (1500, 20)}
 

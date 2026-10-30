@@ -121,6 +121,15 @@ master:
   true_peak: -3
   highpass_hz: 80
   sample_rate: 44100
+  # Тишина в начале/конце файла главы (плееры склеивают файлы; стандарт 1–5 с).
+  head_ms: 1000
+  tail_ms: 2000
   # eq3: +3 dB presence at 4 kHz, -2 dB mud cut at 300 Hz, light de-esser.
   # Chosen by ear from clarity_test/ variants.
   eq_filters: "equalizer=f=4000:t=q:w=1:g=3,equalizer=f=300:t=q:w=1:g=-2,deesser=i=0.15"
+# Теги mp3 глав (название книги, автор, чтец, обложка). Пустое — не пишется.
+book:
+  title: "Ты не поломан"
+  author: "Александр Исаев"
+  narrator: ""        # что писать в «Читает: …» — решает человек
+  cover: ""           # путь к jpg/png внутри проекта

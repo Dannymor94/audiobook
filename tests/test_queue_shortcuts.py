@@ -6,7 +6,8 @@ from audiobook import jobqueue as jq
 
 def test_section_jobs_order_and_first():
     jobs = jq.section_jobs("20_x", 2)
-    assert [j[0] for j in jobs] == ["chunk", "synth", "qc", "assemble", "master", "suspects"]
+    assert [j[0] for j in jobs] == ["chunk", "synth", "qc", "assemble", "master", "suspects", "sync"]
+    assert "sync" not in [j[0] for j in jq.section_jobs("20_x", 2, first=3)]
     assert all("--section" in j and "20_x" in j for j in jobs)
     assert "--first" not in sum(jobs, [])
     pj = jq.section_jobs("20_x", 1, first=10)

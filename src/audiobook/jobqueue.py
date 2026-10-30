@@ -539,7 +539,8 @@ def section_exists(section: str) -> bool:
 
 
 def section_jobs(section: str, workers: int = 2, first: int | None = None) -> list[list[str]]:
-    """Whole render of ONE section: chunk → synth → qc → assemble → master → suspects."""
+    """Whole render of ONE section: chunk → synth → qc → assemble → master → suspects
+    → sync (text↔time map; full section only)."""
     f = ["--first", str(first)] if first else []
     sec = ["--section", section]
     return [["chunk", *sec],
@@ -547,7 +548,8 @@ def section_jobs(section: str, workers: int = 2, first: int | None = None) -> li
             ["qc", *sec],
             ["assemble", *sec, *f],
             ["master", *sec, *f],
-            ["suspects", *sec, *f]]
+            ["suspects", *sec, *f],
+            *([] if first else [["sync", *sec]])]
 
 
 def redo_jobs(section: str, chunk_ids: list[str], candidates: int = 3) -> list[list[str]]:

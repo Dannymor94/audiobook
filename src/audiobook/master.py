@@ -36,19 +36,82 @@ def _loudnorm_measure(ff: str, src: Path, I: float, tp: float, lra: float,
     return json.loads(err[start:end + 1])
 
 
+def book_tags(config: dict, section: str) -> dict[str, str]:
+    """ID3 tags of one chapter file from config ``book`` and the section's
+    heading (text/blocks). Empty values are left out."""
+    from audiobook.status import book_sections
+    b = config.get("book") or {}
+    skip = set((config.get("render") or {}).get("skip_sections") or [])
+    order = [s for s in book_sections() if s not in skip]
+    heading = ""
+    jf = paths.TEXT / "blocks" / f"{section}.blocks.json"
+    if jf.exists():
+        with open(jf, encoding="utf-8") as f:
+            heading = json.load(f).get("heading") or ""
+    tags = {
+        "title": heading or section,
+        "album": str(b.get("title") or ""),
+        "artist": str(b.get("author") or ""),
+        "album_artist": str(b.get("author") or ""),
+        "genre": "Audiobook",
+        "comment": f"Читает: {b['narrator']}" if b.get("narrator") else "",
+        "track": f"{order.index(section) + 1}/{len(order)}" if section in order else "",
+    }
+    return {k: v for k, v in tags.items() if v}
+
+
+def cover_path(config: dict) -> Path | None:
+    c = (config.get("book") or {}).get("cover")
+    if not c:
+        return None
+    p = paths.ROOT / str(c)
+    return p if p.exists() else None
+
+
+def pad_filter(config: dict) -> str:
+    """Silence at the head/tail of a chapter file (master.head_ms / tail_ms).
+    Players butt files together; ACX asks for 1–5 s of room tone each end."""
+    m = config.get("master") or {}
+    h, t = int(m.get("head_ms") or 0), int(m.get("tail_ms") or 0)
+    parts = []
+    if h:
+        parts.append(f"adelay=delays={h}:all=1")
+    if t:
+        parts.append(f"apad=pad_dur={t / 1000:g}")
+    return ",".join(parts)
+
+
 def master_section(sec_dir: Path, config: dict,
                    first: int | None = None) -> tuple[Path, dict]:
+    """Book chapter: adds head/tail silence, ID3 tags and cover. Previews
+    (--first) get the same treatment so they sound like the final file."""
     from audiobook.assemble import preview_name
     stem = preview_name(first)
     src = sec_dir / f"{stem}.wav"
     if not src.exists():
         raise SystemExit(f"нет {src.name}: {src}")
     out = sec_dir / f"{stem}.mp3"
-    return out, master_wav(src, out, config)
+    return out, master_wav(src, out, config, pad=True,
+                           tags=book_tags(config, sec_dir.name), cover=cover_path(config))
 
 
-def master_wav(src: Path, out: Path, config: dict) -> dict:
-    """highpass → config EQ → two-pass loudnorm → 192k CBR mp3. Returns the
+def encode_args(ff: str, src: Path, out: Path, af: str, sr: int,
+                tags: dict[str, str] | None = None, cover: Path | None = None) -> list[str]:
+    cmd = [ff, "-hide_banner", "-y", "-i", str(src)]
+    if cover:
+        cmd += ["-i", str(cover), "-map", "0:a", "-map", "1:v", "-c:v", "copy",
+                "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
+    cmd += ["-af", af, "-ar", str(sr), "-c:a", "libmp3lame", "-b:a", "192k",
+            "-id3v2_version", "3"]
+    for k, v in (tags or {}).items():
+        cmd += ["-metadata", f"{k}={v}"]
+    return cmd + ["-f", "mp3", str(out)]
+
+
+def master_wav(src: Path, out: Path, config: dict, pad: bool = False,
+               tags: dict[str, str] | None = None, cover: Path | None = None) -> dict:
+    """highpass → config EQ → two-pass loudnorm → [head/tail silence] → 192k CBR
+    mp3 with optional tags/cover. Written to a temp file and renamed. Returns the
     pass-1 loudnorm measurement."""
     ff = _ff()
     m = config["master"]
@@ -68,11 +131,13 @@ def master_wav(src: Path, out: Path, config: dict) -> dict:
         f"measured_LRA={meas['input_lra']}:measured_thresh={meas['input_thresh']}:"
         f"offset={meas['target_offset']}:linear=true"
     )
-    subprocess.run(
-        [ff, "-hide_banner", "-y", "-i", str(src), "-af", af, "-ar", str(sr),
-         "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3", str(out)],
-        capture_output=True, text=True, check=True,
-    )
+    padf = pad_filter(config) if pad else ""
+    if padf:
+        af += "," + padf
+    tmp = out.with_name(out.name + ".part")
+    subprocess.run(encode_args(ff, src, tmp, af, sr, tags, cover),
+                   capture_output=True, text=True, check=True)
+    tmp.replace(out)
     return meas
 
 

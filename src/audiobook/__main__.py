@@ -44,6 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
     fq = fxs.add_parser("queue", help="redo каждого чанка плана в очередь (всё или ничего)")
     fq.add_argument("--candidates", type=int, default=3, help="новых кандидатов на чанк (default 3)")
     fxs.add_parser("review", help="одна страница с кандидатами чанков плана → out/fix/review.html")
+    sy = sub.add_parser("sync", help="карта текст↔время главы для читалки → section.sync.json")
+    sy.add_argument("--section", default=None)
+    sy.add_argument("--all", action="store_true", help="все собранные секции")
+    im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
+    im.add_argument("--section", default=None)
+    im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    sub.add_parser("pace", help="темп чтения по главам: отклонения от медианы книги")
     sub.add_parser("status", help="статус книги: что отрендерено, что ждёт человека, сколько осталось")
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
@@ -202,6 +209,15 @@ def _dispatch(a) -> int:
         if a.fix_cmd == "queue":
             return fix.cmd_queue(a.candidates)
         return fix.cmd_review()
+    if a.cmd == "sync":
+        from .sync import run as sync
+        return sync(load_config(), a.section, a.all)
+    if a.cmd == "impact":
+        from .impact import run as impact
+        return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "pace":
+        from .pace import run as pace
+        return pace(load_config())
     if a.cmd == "status":
         from .status import run as status
         return status(load_config())

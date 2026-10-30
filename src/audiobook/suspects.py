@@ -136,6 +136,9 @@ def run(config: dict, section: str | None, first: int | None = None) -> int:
     if not any("flag_words" in r for r in rows):
         raise SystemExit("в манифесте нет flag_words — сначала qc (новой версии)")
     items = collect(rows, read_index(idx_path))
+    head = int((config.get("master") or {}).get("head_ms") or 0)   # silence master adds
+    for it in items:
+        it["t_ms"] += head
     why_ru = {"conf": "неуверенно", "watch": "ловушка"}
     out = sec_dir / f"{stem}.suspects.tsv"
     with open(out, "w", encoding="utf-8") as f:

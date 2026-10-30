@@ -72,7 +72,7 @@ def assemble_section(sec_dir: Path, config: dict,
     return out, stats
 
 
-INDEX_COLUMNS = ("id", "start_ms", "lead_ms", "hash16", "seed")
+INDEX_COLUMNS = ("id", "start_ms", "lead_ms", "hash16", "seed", "dur_ms")
 
 
 def write_index(path: Path, rows: list[dict], stats: list[dict]) -> None:
@@ -85,7 +85,7 @@ def write_index(path: Path, rows: list[dict], stats: list[dict]) -> None:
         for row, st in zip(rows, stats):
             seed = row.get("seed_override") or row.get("seed") or ""
             f.write(f"{st['id']}\t{st['start_ms']}\t{st['lead_ms']}\t"
-                    f"{str(row.get('hash', ''))[:16]}\t{seed}\n")
+                    f"{str(row.get('hash', ''))[:16]}\t{seed}\t{st.get('trimmed_ms', '')}\n")
     tmp.replace(path)
 
 

@@ -32,7 +32,7 @@
 `todo` → `doing` → `review` → `done` · `blocked` (нужен человек)
 
 ## Короткие команды (вместо цепочек queue add)
-- `./run.sh queue section <S> [--first N]` — вся секция: chunk → synth → qc (с дублями) → assemble → master → suspects.
+- `./run.sh queue section <S> [--first N]` — вся секция: chunk → synth → qc (с дублями) → assemble → master → suspects → sync.
 - `./run.sh queue redo <S> <id> [<id> …] [--candidates 3]` — кандидаты для нескольких чанков.
 - `./run.sh queue run` — выполнить очередь. `./run.sh queue list` — что в ней.
 - `./run.sh status` — вся книга: сделано / ждёт человека / подозрительные / звук свежий, остаток времени.
