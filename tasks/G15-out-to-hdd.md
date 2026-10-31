@@ -1,8 +1,8 @@
 ---
 id: G15
 title: перенести out/ (рендер) на HDD 3 ТБ, модели и код оставить на SSD (≈20 мин)
-status: todo
-owner:
+status: review
+owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []
 ---
@@ -65,6 +65,74 @@ uv run pytest -q
 ```
 
 ## Отчёт
-Вывод всех шагов дословно; `$HDD`, тип ФС, свободное место; размер перенесённого.
-Напомнить человеку: `~/audiobook/out_ssd_old` можно удалить вручную после прослушки ближайшей главы.
-`status: review`.
+
+### Шаг 0
+```
+git log --oneline -1 → 3686882 reuse identical chunks + per-chapter listen plan to Telegram; task G15
+uv sync → Resolved 129 packages (no changes)
+uv run pytest -q → 550 passed, 3 skipped
+./run.sh preflight → PREFLIGHT: GREEN
+./run.sh queue list → только done-записи, running/pending нет
+```
+
+### Шаг 1. lsblk
+```
+NAME     SIZE ROTA TYPE FSTYPE   MOUNTPOINTS
+sda       3.6T    1 disk
+├─sda1     16M    1 part
+└─sda2    3.6T    1 part ext4     /mnt/data
+sdb     223.6G    0 disk
+├─sdb1      1G    0 part vfat     /boot/efi
+└─sdb2  222.5G    0 part ext4     /
+```
+HDD = `/dev/sda2`, 3.6 ТБ, ROTA=1, ext4, `$HDD=/mnt/data`.
+
+### Шаг 1. findmnt / df / du
+```
+findmnt -T ~/audiobook → TARGET=/ SOURCE=/dev/sdb2 FSTYPE=ext4
+df -h ~/audiobook → /dev/sdb2  218G  52G  155G  26%  /
+du -sh ~/audiobook/out → 690M	/home/danavrata/audiobook/out
+```
+`~/audiobook` на SSD (`sdb2`), HDD — другой диск, перенос нужен.
+
+### Шаг 1. df $HDD + write test
+```
+df -h /mnt/data → /dev/sda2  3.6T  372G  3.1T  11%  /mnt/data
+touch /mnt/data/.audiobook_write_test
+-rw-rw-r-- 1 danavrata danavrata 0 Oct 30 22:44 /mnt/data/.audiobook_write_test
+```
+Свободно 3.1 ТБ (≥ 50 ГБ), запись разрешена.
+
+### Шаг 2. rsync + проверка
+```
+rsync -a ~/audiobook/out/ /mnt/data/audiobook_out/
+du -sb ~/audiobook/out /mnt/data/audiobook_out →
+  720977067	/home/danavrata/audiobook/out
+  720977067	/mnt/data/audiobook_out
+find ~/audiobook/out -type f | wc -l → 840
+find /mnt/data/audiobook_out -type f | wc -l → 840
+```
+Размер и число файлов совпадают. ✓
+
+### Шаг 3. Переключение
+```
+mv ~/audiobook/out ~/audiobook/out_ssd_old
+ln -s /mnt/data/audiobook_out ~/audiobook/out
+ls -la ~/audiobook/out →
+  lrwxrwxrwx 1 danavrata danavrata 23 Oct 30 22:44 out -> /mnt/data/audiobook_out
+```
+
+### Шаг 4. Проверка
+```
+git status --short → ?? out_ssd_old/   (out — в .gitignore, out_ssd_old — нет, ожидаемо)
+./run.sh status → 1% отрендерено, глава 13 видна, очередь 0
+./run.sh impact → перерендер 0 чанков из 68
+./run.sh preflight → PREFLIGHT: GREEN
+uv run pytest -q → 550 passed, 3 skipped
+```
+
+### Заметки агента
+- `$HDD=/mnt/data`, ФС ext4, свободно 3.1 ТБ.
+- `out_ssd_old/` появился в `git status --short` как untracked — ожидаемо: в .gitignore стоит `out/`, а не `out_ssd_old/`. Ни pipeline, ни тесты его не видят.
+- Весь пайплайн работает через симлинк без изменений в коде.
+- `~/audiobook/out_ssd_old` (690 МБ) можно удалить вручную после прослушки ближайшей главы.
