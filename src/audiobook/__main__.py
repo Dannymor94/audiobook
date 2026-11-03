@@ -122,9 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
     su.add_argument("--first", type=int, default=None)
     ph = sub.add_parser("phoneme-check",
                         help="ЭКСПЕРИМЕНТ: ударение и лишний [j] по фонемам в wav из папки")
-    ph.add_argument("--dir", required=True, help="папка с *.wav (например out/pron_test/…)")
-    ph.add_argument("--expect", nargs="+", required=True,
+    ph.add_argument("--dir", default=None, help="папка с *.wav (например out/pron_test/…)")
+    ph.add_argument("--expect", nargs="+", default=None,
                     help="слова с ударной гласной заглавной: запИть тебЯ дышИ")
+    ph.add_argument("--auto", action="store_true",
+                    help="автоматические кандидаты из stress_watch.yaml + pronounce.yaml")
+    ph.add_argument("--section", default=None,
+                    help="секция для --auto (NN_slug, обязательно с --auto)")
+    ph.add_argument("--first", type=int, default=None,
+                    help="только первые N чанков (с --auto)")
     sub.add_parser("lint-text",
                    help="проверка text/*.norm.txt: пропущенная ё, опечатки, что читать по буквам → out/lint/text_lint.md")
     gd = sub.add_parser("golden",
@@ -308,8 +314,14 @@ def _dispatch(a) -> int:
         from .suspects import run as suspects
         return suspects(load_config(), a.section, a.first)
     if a.cmd == "phoneme-check":
-        from .phoneme_check import run as phoneme_check
-        return phoneme_check(load_config(), a.dir, a.expect)
+        from . import phoneme_check as _pc
+        if a.auto:
+            if not a.section:
+                raise SystemExit("phoneme-check --auto требует --section")
+            return _pc.run_auto(load_config(), a.section, a.first)
+        if not a.dir or not a.expect:
+            raise SystemExit("phoneme-check: нужны --dir и --expect (или --auto --section)")
+        return _pc.run(load_config(), a.dir, a.expect)
     if a.cmd == "lint-text":
         from .text_lint import run as lint_text
         return lint_text(load_config())
