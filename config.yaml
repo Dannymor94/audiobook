@@ -117,6 +117,12 @@ pauses_ms:
 qc:
   whisper_model: small           # models/whisper/small
   cer_threshold: 0.05
+  # Пороги стыков чанков (joins). Не входят в хеш; калибруются в G16.
+  joins:
+    f0_jump_st: 4.0        # скачок высоты тона, полутонов
+    slope_fall_st_s: 8.0   # терминальное падение тона (ст/с)
+    rms_jump_db: 6.0       # скачок громкости, дБ
+    tempo_diff_pct: 25.0   # разница темпа, %
   # Слова, в которых whisper не уверен (p ниже порога), попадают в suspects —
   # список мест для прослушки. Ударение whisper не слышит; это ловит искажения.
   word_conf: 0.6

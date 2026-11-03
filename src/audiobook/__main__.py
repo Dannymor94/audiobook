@@ -120,6 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="места для прослушки (после qc + assemble) → <stem>.suspects.tsv")
     su.add_argument("--section", required=True)
     su.add_argument("--first", type=int, default=None)
+    jo = sub.add_parser("joins",
+                        help="метрики стыков чанков (F0, темп, громкость) → <stem>.joins.tsv")
+    jo.add_argument("--section", required=True)
+    jo.add_argument("--first", type=int, default=None)
     ph = sub.add_parser("phoneme-check",
                         help="ЭКСПЕРИМЕНТ: ударение и лишний [j] по фонемам в wav из папки")
     ph.add_argument("--dir", required=True, help="папка с *.wav (например out/pron_test/…)")
@@ -307,6 +311,9 @@ def _dispatch(a) -> int:
     if a.cmd == "suspects":
         from .suspects import run as suspects
         return suspects(load_config(), a.section, a.first)
+    if a.cmd == "joins":
+        from .joins import run as joins
+        return joins(load_config(), a.section, a.first)
     if a.cmd == "phoneme-check":
         from .phoneme_check import run as phoneme_check
         return phoneme_check(load_config(), a.dir, a.expect)
