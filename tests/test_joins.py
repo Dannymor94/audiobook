@@ -156,3 +156,60 @@ def test_within_para_pairs_two_paragraphs_no_cross():
     pairs = _within_para_pairs(units, None)
     # Each paragraph is a single chunk → no within-para pairs at all
     assert pairs == []
+
+
+# ── qc.joins thresholds do not enter chunk hash ───────────────────────────────
+
+def test_qc_joins_thresholds_not_in_chunk_hash():
+    """Changing qc.joins must not change any chunk hash."""
+    from audiobook.chunker import build_manifest, load_units
+    import copy
+
+    # Minimal synthetic units (no real text needed)
+    units = [{"type": "paragraph", "text": "Тест раз два три."}]
+    base_config = {
+        "model": {"name": "test", "seed": 0, "temperature": 1.0, "language": "ru"},
+        "render": {"latents": "none"},
+        "qc": {
+            "joins": {
+                "f0_jump_st": 4.0,
+                "slope_fall_st_s": 8.0,
+                "rms_jump_db": 6.0,
+                "tempo_diff_pct": 25.0,
+            }
+        },
+    }
+    config_modified = copy.deepcopy(base_config)
+    config_modified["qc"]["joins"]["f0_jump_st"] = 99.0
+    config_modified["qc"]["joins"]["rms_jump_db"] = 99.0
+
+    from audiobook.chunker import chunk_hash, build_chunks, limits
+    from audiobook.pronounce import load_table, respell
+    from audiobook import voicecfg, leadin
+
+    def _hashes(cfg):
+        table = load_table()
+        chunks = build_chunks(units, cfg)
+        model = "test"
+        seed = 0
+        temperature = 1.0
+        language = "ru"
+        lat = "none"
+        result = []
+        prev_prepared, prev_kind = None, None
+        for c in chunks:
+            prepared = voicecfg.prepare_text(c["text"], cfg)
+            synth_text = respell(prepared, table)
+            kind = c.get("kind", "text")
+            phrase = leadin.phrase_for(
+                prepared, cfg, prev_prepared,
+                kind in ("text", "stack") and prev_kind in ("text", "stack"),
+            )
+            prev_prepared, prev_kind = prepared, kind
+            result.append(chunk_hash(c["text"], model, seed, temperature,
+                                      language, lat, synth_text, phrase))
+        return result
+
+    assert _hashes(base_config) == _hashes(config_modified), (
+        "qc.joins thresholds must not affect chunk hashes"
+    )
