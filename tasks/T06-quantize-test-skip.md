@@ -1,7 +1,7 @@
 ---
 id: T06
 title: int8-тесты пропускать, если в torch нет движка квантизации
-status: review
+status: done
 owner: codex-gpt-6
 agent: codex
 machine: code
