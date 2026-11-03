@@ -1,8 +1,8 @@
 ---
 id: T08
 title: QC — пословное сравнение текста и расшифровки (ошибки окончаний)
-status: todo
-owner:
+status: doing
+owner: codex-gpt-6
 agent: codex
 machine: code
 branch: task/T08
