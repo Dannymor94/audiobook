@@ -13,7 +13,7 @@ Sections of the report:
   3. «Подозрительные формы»  — hints, not corrections: rare word next to a frequent
      near-twin, repeated word, Latin letters inside a Cyrillic word, «…ётся и»
      (maybe past tense «-ёгся»), tripled letters.
-  4. «Для озвучки»          — abbreviations, digits, Latin tokens, hyphenated caps.
+  4. «Для озвучки»          — abbreviations, digits, Latin tokens, hyphenated caps, punctuation and slashes.
 """
 from __future__ import annotations
 
@@ -58,6 +58,10 @@ _REPEAT = re.compile(
 _YOTSYA_I = re.compile(
     rf"(?<![\w-])([{_CYR}]*ётся)[ \t ]+и(?![\w-])", re.IGNORECASE)
 _TRIPLE = re.compile(r"(.)\1\1")
+_SPACE_BEFORE_PUNCT = re.compile(r"[^\S\r\n]+[,.;:!?…]")
+_LETTER_SLASH = re.compile(r"(?<=[^\W\d_])/(?=[^\W\d_])")
+_PUNCT_RUN = re.compile(r"[,.;:!?…]{2,}")
+_ALLOWED_PUNCT_RUNS = {"?!", "!?", "?..", "!..", "..."}
 
 # (stem, context) — one place in the text.
 Hit = tuple[str, str]
@@ -276,6 +280,27 @@ def find_triple_letters(sections: dict[str, str]) -> list[Hit]:
 
 # ── 3. for TTS ───────────────────────────────────────────────────────────────
 
+def find_space_before_punctuation(sections: dict[str, str]) -> list[Hit]:
+    """Horizontal whitespace before a punctuation mark."""
+    return _regex_hits(sections, _SPACE_BEFORE_PUNCT)
+
+
+def find_letter_slashes(sections: dict[str, str]) -> list[Hit]:
+    """Slashes immediately between letters, including overlapping alternatives."""
+    return _regex_hits(sections, _LETTER_SLASH)
+
+
+def find_mixed_punctuation(sections: dict[str, str]) -> list[Hit]:
+    """Mixed punctuation runs except the explicitly allowed combinations."""
+    out: list[Hit] = []
+    for stem, text in sections.items():
+        for m in _PUNCT_RUN.finditer(text):
+            run = m.group()
+            if len(set(run)) > 1 and run not in _ALLOWED_PUNCT_RUNS:
+                out.append((stem, context(text, m.start(), m.end())))
+    return out
+
+
 def find_abbreviations(sections: dict[str, str]) -> list[dict]:
     """All-caps words (≥2 letters) the book never writes in lowercase.
     [{"word", "count", "hits": first examples}] sorted by count desc."""
@@ -365,6 +390,9 @@ def lint(sections: dict[str, str]) -> dict:
         "hyphen_caps": find_hyphen_caps(sections),
         "digits": find_digits(sections),
         "latin": find_latin(sections),
+        "space_before_punct": find_space_before_punctuation(sections),
+        "letter_slashes": find_letter_slashes(sections),
+        "mixed_punct": find_mixed_punctuation(sections),
     }
 
 
@@ -383,6 +411,9 @@ def summary(res: dict) -> list[tuple[str, int]]:
         ("Для озвучки: слова через дефис с капсом", len(res["hyphen_caps"])),
         ("Для озвучки: числа цифрами", len(res["digits"])),
         ("Для озвучки: латиница", len(res["latin"])),
+        ("Для озвучки: пробел перед знаком", len(res["space_before_punct"])),
+        ("Для озвучки: слэш между буквами", len(res["letter_slashes"])),
+        ("Для озвучки: сдвоенные разные знаки", len(res["mixed_punct"])),
     ]
 
 
@@ -441,6 +472,14 @@ def render_report(res: dict) -> str:
                           ("Латиница", res["latin"])]:
         L += [f"### {title} ({len(groups)})", ""]
         L += _group_lines(groups) if groups else ["Не найдено."]
+        L.append("")
+    for title, hits in [
+        ("Пробел перед знаком", res["space_before_punct"]),
+        ("Слэш между буквами", res["letter_slashes"]),
+        ("Сдвоенные разные знаки", res["mixed_punct"]),
+    ]:
+        L += [f"### {title} ({len(hits)})", ""]
+        L += _hit_lines(hits) if hits else ["Не найдено."]
         L.append("")
     return "\n".join(L).rstrip() + "\n"
 

@@ -164,3 +164,65 @@ def test_cli_lint_text(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(paths, "OUT", tmp_path / "out")
     assert main(["lint-text"]) == 0
     assert (tmp_path / "out" / "lint" / "text_lint.md").exists()
+
+
+@pytest.mark.parametrize("mark", [",", ".", ";", ":", "!", "?", "…"])
+@pytest.mark.parametrize("space", [" ", "  ", "\t", "\u00a0", "\u202f"])
+def test_space_before_punctuation(mark, space):
+    hits = tl.find_space_before_punctuation(_one(f"Тест{space}{mark} конец"))
+    assert len(hits) == 1
+    assert hits[0][0] == "01_test"
+    assert f"**{space}{mark}**" in hits[0][1]
+
+
+def test_punctuation_checks_ignore_normal_spacing_and_line_breaks():
+    secs = _one("Тест, пример. Да; нет: вопрос? Ответ! Пауза…\n. Конец\n")
+    assert tl.find_space_before_punctuation(secs) == []
+    assert tl.find_mixed_punctuation(secs) == []
+
+
+def test_slashes_between_letters_only():
+    secs = _one("и/или он/она a/b/c ё/е 1/2 а/2 2/б / а / б")
+    hits = tl.find_letter_slashes(secs)
+    assert len(hits) == 5
+    assert all(stem == "01_test" and "**/**" in ctx for stem, ctx in hits)
+
+
+@pytest.mark.parametrize("run", [",.", ".,", ";:", ":;", "!,", "?;", "…?", "?!,", "?..,"])
+def test_mixed_punctuation_reports_entire_run(run):
+    hits = tl.find_mixed_punctuation(_one(f"Тест{run} Конец"))
+    assert len(hits) == 1
+    assert f"**{run}**" in hits[0][1]
+
+
+@pytest.mark.parametrize("run", ["?!", "!?", "?..", "!..", "...", "!!", "??", "……"])
+def test_allowed_or_identical_punctuation_is_not_reported(run):
+    assert tl.find_mixed_punctuation(_one(f"Тест{run} Конец")) == []
+
+
+def test_new_checks_report_context_with_default_radius():
+    text = "а" * 100 + " , " + "б" * 100
+    assert tl.find_space_before_punctuation(_one(text)) == [
+        ("01_test", "а" * 40 + "** ,** " + "б" * 39)
+    ]
+
+
+def test_new_checks_in_report_and_summary_without_changing_text(tmp_path, monkeypatch, capsys):
+    text_dir = tmp_path / "text"
+    text_dir.mkdir()
+    source = text_dir / "01_test.norm.txt"
+    source.write_text("Тест , и/или пример,; конец.\n", encoding="utf-8")
+    before = source.read_bytes()
+    monkeypatch.setattr(paths, "TEXT", text_dir)
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    assert tl.run({}) == 0
+    assert source.read_bytes() == before
+    report = (tmp_path / "out" / "lint" / "text_lint.md").read_text(encoding="utf-8")
+    tts_report = report.split("## Для озвучки", 1)[1]
+    output = capsys.readouterr().out
+    for title in ("Пробел перед знаком", "Слэш между буквами", "Сдвоенные разные знаки"):
+        assert f"### {title} (1)" in tts_report
+        assert f"Для озвучки: {title.lower()}: 1" in output
+    assert "** ,**" in tts_report
+    assert "**/**" in tts_report
+    assert "**,;**" in tts_report
