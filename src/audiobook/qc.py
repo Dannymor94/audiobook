@@ -14,6 +14,7 @@ import logging
 import re
 import statistics
 import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from audiobook import paths
@@ -122,6 +123,62 @@ def _numbers_like_ref(hyp_text: str, ref_tokens: list[str]) -> str:
     return _DIGITS.sub(repl, hyp_text)
 
 
+def word_diff(ref_norm: str, hyp_norm: str) -> list[dict]:
+    """Align normalized words; report substitutions, deletions and insertions."""
+    ref, hyp = ref_norm.split(), hyp_norm.split()
+    out = []
+    for tag, a, b, c, d in SequenceMatcher(None, ref, hyp, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        for offset in range(max(b - a, d - c)):
+            ri, hi = a + offset, c + offset
+            rw = ref[ri] if ri < b else ""
+            hw = hyp[hi] if hi < d else ""
+            op = "sub" if rw and hw else "del" if rw else "ins"
+            prefix = 0
+            for x, y in zip(rw, hw):
+                if x != y:
+                    break
+                prefix += 1
+            ending = (op == "sub" and prefix >= 3
+                      and max(len(rw), len(hw)) - prefix <= 3)
+            out.append({"op": op, "ref": rw, "hyp": hw,
+                        "class": "ending" if ending else "word",
+                        "ref_index": min(ri, b), "hyp_index": min(hi, d)})
+    return out
+
+
+def _diff_flags(diffs: list[dict], hyp_norm: str, words: list[dict],
+                ref_tokens: list[str]) -> list[list]:
+    """Map normalized transcript tokens to Whisper times, including digit expansion.
+
+    A deletion has no spoken word: use the next word boundary, or the last end.
+    Missing timing falls back to the chunk start.
+    """
+    tokens, timed = [], []
+    for w in words:
+        normalized = normalize_for_cer(_numbers_like_ref(w["w"], ref_tokens)).split()
+        tokens.extend(normalized)
+        timed.extend([w] * len(normalized))
+    hyp = hyp_norm.split()
+    mapping = {}
+    for block in SequenceMatcher(None, hyp, tokens, autojunk=False).get_matching_blocks():
+        for k in range(block.size):
+            mapping[block.a + k] = timed[block.b + k]
+    flags = []
+    for diff in diffs:
+        i = diff["hyp_index"]
+        w = mapping.get(i)
+        if w is not None:
+            start, prob = w["s"], w.get("p")
+        elif i == len(hyp) and words:
+            start, prob = words[-1]["e"], None
+        else:
+            start, prob = 0, None
+        flags.append([f"{diff['ref']}→{diff['hyp']}", start, prob, diff["class"]])
+    return flags
+
+
 def cer(ref_text: str, hyp_text: str) -> float:
     """Character error rate of a transcript against reference text, both put
     through normalize_for_cer first. 0.0 on two empty/identical normalizations.
@@ -217,7 +274,13 @@ def _measure(model, wav_path: Path, text: str, watch: set[str], min_conf: float)
     from audiobook.takes import wav_peak, word_stats
     txt, words = transcribe_words(model, wav_path)
     min_p, mean_p = word_stats(words, _norm_word)
-    return {"transcript": txt, "flag_words": flag_words(words, watch, min_conf),
+    ref = normalize_for_cer(text)
+    hyp = normalize_for_cer(_numbers_like_ref(txt, ref.split()))
+    diffs = word_diff(ref, hyp)
+    flags = flag_words(words, watch, min_conf)
+    flags.extend(_diff_flags(diffs, hyp, words, ref.split()))
+    return {"transcript": txt, "flag_words": flags,
+            "word_diff": ";".join(f"{d['ref']}→{d['hyp']}:{d['class']}" for d in diffs),
             "cer": round(cer(text, txt), 4), "min_p": min_p, "mean_p": mean_p,
             "peak": wav_peak(wav_path)}
 
@@ -337,6 +400,12 @@ def run(config: dict, section: str | None = None) -> int:
         reuse.resync(sec_dir, rows)          # followers = leader's final take
         _write_manifest(manifest_path, rows)
 
+    # Reuse copies flag_words with the selected audio; rebuild the compact field
+    # too, since older reuse manifests do not carry this reporting-only field.
+    for r in candidates:
+        r["word_diff"] = ";".join(f"{f[0]}:{f[3]}" for f in r.get("flag_words") or []
+                                 if f[3] in ("ending", "word"))
+
     # Exhausted retries → manual queue.
     manual = 0
     for r in rows:
@@ -346,9 +415,13 @@ def run(config: dict, section: str | None = None) -> int:
     _write_manifest(manifest_path, rows)
 
     suspects = [r["id"] for r in candidates if r.get("suspect")]
+    endings = sum(any(f[3] == "ending" for f in r.get("flag_words") or [])
+                  for r in candidates)
+    word_errors = sum(any(f[3] == "word" for f in r.get("flag_words") or [])
+                      for r in candidates)
     print(f"section={section}  chunks={len(candidates)}  "
           f"recovered={recovered}  manual={manual}  suspect={len(suspects)}  "
-          f"takes={took}  replaced={replaced}")
+          f"takes={took}  replaced={replaced}  ending={endings}  word={word_errors}")
     for r in rows:
         if r.get("status") == "manual":
             print(f"  MANUAL {r['id']} cer={r.get('cer')}: {r['text']!r}")

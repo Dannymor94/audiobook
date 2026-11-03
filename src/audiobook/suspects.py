@@ -1,7 +1,7 @@
 """List the places in an assembled section worth a human listen.
 
-QC stores per chunk ``flag_words`` (whisper-unsure words and stress-trap
-words, with time inside the chunk); assemble writes ``<stem>.index.tsv``
+QC stores per chunk ``flag_words`` (whisper-unsure words, stress traps and
+word differences, with time inside the chunk); assemble writes ``<stem>.index.tsv``
 (where each chunk starts in the section and how much leading silence it lost).
 This joins them into section timestamps:
 
@@ -15,6 +15,8 @@ point at the wrong audio. Fix: assemble again.
 
 Whisper hears words, not stress: "conf" catches garbled words (тебья, дышьи,
 каша), "watch" points at known traps whose stress only an ear can confirm.
+"ending" and "word" report normalized text/transcript differences without
+changing QC acceptance or retry decisions.
 """
 from __future__ import annotations
 
@@ -139,7 +141,8 @@ def run(config: dict, section: str | None, first: int | None = None) -> int:
     head = int((config.get("master") or {}).get("head_ms") or 0)   # silence master adds
     for it in items:
         it["t_ms"] += head
-    why_ru = {"conf": "неуверенно", "watch": "ловушка"}
+    why_ru = {"conf": "неуверенно", "watch": "ловушка",
+              "ending": "окончание", "word": "расхождение слов"}
     out = sec_dir / f"{stem}.suspects.tsv"
     with open(out, "w", encoding="utf-8") as f:
         f.write("time\tchunk\tword\tprob\twhy\n")
@@ -147,7 +150,9 @@ def run(config: dict, section: str | None, first: int | None = None) -> int:
             f.write(f"{mmss(it['t_ms'])}\t{it['id']}\t{it['word']}\t{it['p']}\t{it['why']}\n")
     print(f"{section}: подозрительных мест {len(items)} "
           f"(неуверенно {sum(i['why'] == 'conf' for i in items)}, "
-          f"ловушек {sum(i['why'] == 'watch' for i in items)})")
+          f"ловушек {sum(i['why'] == 'watch' for i in items)}, "
+          f"окончаний {sum(i['why'] == 'ending' for i in items)}, "
+          f"слов {sum(i['why'] == 'word' for i in items)})")
     for it in items:
         print(f"  {mmss(it['t_ms']):>6}  {it['word']:<16} {why_ru[it['why']]}"
               f"  p={it['p']}  (чанк {it['id']})")
