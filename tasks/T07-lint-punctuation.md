@@ -1,8 +1,8 @@
 ---
 id: T07
 title: lint-text — пробел перед знаком, слэш, сдвоенные знаки
-status: todo
-owner:
+status: doing
+owner: codex-gpt-6
 agent: codex
 machine: code
 branch: task/T07
