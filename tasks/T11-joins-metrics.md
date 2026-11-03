@@ -1,8 +1,8 @@
 ---
 id: T11
 title: ./run.sh joins — метрики стыков (высота голоса, темп, громкость)
-status: todo
-owner:
+status: doing
+owner: claude-code
 agent: claude-code
 machine: code
 branch: task/T11
