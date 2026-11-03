@@ -1,8 +1,8 @@
 ---
 id: T12
 title: phoneme-check --auto — ожидаемое ударение без ручного --expect
-status: todo
-owner:
+status: doing
+owner: claude-code
 agent: claude-code
 machine: code
 branch: task/T12
