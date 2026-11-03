@@ -133,6 +133,11 @@ def test_load_model_int8_calls_quantize_dynamic(fake_qwen, monkeypatch):
     assert m.model is sentinel  # result assigned back
 
 
+@pytest.mark.skipif(
+    not set(torch.backends.quantized.supported_engines) - {"none"}
+    or torch.backends.quantized.engine == "none",
+    reason="Нет доступного активного движка квантизации torch",
+)
 def test_load_model_int8_real_quantize_swaps_linear(fake_qwen):
     synth_mod, _ = fake_qwen
     m = synth_mod.load_model("cpu", "1.7B", "int8")
@@ -152,6 +157,11 @@ def test_load_model_rejects_bad_quantize(fake_qwen):
         synth_mod.load_model("cpu", "1.7B", "int4")
 
 
+@pytest.mark.skipif(
+    not set(torch.backends.quantized.supported_engines) - {"none"}
+    or torch.backends.quantized.engine == "none",
+    reason="Нет доступного активного движка квантизации torch",
+)
 def test_load_model_cache_keyed_by_quantize(fake_qwen):
     synth_mod, loads = fake_qwen
     a = synth_mod.load_model("cpu", "1.7B", "none")
