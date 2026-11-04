@@ -343,6 +343,38 @@ def test_credit_rows_hash_like_book(tmp_path, monkeypatch):
     assert k != export.credit_key(text + " ", export.credit_rows(text + " ", CREDITS_CFG, {}, "lat"))
 
 
+def test_credit_rows_hash_matches_prepare_synth_text(tmp_path, monkeypatch):
+    """Hash in credit_rows == hash prepare_synth_text would produce — for both open_end cases."""
+    _book(tmp_path, monkeypatch)
+    from audiobook.synth import prepare_synth_text
+    from audiobook.chunker import chunk_hash
+    import audiobook.voicecfg as _vc
+
+    sentinel = CREDITS_CFG["model"].get("sentinel", "")
+    table = {}
+
+    # open_end=False: chunk already has terminal punctuation
+    for chunk_text in ["Плейсхолдер один.", "Слово"]:
+        rows = export.credit_rows(chunk_text, CREDITS_CFG, table, "lat")
+        row = rows[0]
+        synth_text, phrase = prepare_synth_text(
+            row["text"], CREDITS_CFG, table, sentinel,
+            open_end=row["open_end"],
+        )
+        prepared_text = synth_text.replace(f"\x00{sentinel}", "")
+        expected_hash = chunk_hash(
+            row["text"],
+            _vc.model_id(CREDITS_CFG),
+            CREDITS_CFG["model"]["seed"],
+            CREDITS_CFG["model"]["temperature"],
+            CREDITS_CFG["model"]["language"],
+            "lat",
+            prepared_text if prepared_text != row["text"] else None,
+            phrase,
+        )
+        assert row["hash"] == expected_hash, f"hash mismatch for {chunk_text!r}"
+
+
 def test_render_credits_cache_and_retire(tmp_path, monkeypatch):
     from audiobook import synth
     names = _book(tmp_path, monkeypatch)
