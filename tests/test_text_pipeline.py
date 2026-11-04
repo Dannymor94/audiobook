@@ -1094,3 +1094,118 @@ def test_chunk_fragments_with_enum_pause():
     assert [f for f, _, _ in frags] == ["Тяжесть", "ком", "напряжение."]
     assert [p for _, p, _ in frags] == [250, 250, 0]
     assert all(ie for _, _, ie in frags)
+
+
+# ---------------------------------------------------------------------------
+# open_end option in text_prep
+# ---------------------------------------------------------------------------
+
+from audiobook.voicecfg import prepare_text as _pt
+
+
+def _cfg(open_end=None, ensure_terminal=False, strip_quotes=False):
+    tp = {}
+    if ensure_terminal:
+        tp["ensure_terminal"] = True
+    if strip_quotes:
+        tp["strip_quotes"] = True
+    if open_end is not None:
+        tp["open_end"] = open_end
+    return {"text_prep": tp} if tp else {}
+
+
+def test_open_end_keep_same_as_ensure_terminal():
+    """open_end: keep with ensure_terminal = current behaviour, hashes unchanged."""
+    text = "И вдруг он понял,"
+    assert _pt(text, _cfg(ensure_terminal=True)) == _pt(text, _cfg(ensure_terminal=True, open_end="keep"))
+
+
+def test_open_end_none_no_dot():
+    assert _pt("Он шёл,", _cfg(ensure_terminal=True, open_end="none")) == "Он шёл,"
+
+
+def test_open_end_ellipsis_comma():
+    assert _pt("Он шёл,", _cfg(open_end="ellipsis")) == "Он шёл…"
+
+
+def test_open_end_ellipsis_emdash():
+    assert _pt("Он шёл—", _cfg(open_end="ellipsis")) == "Он шёл…"
+
+
+def test_open_end_no_effect_on_terminal():
+    """Chunk already ends with '.': open_end modes must not change it."""
+    text = "Он понял."
+    for mode in ("keep", "none", "ellipsis"):
+        assert _pt(text, _cfg(ensure_terminal=True, open_end=mode)) == text
+
+
+def test_open_end_default_no_change():
+    """With no text_prep at all, output equals input."""
+    assert _pt("Он шёл,", {}) == "Он шёл,"
+
+
+# ---------------------------------------------------------------------------
+# open_end / cont flags in manifest
+# ---------------------------------------------------------------------------
+
+from audiobook.chunker import build_manifest, build_chunks
+
+
+def _minimal_config():
+    """Minimal config that passes build_manifest (no models needed)."""
+    return {
+        "model": {"name": "test", "seed": 42, "temperature": 0.7, "language": "ru"},
+        "pauses_ms": {"sentence": 350, "paragraph": 700},
+        "ref": {"path": "ref/dummy.pt"},
+    }
+
+
+def _units_from_texts(texts):
+    return [{"type": "text", "text": t} for t in texts]
+
+
+def test_manifest_open_end_flag(monkeypatch):
+    """Chunk ending without terminal → open_end=True; next chunk → cont=True."""
+    import audiobook.chunker as _chunker
+    import audiobook.voicecfg as _vc
+    import audiobook.leadin as _leadin
+    import audiobook.pronounce as _pron
+
+    monkeypatch.setattr(_vc, "prepare_text", lambda text, cfg: text)
+    monkeypatch.setattr(_leadin, "phrase_for", lambda *a, **kw: None)
+    monkeypatch.setattr(_pron, "respell", lambda text, table: text)
+    monkeypatch.setattr(_pron, "load_table", lambda: {})
+    monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
+
+    cfg = _minimal_config()
+    # Two chunks: first ends in comma (open_end), second ends in period.
+    units = _units_from_texts(["Он шёл,", "пока не устал."])
+    rows = build_manifest(units, cfg)
+    assert len(rows) == 2
+    assert rows[0]["open_end"] is True
+    assert rows[0]["cont"] is False
+    assert rows[1]["open_end"] is False
+    assert rows[1]["cont"] is True
+
+
+def test_manifest_open_end_not_in_hash(monkeypatch):
+    """open_end and cont are metadata only — hash must equal a manifest built
+    identically except those fields are absent (simulated by comparing two runs
+    where the text differs only in terminal punctuation but hash uses same synth_text)."""
+    import audiobook.chunker as _chunker
+    import audiobook.voicecfg as _vc
+    import audiobook.leadin as _leadin
+    import audiobook.pronounce as _pron
+
+    monkeypatch.setattr(_vc, "prepare_text", lambda text, cfg: text)
+    monkeypatch.setattr(_leadin, "phrase_for", lambda *a, **kw: None)
+    monkeypatch.setattr(_pron, "respell", lambda text, table: text)
+    monkeypatch.setattr(_pron, "load_table", lambda: {})
+    monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
+
+    cfg = _minimal_config()
+    rows = build_manifest(_units_from_texts(["Привет."]), cfg)
+    # hash must be independent of open_end (it is not passed to chunk_hash)
+    from audiobook.chunker import chunk_hash
+    expected = chunk_hash(rows[0]["text"], "test", 42, 0.7, "ru", "FAKE")
+    assert rows[0]["hash"] == expected

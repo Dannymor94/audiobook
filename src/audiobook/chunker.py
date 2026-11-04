@@ -591,8 +591,11 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
+    _TERMINAL = frozenset(".!?…:;»\"")  # raw text: quotes always present here
+
     manifest: list[dict] = []
     prev_prepared, prev_kind = None, None
+    prev_open_end = False
     for n, c in enumerate(build_chunks(units, config), start=1):
         # Same order as synth.prepare_synth_text: text_prep → lead-in → respell.
         # text_prep changes enter the hash through synth_text (pron=…).
@@ -608,6 +611,10 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
         )) else 0
+        # Manifest-only flags: sentence continues across chunk boundary.
+        # Neither field enters the hash — only text_prep changes do (via synth_text).
+        raw_s = c["text"].rstrip()
+        is_open_end = bool(raw_s) and raw_s[-1] not in _TERMINAL
         manifest.append({
             "id": f"{n:04d}",
             "n": n,
@@ -617,11 +624,14 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "leadin": phrase,       # carrier/context read before the text and cut off (in hash)
+            "open_end": is_open_end,   # sentence continues into next chunk (not in hash)
+            "cont": prev_open_end,     # chunk starts mid-sentence (not in hash)
             "status": "pending",
             "locked": False,
             "seed_override": None,  # set by `accept`; never enters the hash
             "duration_ms": None,
         })
+        prev_open_end = is_open_end
     return manifest
 
 

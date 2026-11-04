@@ -83,6 +83,8 @@ _QUOTES = str.maketrans("", "", "«»“”„")
 # gone, so it is not in the stripped set.
 _TERMINAL_STRIPPED = frozenset(".!?…:;")
 _TERMINAL_QUOTED = frozenset(".!?…:;»\"")
+# Characters replaced by "…" in open_end: ellipsis mode.
+_OPEN_END_STRIP = str.maketrans("", "", ",—")  # comma, em-dash
 
 
 def prepare_text(text: str, config: dict) -> str:
@@ -104,9 +106,14 @@ def prepare_text(text: str, config: dict) -> str:
     strip = bool(tp.get("strip_quotes"))
     if strip:
         t = t.translate(_QUOTES).strip()
-    if tp.get("ensure_terminal"):
-        terminal = _TERMINAL_STRIPPED if strip else _TERMINAL_QUOTED
-        s = t.rstrip()
-        if s and s[-1] not in terminal:
-            t = s + "."
+    terminal = _TERMINAL_STRIPPED if strip else _TERMINAL_QUOTED
+    s = t.rstrip()
+    is_open = bool(s) and s[-1] not in terminal
+    open_end_mode = tp.get("open_end", "keep")
+    if is_open and open_end_mode == "ellipsis":
+        t = s.translate(_OPEN_END_STRIP).rstrip() + "…"
+    elif is_open and open_end_mode == "none":
+        pass
+    elif tp.get("ensure_terminal") and is_open:
+        t = s + "."
     return t
