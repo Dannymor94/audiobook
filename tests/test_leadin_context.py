@@ -82,8 +82,8 @@ def test_passage_select_and_cli():
     assert "passage" in _HEAVY and "passage" not in _MAIN_CONFIG_ONLY   # trial configs allowed
 
 
-def test_config_context_off_by_default():
+def test_config_context_matches_decision():
     from pathlib import Path
     import yaml
     cfg = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    assert leadin.context_settings(cfg) is None
+    assert leadin.context_settings(cfg) == {"max_chars": 60}
