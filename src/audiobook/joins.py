@@ -180,7 +180,8 @@ def _within_para_pairs(units: list[dict], config: dict) -> list[tuple[int, int]]
 
 def _flags(row: dict, thresholds: dict) -> str:
     flags = []
-    if abs(row["f0_diff_st"]) >= thresholds.get("f0_jump_st", 4.0):
+    f0_diff = row["f0_diff_st"]
+    if abs(f0_diff) >= thresholds.get("f0_jump_st", 4.0):
         flags.append("F0_JUMP")
     if row["slope_tail_st_s"] <= -thresholds.get("slope_fall_st_s", 8.0):
         flags.append("FALL_END")
@@ -189,6 +190,10 @@ def _flags(row: dict, thresholds: dict) -> str:
     if (not np.isnan(row["tempo_diff_pct"])
             and abs(row["tempo_diff_pct"]) >= thresholds.get("tempo_diff_pct", 25.0)):
         flags.append("TEMPO_DIFF")
+    # F0 tracker locked onto the octave above/below: |ΔF0| ≈ 12 st.
+    tol = thresholds.get("f0_octave_tol_st", 2.0)
+    if not np.isnan(f0_diff) and abs(abs(f0_diff) - 12.0) <= tol:
+        flags.append("F0_OCTAVE?")
     return ",".join(flags)
 
 

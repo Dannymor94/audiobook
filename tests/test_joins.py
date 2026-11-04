@@ -121,6 +121,30 @@ def test_flags_none_when_all_ok():
     assert _flags(row, thresholds) == ""
 
 
+def test_flags_f0_octave_fires_at_12st():
+    """ΔF0 ≈ 12 st → F0_OCTAVE? flag (tracker locked one octave away)."""
+    thresholds = {}
+    row = {"f0_diff_st": 11.96, "slope_tail_st_s": 0.0,
+           "rms_diff_db": 1.0, "tempo_diff_pct": 5.0}
+    assert "F0_OCTAVE?" in _flags(row, thresholds)
+
+
+def test_flags_f0_octave_does_not_fire_far_from_octave():
+    """ΔF0 = 8.89 st: not close enough to 12 → no F0_OCTAVE?."""
+    thresholds = {}
+    row = {"f0_diff_st": 8.89, "slope_tail_st_s": 0.0,
+           "rms_diff_db": 1.0, "tempo_diff_pct": 5.0}
+    assert "F0_OCTAVE?" not in _flags(row, thresholds)
+
+
+def test_flags_f0_octave_fires_negative_direction():
+    """ΔF0 ≈ -12 st (tracker jumped an octave down) also fires."""
+    thresholds = {}
+    row = {"f0_diff_st": -11.8, "slope_tail_st_s": 0.0,
+           "rms_diff_db": 1.0, "tempo_diff_pct": 5.0}
+    assert "F0_OCTAVE?" in _flags(row, thresholds)
+
+
 # ── within_para_pairs ─────────────────────────────────────────────────────────
 
 def test_within_para_pairs_single_paragraph_two_chunks():
