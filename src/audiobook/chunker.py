@@ -561,13 +561,23 @@ def latents_hash(config: dict) -> str:
 _TERMINAL_RAW = frozenset(".!?…:;»\"")  # raw text always has quotes
 
 
-def chunk_open_end(text: str) -> bool:
-    """True when the chunk ends mid-sentence (no terminal punctuation).
+def chunk_open_end(text: str, next_text: str | None = None) -> bool:
+    """True when the chunk ends mid-sentence AND the following chunk continues it.
 
-    Used by build_manifest and credit_rows to set the open_end manifest flag
-    and pass it to voicecfg.prepare_text — the single source of this logic."""
+    Criteria (both must hold):
+    1. No terminal punctuation on the last non-whitespace character.
+    2. next_text is not None and its first non-whitespace character is lowercase
+       (sentence continues — not a new sentence, heading or paragraph start).
+
+    The last chunk of a paragraph always returns False (next_text=None).
+    next_text should be None when the next chunk is a heading or step label."""
     s = text.rstrip()
-    return bool(s) and s[-1] not in _TERMINAL_RAW
+    if not s or s[-1] in _TERMINAL_RAW:
+        return False
+    if next_text is None:
+        return False
+    ns = next_text.lstrip()
+    return bool(ns) and ns[0].islower()
 
 
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
@@ -603,15 +613,24 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
+    chunks = list(build_chunks(units, config))
     manifest: list[dict] = []
     prev_prepared, prev_kind = None, None
     prev_open_end = False
-    for n, c in enumerate(build_chunks(units, config), start=1):
+    for i, c in enumerate(chunks):
+        n = i + 1
         kind = c.get("kind", "text")
-        # open_end only for running text: headings/step labels are complete thoughts
-        # even without terminal punctuation, and can never continue into the next chunk.
-        # Must come before prepare_text so the flag is consistent with prepare_synth_text.
-        is_open_end = chunk_open_end(c["text"]) and kind in ("text", "stack")
+        # open_end: sentence continues mid-chunk AND next running-text chunk starts lowercase.
+        # Headings/step labels are excluded (complete thoughts even without terminal mark).
+        # next_text is None when next chunk is a heading/step/absent → forces False.
+        if kind in ("text", "stack"):
+            nc = chunks[i + 1] if i + 1 < len(chunks) else None
+            next_text = (nc["text"]
+                         if nc and nc.get("kind", "text") in ("text", "stack")
+                         else None)
+            is_open_end = chunk_open_end(c["text"], next_text)
+        else:
+            is_open_end = False
         # Same order as synth.prepare_synth_text: text_prep → lead-in → respell.
         # text_prep changes enter the hash through synth_text (pron=…).
         prepared = voicecfg.prepare_text(c["text"], config, is_open_end)

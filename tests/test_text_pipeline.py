@@ -1224,11 +1224,11 @@ def test_synth_text_consistent_with_hash_keep(monkeypatch):
     monkeypatch.setattr(_pron, "load_table", lambda: {})
     monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
 
-    # open_end=True, mode=keep (default) + ensure_terminal: adds "."
+    # open_end=True: first chunk ends without terminal, next starts with lowercase.
     cfg = {**_minimal_config(), "text_prep": {"ensure_terminal": True}}
-    rows = build_manifest(_units_from_texts(["Он шёл,"]), cfg)
+    rows = build_manifest(_units_from_texts(["Он шёл,", "пока не устал."]), cfg)
     row = rows[0]
-    assert row["open_end"] is True
+    assert row["open_end"] is True, "first chunk before lowercase continuation must be open_end"
     synth_text, _ = prepare_synth_text(row["text"], cfg, {}, "SENTINEL",
                                         open_end=row["open_end"])
     # hash field was built from the same synth_text (minus sentinel)
@@ -1250,11 +1250,13 @@ def test_hash_changes_for_open_end_chunk_with_none(monkeypatch):
     monkeypatch.setattr(_pron, "load_table", lambda: {})
     monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
 
-    text = "Он шёл,"
+    # Two chunks so the first gets open_end=True (next starts with lowercase).
+    texts = ["Он шёл,", "пока не устал."]
     cfg_keep = {**_minimal_config(), "text_prep": {"ensure_terminal": True}}
     cfg_none = {**_minimal_config(), "text_prep": {"ensure_terminal": True, "open_end": "none"}}
-    rows_keep = build_manifest(_units_from_texts([text]), cfg_keep)
-    rows_none = build_manifest(_units_from_texts([text]), cfg_none)
+    rows_keep = build_manifest(_units_from_texts(texts), cfg_keep)
+    rows_none = build_manifest(_units_from_texts(texts), cfg_none)
+    assert rows_keep[0]["open_end"] is True
     # keep → "Он шёл,." in synth_text; none → "Он шёл," — hashes must differ
     assert rows_keep[0]["hash"] != rows_none[0]["hash"]
 
@@ -1303,3 +1305,29 @@ def test_heading_chunks_open_end_false(monkeypatch):
         assert rows[0]["hash"] == rows_mode[0]["hash"], (
             f"open_end: {mode} changed hash of a heading chunk"
         )
+
+
+def test_caption_before_quote_open_end_false(monkeypatch):
+    """Caption like 'Имя, возраст, город' before a capitalised quote → open_end=False.
+
+    A caption ends without terminal punctuation but the following chunk starts
+    with an uppercase letter (new sentence/quote), so it is NOT a continuation."""
+    import audiobook.chunker as _chunker
+    import audiobook.leadin as _leadin
+    import audiobook.pronounce as _pron
+
+    monkeypatch.setattr(_leadin, "phrase_for", lambda *a, **kw: None)
+    monkeypatch.setattr(_pron, "respell", lambda text, table: text)
+    monkeypatch.setattr(_pron, "load_table", lambda: {})
+    monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
+
+    # Caption ends with comma; quote starts with uppercase → open_end=False
+    units = _units_from_texts(["Имя, возраст, город", "«Это была лучшая ночь моей жизни.»"])
+    rows = build_manifest(units, _minimal_config())
+    assert rows[0]["open_end"] is False, (
+        "caption before uppercase quote must not be open_end"
+    )
+    # Also: single trailing chunk always False (last in its paragraph)
+    units_single = _units_from_texts(["Имя, возраст, город"])
+    rows_single = build_manifest(units_single, _minimal_config())
+    assert rows_single[0]["open_end"] is False
