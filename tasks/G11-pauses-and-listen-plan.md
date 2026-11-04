@@ -1,7 +1,7 @@
 ---
 id: G11
 title: паузы по знаку в конце фразы + план прослушки на главе 13 (≈10 мин, без синтеза)
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []

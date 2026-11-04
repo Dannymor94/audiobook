@@ -1,7 +1,7 @@
 ---
 id: G09
 title: pron-test — «заглавная согласная» в словаре на 1.7B (≈30 мин)
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []

@@ -1,7 +1,7 @@
 ---
 id: G05
 title: golden A/B — temperature 1.0 vs 0.9 (≈1.5 ч)
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: [G04]

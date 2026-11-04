@@ -1,7 +1,7 @@
 ---
 id: T10
 title: продолжения фраз — не ставить точку и не вешать нейтральную вводную (опции, выкл.)
-status: todo
+status: done
 owner:
 agent: claude-code
 machine: code

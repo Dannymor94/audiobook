@@ -1,7 +1,7 @@
 ---
 id: G12
 title: A/B «контекст из предыдущей фразы» на сплошном отрывке (≈1 ч)
-status: review
+status: done
 owner: claude-sonnet-4-6
 machine: gamebox
 depends_on: []
