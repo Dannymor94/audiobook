@@ -45,10 +45,10 @@
 "выбивается": "выбивАется"  # third-syllable stress; 6 occ.
 
 # Group-2 stress fixes (ch13 continuity diagnosis).
-"сознание": "соЗнание"     # model reads as "сУснание"; 2nd-syllable stress; 33 occ
-"сознания": "соЗнания"     # genitive; 6 occ
-"сознанию": "соЗнанию"     # dative; 1 occ
-"Сознание": "СоЗнание"     # sentence-initial; 3 occ
+"сознание": "сознАние"     # decisions: выбрано на слух (1.7B)
+"сознания": "сознАния"     # decisions: выбрано на слух (1.7B)
+"сознанию": "сознАнию"     # decisions: выбрано на слух (1.7B)
+"Сознание": "СознАние"     # decisions: выбрано на слух (1.7B)
 "найди": "найДи"           # imperative of "найти", final stress; model reads нАйди; 12 occ
 "Найди": "НайДи"           # sentence-initial; 30 occ
 
