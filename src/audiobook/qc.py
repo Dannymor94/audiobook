@@ -365,7 +365,7 @@ def run(config: dict, section: str | None = None) -> int:
                 # Same pad→respell→sentinel as render, so a re-synth of a short
                 # chunk keeps its lead-in (and gets the carrier trimmed off).
                 synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel,
-                                                        row_leadin(r))
+                                                        row_leadin(r), r.get("open_end", False))
                 wav = eng.synth(synth_text, new_seed, **({"leadin": phrase} if phrase else {}))
                 if wav is None:  # capped/timeout — leave qc_fail, becomes manual
                     log.warning("qc re-synth failed (cap/timeout) chunk %s", r["id"])
@@ -467,7 +467,7 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
         with TimeoutSynth(wcfg, timeout_s) as eng:
             for r, d, s in missing:
                 synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel,
-                                                        row_leadin(r))
+                                                        row_leadin(r), r.get("open_end", False))
                 wav = eng.synth(synth_text, s, **({"leadin": phrase} if phrase else {}))
                 if wav is None:
                     log.warning("take %s seed %s: cap/timeout", r["id"], s)

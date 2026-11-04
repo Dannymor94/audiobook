@@ -88,7 +88,7 @@ def run_redo(config: dict, section: str, chunk_id: str, n_candidates: int) -> in
 
     base_seed = seed_for_chunk(row["hash"])
     synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel,
-                                            row_leadin(row))
+                                            row_leadin(row), row.get("open_end", False))
     synth_kw = {"leadin": phrase} if phrase else {}
 
     print(f"redo {section}/{chunk_id}: {row['text']!r}")

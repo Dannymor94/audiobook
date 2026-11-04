@@ -597,9 +597,13 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     prev_prepared, prev_kind = None, None
     prev_open_end = False
     for n, c in enumerate(build_chunks(units, config), start=1):
+        # open_end detected from raw text; must come before prepare_text so the flag
+        # is consistent between the hash and what prepare_synth_text sees at render time.
+        raw_s = c["text"].rstrip()
+        is_open_end = bool(raw_s) and raw_s[-1] not in _TERMINAL
         # Same order as synth.prepare_synth_text: text_prep → lead-in → respell.
         # text_prep changes enter the hash through synth_text (pron=…).
-        prepared = voicecfg.prepare_text(c["text"], config)
+        prepared = voicecfg.prepare_text(c["text"], config, is_open_end)
         synth_text = respell(prepared, table)
         kind = c.get("kind", "text")
         # Context lead-in only inside running text: never for headings/step
@@ -611,10 +615,6 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
         )) else 0
-        # Manifest-only flags: sentence continues across chunk boundary.
-        # Neither field enters the hash — only text_prep changes do (via synth_text).
-        raw_s = c["text"].rstrip()
-        is_open_end = bool(raw_s) and raw_s[-1] not in _TERMINAL
         manifest.append({
             "id": f"{n:04d}",
             "n": n,

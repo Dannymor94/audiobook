@@ -87,15 +87,19 @@ _TERMINAL_QUOTED = frozenset(".!?…:;»\"")
 _OPEN_END_STRIP = str.maketrans("", "", ",—")  # comma, em-dash
 
 
-def prepare_text(text: str, config: dict) -> str:
+def prepare_text(text: str, config: dict, open_end: bool = False) -> str:
     """The chunk text as the model should read it, before lead-in/respell.
 
     ``text_prep.strip_quotes``: drop «» “ ” „ — quotation marks are inaudible
     and made the model read short quoted phrases with a foreign accent.
     ``text_prep.ensure_terminal``: append "." when the text has no terminal
     mark — without one the model garbled a short phrase at word level.
+    ``text_prep.open_end``: keep (default) | none | ellipsis — controls ONLY chunks
+    where the manifest flag open_end=True (sentence cut mid-flow). The caller must
+    pass open_end=True; detection is never done from the last character, so headings
+    and captions without terminal marks are not affected.
     Validated by ear on 1.7B (quote_test variant c: «Я тебя чувствую» →
-    "Я тебя чувствую."). Both default off. The book text and the manifest are
+    "Я тебя чувствую."). All default off. The book text and the manifest are
     never changed; this only shapes the model input (and so enters the hash
     through ``synth_text``)."""
     tp = config.get("text_prep") or {}
@@ -106,14 +110,15 @@ def prepare_text(text: str, config: dict) -> str:
     strip = bool(tp.get("strip_quotes"))
     if strip:
         t = t.translate(_QUOTES).strip()
-    terminal = _TERMINAL_STRIPPED if strip else _TERMINAL_QUOTED
-    s = t.rstrip()
-    is_open = bool(s) and s[-1] not in terminal
     open_end_mode = tp.get("open_end", "keep")
-    if is_open and open_end_mode == "ellipsis":
+    if open_end and open_end_mode == "ellipsis":
+        s = t.rstrip()
         t = s.translate(_OPEN_END_STRIP).rstrip() + "…"
-    elif is_open and open_end_mode == "none":
+    elif open_end and open_end_mode == "none":
         pass
-    elif tp.get("ensure_terminal") and is_open:
-        t = s + "."
+    elif tp.get("ensure_terminal"):
+        terminal = _TERMINAL_STRIPPED if strip else _TERMINAL_QUOTED
+        s = t.rstrip()
+        if s and s[-1] not in terminal:
+            t = s + "."
     return t

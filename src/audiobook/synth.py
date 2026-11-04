@@ -235,7 +235,8 @@ def row_leadin(row: dict):
 
 
 def prepare_synth_text(text: str, config: dict, table: dict,
-                       sentinel: str, phrase=leadin.AUTO) -> tuple[str, str | None]:
+                       sentinel: str, phrase=leadin.AUTO,
+                       open_end: bool = False) -> tuple[str, str | None]:
     """The exact string fed to the model for a chunk, plus the lead-in carrier if
     one fires. Order: text_prep → pad (short chunks) → respell (stress dict) → sentinel — the
     chunk hash (chunker.chunk_hash) is built the same way. Returns
@@ -244,7 +245,7 @@ def prepare_synth_text(text: str, config: dict, table: dict,
     synthesis input, shared by render, redo, and qc re-synth — so no path can
     quietly drop the padding and let the drift back in."""
     from audiobook.pronounce import respell
-    text = voicecfg.prepare_text(text, config)  # text_prep: quotes / final period
+    text = voicecfg.prepare_text(text, config, open_end)  # text_prep: quotes / final period
     if phrase is leadin.AUTO:
         phrase = leadin.fires(text, config)
     base = leadin.pad(text, phrase) if phrase else text
@@ -357,7 +358,7 @@ def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
 
     if len(frags) == 1:
         synth_text, phrase = prepare_synth_text(row["text"], config, table, sentinel,
-                                                row_leadin(row))
+                                                row_leadin(row), row.get("open_end", False))
         synth_kw = {"leadin": phrase} if phrase else {}
         for attempt in range(retries + 1):
             used = base + attempt

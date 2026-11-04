@@ -63,7 +63,7 @@ def render_variants(engine, row: dict, config: dict,
     out = []
     for v, t in tables:
         synth_text, phrase = prepare_synth_text(row["text"], config, t, sentinel,
-                                                row_leadin(row))
+                                                row_leadin(row), row.get("open_end", False))
         kw = {"leadin": phrase} if phrase else {}
         for k in range(seeds):
             wav = None
