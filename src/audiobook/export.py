@@ -539,14 +539,12 @@ def credit_rows(text: str, config: dict, table: dict, lat_hash: str) -> list[dic
     from audiobook.pronounce import respell
     m = config["model"]
     model = voicecfg.model_id(config)
-    _TERMINAL = frozenset(".!?…:;»\"")
     rows = []
     for n, c in enumerate(credit_chunks(text, config), 1):
-        raw_s = c.rstrip()
-        is_open_end = bool(raw_s) and raw_s[-1] not in _TERMINAL
-        prepared = voicecfg.prepare_text(c, config, is_open_end)
+        # Credit lines are standalone — no cross-line sentence continuations.
+        prepared = voicecfg.prepare_text(c, config, open_end=False)
         rows.append({"id": f"{n:04d}", "n": n, "text": c, "seed_override": None,
-                     "open_end": is_open_end,
+                     "open_end": False,
                      "hash": chunk_hash(c, model, m["seed"], m["temperature"], m["language"],
                                         lat_hash, respell(prepared, table),
                                         leadin.fires(prepared, config))})

@@ -1276,3 +1276,30 @@ def test_hash_unchanged_for_non_open_end_chunk_with_none(monkeypatch):
     rows_base = build_manifest(_units_from_texts([text]), cfg_base)
     rows_none = build_manifest(_units_from_texts([text]), cfg_none)
     assert rows_base[0]["hash"] == rows_none[0]["hash"]
+
+
+def test_heading_chunks_open_end_false(monkeypatch):
+    """Heading chunks get open_end=False even without terminal punctuation.
+    With open_end: none/ellipsis their hash must not change."""
+    import audiobook.chunker as _chunker
+    import audiobook.leadin as _leadin
+    import audiobook.pronounce as _pron
+
+    monkeypatch.setattr(_leadin, "phrase_for", lambda *a, **kw: None)
+    monkeypatch.setattr(_pron, "respell", lambda text, table: text)
+    monkeypatch.setattr(_pron, "load_table", lambda: {})
+    monkeypatch.setattr(_chunker, "latents_hash", lambda cfg: "FAKE")
+
+    # heading units (no terminal punctuation) — build_manifest must set open_end=False
+    units = [{"type": "heading", "text": "Введение", "level": 1}]
+    cfg_base = {**_minimal_config(), "text_prep": {"ensure_terminal": True}}
+    rows = build_manifest(units, cfg_base)
+    assert rows[0]["open_end"] is False
+
+    # hash must be unchanged with none/ellipsis modes
+    for mode in ("none", "ellipsis"):
+        cfg_mode = {**_minimal_config(), "text_prep": {"ensure_terminal": True, "open_end": mode}}
+        rows_mode = build_manifest(units, cfg_mode)
+        assert rows[0]["hash"] == rows_mode[0]["hash"], (
+            f"open_end: {mode} changed hash of a heading chunk"
+        )

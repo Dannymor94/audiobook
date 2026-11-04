@@ -558,6 +558,18 @@ def latents_hash(config: dict) -> str:
     return "no-latents"
 
 
+_TERMINAL_RAW = frozenset(".!?…:;»\"")  # raw text always has quotes
+
+
+def chunk_open_end(text: str) -> bool:
+    """True when the chunk ends mid-sentence (no terminal punctuation).
+
+    Used by build_manifest and credit_rows to set the open_end manifest flag
+    and pass it to voicecfg.prepare_text — the single source of this logic."""
+    s = text.rstrip()
+    return bool(s) and s[-1] not in _TERMINAL_RAW
+
+
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
                language: str, lat_hash: str, synth_text: str | None = None,
                leadin: str | None = None, enum_pause_ms: int = 0) -> str:
@@ -591,21 +603,19 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
-    _TERMINAL = frozenset(".!?…:;»\"")  # raw text: quotes always present here
-
     manifest: list[dict] = []
     prev_prepared, prev_kind = None, None
     prev_open_end = False
     for n, c in enumerate(build_chunks(units, config), start=1):
-        # open_end detected from raw text; must come before prepare_text so the flag
-        # is consistent between the hash and what prepare_synth_text sees at render time.
-        raw_s = c["text"].rstrip()
-        is_open_end = bool(raw_s) and raw_s[-1] not in _TERMINAL
+        kind = c.get("kind", "text")
+        # open_end only for running text: headings/step labels are complete thoughts
+        # even without terminal punctuation, and can never continue into the next chunk.
+        # Must come before prepare_text so the flag is consistent with prepare_synth_text.
+        is_open_end = chunk_open_end(c["text"]) and kind in ("text", "stack")
         # Same order as synth.prepare_synth_text: text_prep → lead-in → respell.
         # text_prep changes enter the hash through synth_text (pron=…).
         prepared = voicecfg.prepare_text(c["text"], config, is_open_end)
         synth_text = respell(prepared, table)
-        kind = c.get("kind", "text")
         # Context lead-in only inside running text: never for headings/step
         # labels, never borrowing from one. Default mode → fixed carrier (fires).
         phrase = leadin.phrase_for(prepared, config, prev_prepared,

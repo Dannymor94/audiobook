@@ -353,7 +353,6 @@ def test_credit_rows_hash_matches_prepare_synth_text(tmp_path, monkeypatch):
     sentinel = CREDITS_CFG["model"].get("sentinel", "")
     table = {}
 
-    # open_end=False: chunk already has terminal punctuation
     for chunk_text in ["Плейсхолдер один.", "Слово"]:
         rows = export.credit_rows(chunk_text, CREDITS_CFG, table, "lat")
         row = rows[0]
@@ -373,6 +372,27 @@ def test_credit_rows_hash_matches_prepare_synth_text(tmp_path, monkeypatch):
             phrase,
         )
         assert row["hash"] == expected_hash, f"hash mismatch for {chunk_text!r}"
+
+
+def test_credit_rows_open_end_false_and_hash_stable(tmp_path, monkeypatch):
+    """credit_rows always sets open_end=False (standalone lines, never continuations).
+    Hash must not change with open_end: none/ellipsis — those modes never fire."""
+    _book(tmp_path, monkeypatch)
+
+    # All credit_rows have open_end=False regardless of terminal punctuation.
+    for text in ["Плейсхолдер один.", "Введение", "Автор: Иван", "Глава 1"]:
+        rows = export.credit_rows(text, CREDITS_CFG, {}, "lat")
+        for row in rows:
+            assert row["open_end"] is False, f"expected open_end=False for {row['text']!r}"
+
+    # Hash stable: open_end: none/ellipsis must not change credit hashes.
+    base_rows = export.credit_rows("Плейсхолдер один.", CREDITS_CFG, {}, "lat")
+    for mode in ("none", "ellipsis"):
+        cfg_mode = dict(CREDITS_CFG, text_prep={"open_end": mode})
+        mode_rows = export.credit_rows("Плейсхолдер один.", cfg_mode, {}, "lat")
+        assert base_rows[0]["hash"] == mode_rows[0]["hash"], (
+            f"open_end: {mode} changed hash of a credit chunk"
+        )
 
 
 def test_render_credits_cache_and_retire(tmp_path, monkeypatch):
