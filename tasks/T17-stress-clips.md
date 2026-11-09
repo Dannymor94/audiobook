@@ -32,31 +32,32 @@ CLAUDE.md (через AGENTS.md). Без новых зависимостей. Н
 Реализован модуль `src/audiobook/stress_clips.py` и подкоманда `stress-clips`.
 Ревью Codex Sol (CHANGES_REQUIRED) выполнено полностью.
 
-**P1-1 — word_times contract.** Модуль использует `word_times: [[w, s, e, p], ...]`
-когда поле присутствует в строке манифеста, иначе fallback на `flag_words`.
-Контракт QC зафиксирован в docstring модуля: добавить в `qc._measure` одну строку
-`"word_times": [[w["w"], w["s"], w["e"], w.get("p")] for w in words]`.
-Поле привязано к хешу чанка: повторный рендер → повторный QC → замена поля.
-QC-модуль не изменён.
+**Раунд 3 (финальные исправления по ревью):**
 
-**P1-2 — границы клипа.** `slice_wav(data, sr, start_s, end_s, pad_s)`:
-окно `[start_s−pad, end_s+pad]`; fallback `end_s=None` → `[start_s−pad, start_s+pad]`.
+**R3-1 — word_times в QC реализован.** `qc._measure` теперь возвращает
+`word_times: [[w, s, e, p], ...]` для каждого слова Whisper. Одна строка добавлена
+в return dict. Существующая логика (flags, CER, статусы, ре-синтез) не затронута.
 
-**P1-3 — индекс из реальных клипов.** `build_clips` возвращает `(audio, records)`,
-где `records` — только успешно созданные клипы. `index.tsv` строится по `records`,
-не через `zip(hits, starts)`.
+**R3-2 — qc-words: повторная транскрипция без ре-синтеза.** Новая подкоманда
+`./run.sh qc-words --section S` запускает только фазу Whisper для чанков без
+`word_times`, не меняет `status`, `flag_words`, `cer`, `seed`, `hash`. Идемпотентна.
+Нужна для чанков, отрендеренных до добавления `word_times`.
 
-**P1-4 — полный список чанков без таймкодов.** `chunks_without_timestamps(rows)`
-возвращает все rendered-чанки без обоих полей. Вывод не усекается. Если ни один
-чанк не имеет таймкодов — `SystemExit` с указанием запустить QC.
+**R3-3 — нет fallback на flag_words.** `collect_hits` использует только `word_times`.
+Если у некоторых чанков нет `word_times` — `stress-clips` завершается с явным
+сообщением и подсказкой `./run.sh qc-words --section S`.
 
-**P1-5 — устаревший index.tsv.** Если identity-проверка не пройдена или колонка
-`hash16` отсутствует — явное предупреждение, `section_time = «?»`, продолжение работы.
+**R3-4 — проверка привязки word_times к hash/seed.** `r.update(_measure(...))` всегда
+перезаписывает `word_times`. Тест `test_word_times_replaced_on_update` проверяет
+атомарную замену. Ложные вхождения из `flag_words` исключены тестом
+`test_word_in_both_sources_uses_word_times_values`.
 
-**P1-6 — дедупликация.** Ключ `(chunk_id, norm_word, round(start_s, 3))`.
+**R3-5 — интеграционные тесты:** `tests/test_stress_clips_integration.py` (12 тестов):
+уверенное слово вне watch-листа, повторные вхождения (3 клипа), слово длиннее 0.6 с,
+независимость word_times/flag_words.
 
-**P1-7 — частота дискретизации.** `build_clips` проверяет `file_sr == sr`;
-несовпадение → `SystemExit` с указанием файла и обеих частот.
+**R3-6 — тесты QC:** `tests/test_qc_word_times.py` (6 тестов): `_measure` возвращает
+все слова (не только флаги), `run_words_only` сохраняет status/cer/flag_words,
+пропускает уже заполненные чанки.
 
-**Тесты (слой 1):** 24 теста, каждый P1/P2 покрыт отдельным тестом.
-`691 passed, 5 skipped`.
+`709 passed, 5 skipped`.

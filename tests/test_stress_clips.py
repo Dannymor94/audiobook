@@ -1,14 +1,16 @@
 """Layer-1 regression tests for stress_clips.
 
 Synthetic wavs + hand-crafted manifest rows; no models, no network.
-Covers all P1/P2 issues from code review:
-  P1-1  word_times preferred over flag_words
+Covers all P1/P2 issues from code review and the round-2 requirements:
+  P1-1  word_times is the only source (no flag_words fallback)
   P1-2  clip boundaries [word_start-pad, word_end+pad]
   P1-3  index built from successful clips only (no zip mismatch)
   P1-4  full list of chunks without timestamps
   P1-5  stale/unverifiable section index is refused (not silently ?-filled)
   P1-6  duplicate occurrences are deduplicated
   P1-7  mismatched sample rate raises SystemExit
+  R2-3  no fallback: no word_times → reject with qc-words hint
+  R2-6  word_times independent from flag_words (no false occurrences)
 """
 import numpy as np
 import pytest
@@ -45,14 +47,13 @@ def test_norm_strips_plus():
     assert _norm("те+бя") == "тебя"
 
 
-# ── collect_hits: word_times vs flag_words ────────────────────────────────────
+# ── P1-1 / R2-3: word_times is the only source ───────────────────────────────
 
-def test_collect_hits_prefers_word_times():
-    """P1-1: word_times present → used; flag_words ignored."""
+def test_collect_hits_uses_word_times():
     rows = [{
         "id": "1",
-        "word_times": [["тебя", 2.0, 2.4, 0.95], ["нас", 3.0, 3.2, 0.9]],
-        "flag_words": [["тебя", 9.9, 0.1, "watch"]],  # stale/ignored
+        "word_times": [["тебя", 2.0, 2.4, 0.95]],
+        "flag_words": [],
         "status": "done",
     }]
     hits = collect_hits(rows, {"тебя"})
@@ -61,20 +62,23 @@ def test_collect_hits_prefers_word_times():
     assert hits[0]["end_s"] == pytest.approx(2.4)
 
 
-def test_collect_hits_fallback_to_flag_words():
-    """P1-1: no word_times → fall back to flag_words, end_s is None."""
-    rows = [{"id": "1", "flag_words": [["тебя", 2.0, 0.9, "watch"]], "status": "done"}]
+def test_collect_hits_no_fallback_to_flag_words():
+    """R2-3: word_times absent → chunk skipped (no fallback to flag_words)."""
+    rows = [{
+        "id": "1",
+        "flag_words": [["тебя", 2.0, 0.9, "watch"]],
+        "status": "done",
+    }]
     hits = collect_hits(rows, {"тебя"})
-    assert len(hits) == 1
-    assert hits[0]["end_s"] is None
+    assert hits == []
 
 
 def test_collect_hits_no_match():
-    rows = [{"id": "1", "flag_words": [["дышит", 1.0, 0.7, "conf"]], "status": "done"}]
+    rows = [{"id": "1", "word_times": [["дышит", 1.0, 1.3, 0.7]], "status": "done"}]
     assert collect_hits(rows, {"тебя"}) == []
 
 
-def test_collect_hits_norm_stress():
+def test_collect_hits_norm_stress_in_word_times():
     rows = [{"id": "1", "word_times": [["теб́я", 1.5, 1.8, 0.95]], "status": "done"}]
     hits = collect_hits(rows, {"тебя"})
     assert len(hits) == 1
@@ -90,74 +94,82 @@ def test_collect_hits_multiple_chunks():
     assert len(hits) == 2
 
 
-def test_collect_hits_missing_flag_words():
+def test_collect_hits_missing_word_times():
     rows = [{"id": "1", "status": "done"}]
     assert collect_hits(rows, {"тебя"}) == []
 
 
-# ── P1-6: deduplication ───────────────────────────────────────────────────────
+# ── R2-6: word_times and flag_words are independent ──────────────────────────
 
-def test_collect_hits_dedup_same_entry():
-    """P1-6: same (id, norm_word, start_s) appears twice → one hit."""
+def test_flag_words_not_used_as_source():
+    """R2-6: word in flag_words but not in word_times → NOT in hits."""
     rows = [{
         "id": "1",
-        "word_times": [
-            ["тебя", 2.0, 2.4, 0.95],
-            ["тебя", 2.0, 2.4, 0.95],  # exact duplicate
-        ],
+        "word_times": [["нас", 0.5, 0.7, 0.9]],   # only "нас"
+        "flag_words": [["тебя", 2.0, 0.9, "watch"]],  # "тебя" only in flags
+        "status": "done",
+    }]
+    hits = collect_hits(rows, {"тебя"})
+    assert hits == []
+
+
+def test_word_in_both_sources_uses_word_times_values():
+    """R2-6: word in both word_times and flag_words → word_times values used."""
+    rows = [{
+        "id": "1",
+        # word_times has correct start/end; flag_words has stale start
+        "word_times": [["тебя", 2.0, 2.4, 0.95]],
+        "flag_words": [["тебя", 9.9, 0.1, "watch"]],
         "status": "done",
     }]
     hits = collect_hits(rows, {"тебя"})
     assert len(hits) == 1
+    assert hits[0]["start_s"] == pytest.approx(2.0)
+    assert hits[0]["end_s"] == pytest.approx(2.4)
+
+
+# ── P1-6: deduplication ───────────────────────────────────────────────────────
+
+def test_collect_hits_dedup_exact_duplicate():
+    """P1-6: same (id, norm_word, start_s) → one hit."""
+    rows = [{
+        "id": "1",
+        "word_times": [["тебя", 2.0, 2.4, 0.95], ["тебя", 2.0, 2.4, 0.95]],
+        "status": "done",
+    }]
+    assert len(collect_hits(rows, {"тебя"})) == 1
 
 
 def test_collect_hits_dedup_stress_variant():
-    """P1-6: stressed vs plain form of same word at same time → one hit."""
+    """P1-6: stressed vs plain at same time → one hit."""
     rows = [{
         "id": "1",
-        "word_times": [
-            ["тебя́", 2.0, 2.4, 0.95],
-            ["тебя", 2.0, 2.4, 0.9],
-        ],
+        "word_times": [["тебя́", 2.0, 2.4, 0.95], ["тебя", 2.0, 2.4, 0.9]],
         "status": "done",
     }]
-    hits = collect_hits(rows, {"тебя"})
-    assert len(hits) == 1
+    assert len(collect_hits(rows, {"тебя"})) == 1
 
 
 def test_collect_hits_distinct_times_not_deduped():
-    """Different start times → both kept."""
-    rows = [{
-        "id": "1",
-        "word_times": [["тебя", 2.0, 2.4, 0.95], ["тебя", 5.0, 5.4, 0.9]],
-        "status": "done",
-    }]
-    hits = collect_hits(rows, {"тебя"})
-    assert len(hits) == 2
+    rows = [{"id": "1", "word_times": [["тебя", 2.0, 2.4, 0.95],
+                                        ["тебя", 5.0, 5.4, 0.9]], "status": "done"}]
+    assert len(collect_hits(rows, {"тебя"})) == 2
 
 
 # ── P1-4: chunks_without_timestamps ──────────────────────────────────────────
 
 def test_chunks_without_timestamps_all_missing():
-    """P1-4: all rendered chunks lack both word_times and flag_words."""
-    rows = [
-        {"id": "1", "status": "done"},
-        {"id": "2", "status": "done"},
-    ]
-    missing = chunks_without_timestamps(rows)
-    assert missing == ["1", "2"]
+    rows = [{"id": "1", "status": "done"}, {"id": "2", "status": "done"}]
+    assert chunks_without_timestamps(rows) == ["1", "2"]
 
 
 def test_chunks_without_timestamps_partial():
-    """P1-4: only chunks without any timing are reported."""
     rows = [
-        {"id": "1", "status": "done", "flag_words": [["тебя", 1.0, 0.9, "watch"]]},
-        {"id": "2", "status": "done"},   # no timestamps
-        {"id": "3", "status": "done", "word_times": [["нас", 0.5, 0.7, 0.9]]},
-        {"id": "4", "status": "todo"},   # not rendered → not reported
+        {"id": "1", "status": "done", "word_times": [["тебя", 1.0, 1.3, 0.9]]},
+        {"id": "2", "status": "done"},
+        {"id": "3", "status": "todo"},   # not rendered → not reported
     ]
-    missing = chunks_without_timestamps(rows)
-    assert missing == ["2"]
+    assert chunks_without_timestamps(rows) == ["2"]
 
 
 def test_chunks_without_timestamps_all_present():
@@ -168,26 +180,24 @@ def test_chunks_without_timestamps_all_present():
 # ── P1-2: slice_wav with word_start / word_end ────────────────────────────────
 
 def test_slice_wav_uses_end_s():
-    """P1-2: window is [start-pad, end+pad], not centre±pad."""
+    """P1-2: window is [start-pad, end+pad]."""
     data = _sine(10.0)
-    start_s, end_s = 3.0, 4.0        # 1 s word
+    start_s, end_s = 3.0, 4.0
     clip = slice_wav(data, SR, start_s, end_s, PAD_S)
     expected_len = int((end_s - start_s + 2 * PAD_S) * SR)
     assert abs(len(clip) - expected_len) <= 2
 
 
 def test_slice_wav_fallback_no_end_s():
-    """P1-2 fallback: end_s=None → centre-based [start-pad, start+pad]."""
+    """Fallback end_s=None → centre-based [start-pad, start+pad]."""
     data = _sine(10.0)
     clip = slice_wav(data, SR, start_s=5.0, end_s=None, pad_s=PAD_S)
-    expected_len = int(2 * PAD_S * SR)
-    assert abs(len(clip) - expected_len) <= 2
+    assert abs(len(clip) - int(2 * PAD_S * SR)) <= 2
 
 
 def test_slice_wav_clamped_start():
     data = _sine(5.0)
     clip = slice_wav(data, SR, start_s=0.1, end_s=0.5, pad_s=PAD_S)
-    # clamped: starts at 0
     assert len(clip) < int((0.5 - 0.1 + 2 * PAD_S) * SR)
     assert len(clip) > 0
 
@@ -203,41 +213,31 @@ def test_slice_wav_clamped_end():
 
 def test_build_clips_index_survives_missing_wav(tmp_path):
     """P1-3: missing wav is skipped; subsequent clips have correct start times."""
-    # Only ch2.wav exists; ch1 is absent
-    data = _sine(10.0, freq=220.0)
-    sf.write(str(tmp_path / "ch2.wav"), data, SR, subtype="PCM_16")
-
+    sf.write(str(tmp_path / "ch2.wav"), _sine(10.0), SR, subtype="PCM_16")
     hits = [
         {"id": "ch1", "start_s": 2.0, "end_s": 2.4, "word": "тебя", "prob": 0.9},
         {"id": "ch2", "start_s": 3.0, "end_s": 3.5, "word": "тебя", "prob": 0.85},
     ]
     audio, records = build_clips(hits, tmp_path, SR, PAD_S, GAP_S)
-
-    # Only ch2 produced a clip
     assert len(records) == 1
     assert records[0]["hit"]["id"] == "ch2"
     assert records[0]["clip_start_s"] == pytest.approx(0.0)
 
 
 def test_build_clips_two_clips_start_times(tmp_path):
-    """P1-3: two successful clips; second starts after first+gap."""
-    data = _sine(10.0, freq=220.0)
-    sf.write(str(tmp_path / "ch1.wav"), data, SR, subtype="PCM_16")
-
+    """P1-3: second clip starts after first+gap."""
+    sf.write(str(tmp_path / "ch1.wav"), _sine(10.0), SR, subtype="PCM_16")
     hits = [
         {"id": "ch1", "start_s": 2.0, "end_s": 2.5, "word": "тебя", "prob": 0.9},
         {"id": "ch1", "start_s": 7.0, "end_s": 7.4, "word": "тебя", "prob": 0.85},
     ]
     audio, records = build_clips(hits, tmp_path, SR, PAD_S, GAP_S)
-
     assert len(records) == 2
-    clip1_dur = (hits[0]["end_s"] - hits[0]["start_s"] + 2 * PAD_S)
-    expected_second_start = clip1_dur + GAP_S
-    assert records[1]["clip_start_s"] == pytest.approx(expected_second_start, abs=0.02)
+    clip1_dur = hits[0]["end_s"] - hits[0]["start_s"] + 2 * PAD_S
+    assert records[1]["clip_start_s"] == pytest.approx(clip1_dur + GAP_S, abs=0.02)
 
 
 def test_build_clips_missing_wav_returns_empty(tmp_path):
-    """P1-3: all wavs missing → empty audio, empty records."""
     hits = [{"id": "missing", "start_s": 1.0, "end_s": 1.3, "word": "тест", "prob": 0.9}]
     audio, records = build_clips(hits, tmp_path, SR, PAD_S, GAP_S)
     assert audio.size == 0
@@ -249,9 +249,7 @@ def test_build_clips_missing_wav_returns_empty(tmp_path):
 def test_build_clips_wrong_sr_raises(tmp_path):
     """P1-7: chunk wav at wrong sample rate → SystemExit."""
     wrong_sr = 16000
-    data = _sine(5.0, sr=wrong_sr)
-    sf.write(str(tmp_path / "ch1.wav"), data, wrong_sr, subtype="PCM_16")
-
+    sf.write(str(tmp_path / "ch1.wav"), _sine(5.0, sr=wrong_sr), wrong_sr, subtype="PCM_16")
     hits = [{"id": "ch1", "start_s": 1.0, "end_s": 1.3, "word": "тест", "prob": 0.9}]
     with pytest.raises(SystemExit, match="16000"):
         build_clips(hits, tmp_path, SR, PAD_S, GAP_S)
@@ -265,7 +263,7 @@ def test_load_tsv_words(tmp_path):
                  encoding="utf-8")
     words = load_tsv_words(p)
     assert "тебя" in words
-    assert "нес" in words   # ё→е normalised
+    assert "нес" in words
 
 
 def test_load_tsv_words_missing(tmp_path):

@@ -1,6 +1,6 @@
 """stress-clips: extract word clips from rendered sections for stress review.
 
-For each occurrence of risk/failed/watch words found in QC word timestamps,
+For each occurrence of risk/failed/watch words found in QC word_times,
 extracts audio [word_start−0.6 s, word_end+0.6 s], joins clips with 0.4 s of
 silence, and writes one mp3 + index.tsv per section.
 
@@ -13,23 +13,16 @@ Sources:
     failed  out/stress/failed.tsv (col 0 = wordform, produced by stress-sheet apply)
     watch   text/stress_watch.yaml homographs list
 
-─── QC word-timestamp contract (pending architect sign-off) ─────────────────
-To search all words (not only flagged ones) QC must write a ``word_times``
-field to each manifest row during the transcribe phase:
+─── QC word_times contract ───────────────────────────────────────────────────
+qc._measure stores every whisper word in the manifest row:
 
-    "word_times": [[word_str, start_s, end_s, prob], ...]   ← every whisper word
+    "word_times": [[word_str, start_s, end_s, prob], ...]
 
-Minimal change to qc._measure — add one line to the return dict:
-
-    "word_times": [[w["w"], w["s"], w["e"], w.get("p")] for w in words]
-
-Invariant: tied to current audio via chunk hash — if the chunk is re-rendered
-the hash changes, QC re-runs, and word_times is replaced atomically with the
-rest of the row. No separate file needed.
-
-Until that change lands, stress_clips falls back to flag_words (watch-list and
-low-confidence words). Risk/failed words absent from flag_words will be missed
-and the affected chunks appear in the "нет таймкодов" report.
+This field is populated by run() (normal QC) and run_words_only() (re-
+transcribe without re-synth, safe on done/manual chunks). It is atomically
+replaced whenever the chunk is re-transcribed, so it always reflects the
+current audio. No fallback to flag_words: flag_words is a filtered subset
+(watch+conf), not a source of complete timestamps.
 ─────────────────────────────────────────────────────────────────────────────
 """
 from __future__ import annotations
@@ -91,25 +84,21 @@ def _word_set(words_arg: list[str]) -> set[str]:
 
 
 def collect_hits(rows: list[dict], word_set: set[str]) -> list[dict]:
-    """Return [{id, word, start_s, end_s, prob}] for all matches, deduplicated.
+    """Return [{id, word, start_s, end_s, prob}] from word_times, deduplicated.
 
-    Prefers word_times (full Whisper timestamps, every word) when present;
-    falls back to flag_words (only watch/conf words).  end_s is None when only
-    flag_words is available (clip uses center-based fallback in slice_wav).
+    Only uses word_times (complete whisper output); never falls back to
+    flag_words. Rows without word_times are silently skipped here — the caller
+    uses chunks_without_timestamps() to report them separately.
     Dedup key: (chunk_id, norm_word, start_s rounded to 3 dp).
     """
     hits: list[dict] = []
     seen: set[tuple] = set()
     for r in rows:
         word_times = r.get("word_times")
-        if word_times is not None:
-            # [[w, s, e, p], ...]  — full whisper output
-            source = [(e[0], float(e[1]), float(e[2]), e[3]) for e in word_times]
-        else:
-            # [[w, s, p, reason], ...]  — flagged words only, no end time
-            source = [(e[0], float(e[1]), None, e[2]) for e in (r.get("flag_words") or [])]
-
-        for w, s, e, p in source:
+        if word_times is None:
+            continue
+        for entry in word_times:
+            w, s, e, p = entry[0], float(entry[1]), float(entry[2]), entry[3]
             if _norm(w) not in word_set:
                 continue
             key = (r["id"], _norm(w), round(s, 3))
@@ -122,12 +111,11 @@ def collect_hits(rows: list[dict], word_set: set[str]) -> list[dict]:
 
 
 def chunks_without_timestamps(rows: list[dict]) -> list[str]:
-    """IDs of rendered chunks with no word timing data (neither word_times nor flag_words)."""
+    """IDs of rendered chunks with no word_times field."""
     rendered = {"done", "qc_fail", "manual", "reused"}
     return [r["id"] for r in rows
             if r.get("status") in rendered
-            and r.get("word_times") is None
-            and "flag_words" not in r]
+            and r.get("word_times") is None]
 
 
 def _mmss(total_s: float) -> str:
@@ -139,8 +127,8 @@ def slice_wav(data: np.ndarray, sr: int, start_s: float,
               end_s: float | None, pad_s: float) -> np.ndarray:
     """Extract data[start_s−pad_s : end_s+pad_s], clamped to file boundaries.
 
-    When end_s is None (flag_words fallback): start_s is treated as the word
-    centre and the window is [start_s−pad_s, start_s+pad_s].
+    When end_s is None: start_s is treated as the word centre and the window
+    is [start_s−pad_s, start_s+pad_s] (legacy fallback, not used in production).
     """
     n = len(data)
     a = max(0, int((start_s - pad_s) * sr))
@@ -219,31 +207,36 @@ def run(config: dict, section: str | None, words_arg: list[str]) -> int:
     rows = _read_manifest(manifest_path)
     chunks_dir = sec_dir / "chunks"
 
-    # ── report chunks with no timing data at all ─────────────────────────────
+    # ── verify word_times coverage ────────────────────────────────────────────
     no_ts = chunks_without_timestamps(rows)
     if no_ts:
-        print(f"нет таймкодов слов в {len(no_ts)} чанках (word_times и flag_words отсутствуют):")
+        print(f"нет word_times в {len(no_ts)} чанках (нужен повторный QC):")
         for cid in no_ts:
             print(f"  {cid}")
 
-    has_any_ts = any(
-        r.get("word_times") is not None or "flag_words" in r for r in rows
-    )
-    if not has_any_ts:
+    has_any_wt = any(r.get("word_times") is not None for r in rows)
+    if not has_any_wt:
         raise SystemExit(
-            f"{section}: ни один чанк не имеет таймкодов слов — сначала выполните qc"
+            f"{section}: word_times отсутствуют — выполните: "
+            f"./run.sh qc-words --section {section}"
+        )
+
+    if no_ts:
+        raise SystemExit(
+            f"{section}: {len(no_ts)} чанков без word_times — результат будет неполным. "
+            f"Запустите: ./run.sh qc-words --section {section}"
         )
 
     word_set = _word_set(words_arg)
     if not word_set:
         raise SystemExit("нет слов для поиска: файлы источников пусты или не существуют")
 
-    # Sort hits by manifest order then by time within chunk
     hits = collect_hits(rows, word_set)
     if not hits:
-        print(f"{section}: вхождений слов не найдено в таймкодах")
+        print(f"{section}: вхождений слов не найдено в word_times")
         return 0
 
+    # Sort by manifest order then by time within chunk
     id_order = {r["id"]: i for i, r in enumerate(rows)}
     hits.sort(key=lambda h: (id_order.get(h["id"], 9999), h["start_s"]))
 
@@ -262,7 +255,6 @@ def run(config: dict, section: str | None, words_arg: list[str]) -> int:
                 else:
                     index = read_index(idx_path)
             else:
-                # old 3-column index — cannot verify identity; skip it
                 print("предупреждение: index.tsv без колонки hash16; "
                       "проверка невозможна, section_time будет «?»")
         except Exception as exc:

@@ -202,6 +202,9 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("section")
     ac.add_argument("chunk_id")
     ac.add_argument("variant", type=int, help="номер варианта (1-based)")
+    qw = sub.add_parser("qc-words",
+                        help="добавить word_times к отрендеренным чанкам без ре-синтеза")
+    qw.add_argument("--section", required=True)
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
@@ -233,12 +236,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # Commands that write the book's cache/manifests: never with a trial config.
-_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "redo", "assemble", "master",
-                     "headings", "credits", "export"}
+_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "qc-words", "accept", "redo", "assemble",
+                     "master", "headings", "credits", "export"}
 # Commands that load a model or rewrite a section: one at a time (heavy.lock).
-_HEAVY = {"chunk", "synth", "qc", "accept", "redo", "pron-test", "ref-compare",
-          "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate",
-          "credits", "passage"}
+_HEAVY = {"chunk", "synth", "qc", "qc-words", "accept", "redo", "pron-test",
+          "ref-compare", "ref-scout", "phoneme-check", "headings", "bench",
+          "pick-ref", "calibrate", "credits", "passage"}
 
 
 def _dispatch(a) -> int:
@@ -381,6 +384,9 @@ def _dispatch(a) -> int:
     if a.cmd == "qc":
         from .qc import run as qc
         return qc(load_config(), a.section)
+    if a.cmd == "qc-words":
+        from .qc import run_words_only
+        return run_words_only(load_config(), a.section)
     if a.cmd == "assemble":
         from .assemble import run as assemble
         return assemble(load_config(), a.section, a.first)

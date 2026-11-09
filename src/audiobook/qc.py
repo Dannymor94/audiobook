@@ -282,7 +282,8 @@ def _measure(model, wav_path: Path, text: str, watch: set[str], min_conf: float)
     return {"transcript": txt, "flag_words": flags,
             "word_diff": ";".join(f"{d['ref']}→{d['hyp']}:{d['class']}" for d in diffs),
             "cer": round(cer(text, txt), 4), "min_p": min_p, "mean_p": mean_p,
-            "peak": wav_peak(wav_path)}
+            "peak": wav_peak(wav_path),
+            "word_times": [[w["w"], w["s"], w["e"], w.get("p")] for w in words]}
 
 
 def run(config: dict, section: str | None = None) -> int:
@@ -517,3 +518,51 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
 def _write_manifest_rows(path, rows) -> None:
     from audiobook.synth import _write_manifest
     _write_manifest(path, rows)
+
+
+def run_words_only(config: dict, section: str | None = None) -> int:
+    """Add word_times to manifest rows that lack it, without re-synthesising.
+
+    Safe to run on sections with manual/done/qc_fail chunks: statuses, flags,
+    CER and seed are never touched. Skips chunks that already have word_times.
+    Idempotent and resumable: each write is atomic.
+    """
+    if not section:
+        raise SystemExit("qc-words: --section обязателен")
+    from audiobook.synth import _read_manifest, _write_manifest
+
+    sec_dir = paths.OUT / "sections" / section
+    manifest_path = sec_dir / "manifest.jsonl"
+    if not manifest_path.exists():
+        raise SystemExit(f"нет манифеста для секции {section}: {sec_dir}")
+    chunks_dir = sec_dir / "chunks"
+    rows = _read_manifest(manifest_path)
+
+    rendered = {"done", "qc_fail", "manual", "reused"}
+
+    def needs_words(r: dict) -> bool:
+        return (r.get("status") in rendered
+                and r.get("word_times") is None
+                and (chunks_dir / f"{r['id']}.wav").exists())
+
+    todo = [r for r in rows if needs_words(r)]
+    if not todo:
+        already = sum(1 for r in rows if r.get("word_times") is not None)
+        print(f"{section}: word_times уже есть у всех чанков ({already})")
+        return 0
+
+    from audiobook.probe import load_watch
+    watch = {_norm_word(w) for w in load_watch()}
+    min_conf = float(config["qc"].get("word_conf", 0.6))
+
+    wm = load_whisper()
+    try:
+        for r in todo:
+            m = _measure(wm, chunks_dir / f"{r['id']}.wav", r["text"], watch, min_conf)
+            r["word_times"] = m["word_times"]   # only add word_times; nothing else changes
+    finally:
+        _release(wm)
+
+    _write_manifest(manifest_path, rows)
+    print(f"{section}: word_times добавлен к {len(todo)} чанкам")
+    return 0
