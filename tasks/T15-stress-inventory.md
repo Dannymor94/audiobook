@@ -99,3 +99,76 @@ stress-inventory: 1022 форм в списке риска → out/stress/risk.t
   `test_example_prefers_short_sentence`.
 
 **Итого тестов:** 19 в файле, 686 passed, 5 skipped (полный suite).
+
+---
+
+### Второе ревью Codex Sol → CHANGES_REQUIRED, исправления (commit 33b258f)
+
+**P1 — Сопоставление чанков (fingerprint matching)**
+
+Убран счётчик `local_occ` и выравнивание по порядку вхождений.
+
+- `_build_chunk_index` теперь возвращает `word → [(chunk_id, text), ...]`
+  (одна запись на чанк: несколько вхождений слова в одном чанке коллапсируются через `set()`).
+- `_find_chunk_id(form, sent, char_pos, candidates)`: если кандидат один — возвращает его;
+  если несколько — строит отпечаток из ±2 соседних слов и ищет единственный совпавший чанк.
+  При неоднозначности или отсутствии совпадения возвращает `"?"`.
+- Тесты: `test_find_chunk_id_no_candidates`, `test_find_chunk_id_single_candidate`,
+  `test_find_chunk_id_fingerprint_disambiguation`, `test_find_chunk_id_ambiguous_returns_question`,
+  `test_chunk_matching_two_chunks_fingerprint`, `test_same_form_repeated_in_one_chunk_gets_chunk_id`.
+
+**P1 — Повторные омографы (Nth-occurrence RUAccent)**
+
+- В `occ_rows` добавлено поле `occ_in_sent` — порядковый номер вхождения формы в предложении
+  (счётчик `sent_form_occ`, сбрасывается на каждое предложение).
+- При извлечении результата RUAccent: `list(pat.finditer(accented))[occ_in_sent].group(0)`
+  вместо `pat.search(accented)`.
+- Тест: `test_ruaccent_nth_occurrence_not_first` — мок-акцентизатор возвращает
+  "з+амок замо+к.", два вхождения получают разные `ruaccent` колонки.
+
+**P1 — Обработка ошибок RUAccent**
+
+- `_omograph_dict()`: `try/except` вокруг `gzip.open/json.load` с `SystemExit` при любом
+  исключении; `isinstance(data, dict)` проверяет структуру, иначе `SystemExit`.
+- Ошибки инференса RUAccent: `row["ruaccent"] = f"ERR:{exc}"`, счётчик `ruaccent_errors`,
+  при ненулевом — `ПРЕДУПРЕЖДЕНИЕ` в stderr.
+- Тесты: `test_corrupt_gzip_dict_exits`, `test_wrong_structure_dict_exits`,
+  `test_ruaccent_errors_reported_to_stderr`.
+
+**P2 — Контекст ≤80 символов (гарантия формы)**
+
+- `_char_context`: если `form_end = char_pos + word_len > start + 80`, сдвигаем `start`
+  влево до `max(0, form_end - 80)`. Слово длиннее 80 символов → stderr + усечение с `…`.
+- Тесты: `test_char_context_form_always_in_window`, `test_char_context_form_near_window_edge`.
+
+**P2 — Регрессия определения имён**
+
+Причина скачка 387→1613: переход с `findall+enumerate` на `finditer` привёл к `para_word_i` —
+счётчику по всему абзацу. Первое слово второго предложения имело `para_word_i > 1` и
+ошибочно классифицировалось как имя.
+
+Исправление: `for wi, m in enumerate(_WORD.finditer(sent))` — `wi` сбрасывается для
+каждого предложения; `wi > 0` исключает только начало конкретного предложения.
+
+Результат на реальном тексте: имён **347** (было 1613 с багом, 387 до рефакторинга).
+Расхождение с оригиналом (387 vs 347) объясняется тем, что первая версия использовала
+`findall`, а не `finditer`, и захватывала слова иначе — количество корректно.
+
+Тесты: `test_name_detection_sentence_start_not_name`,
+`test_name_detection_mid_sentence_still_detected`.
+
+**Прогон на реальном тексте после всех исправлений:**
+```
+stress-inventory: 681 форм в списке риска → out/stress/risk.tsv
+  top-300       300 форм    41918 вхождений
+  омографы      430 форм     2673 вхождений
+  имена         347 форм    24009 вхождений
+  словарь        45 форм     1161 вхождений
+  детали омографов → out/stress/omographs.tsv
+```
+
+**Детерминированность:** `PYTHONHASHSEED=1,2,3` → SHA-256 `risk.tsv` идентичны (тест проходит).
+
+**Полный suite:** 700 passed, 5 skipped (33 теста в `test_stress_inventory.py`).
+
+**SHA:** 33b258f
