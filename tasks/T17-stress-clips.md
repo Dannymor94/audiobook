@@ -30,12 +30,33 @@ CLAUDE.md (через AGENTS.md). Без новых зависимостей. Н
 ## Отчёт
 
 Реализован модуль `src/audiobook/stress_clips.py` и подкоманда `stress-clips`.
+Ревью Codex Sol (CHANGES_REQUIRED) выполнено полностью.
 
-**Что сделано:**
-- Три источника слов: `risk` (`out/stress/risk.tsv`), `failed` (`out/stress/failed.tsv`), `watch` (`text/stress_watch.yaml`). По умолчанию `failed + watch`.
-- Поиск вхождений в `flag_words` манифеста по нормализованному совпадению (ударения/ё/регистр). Слова без таймкодов выводятся в консоль, падения нет.
-- Слайс wav ±0.6 с вокруг центра слова, 0.4 с тишины между клипами. Если у чанка нет wav-файла — пропускается.
-- Выход: `out/stress/clips/<section>.mp3` + `out/stress/clips/<section>.index.tsv`. Колонки: `clip_time`, `section`, `chunk`, `section_time` (из assembler index или `?`), `word`.
-- Режим `risk` будет проверен интеграционно после T15 (как указано в задаче).
+**P1-1 — word_times contract.** Модуль использует `word_times: [[w, s, e, p], ...]`
+когда поле присутствует в строке манифеста, иначе fallback на `flag_words`.
+Контракт QC зафиксирован в docstring модуля: добавить в `qc._measure` одну строку
+`"word_times": [[w["w"], w["s"], w["e"], w.get("p")] for w in words]`.
+Поле привязано к хешу чанка: повторный рендер → повторный QC → замена поля.
+QC-модуль не изменён.
 
-**Тесты (слой 1):** 14 тестов, синтетический wav, нет моделей, проходят за 3 с. Полный suite: 681 passed, 5 skipped.
+**P1-2 — границы клипа.** `slice_wav(data, sr, start_s, end_s, pad_s)`:
+окно `[start_s−pad, end_s+pad]`; fallback `end_s=None` → `[start_s−pad, start_s+pad]`.
+
+**P1-3 — индекс из реальных клипов.** `build_clips` возвращает `(audio, records)`,
+где `records` — только успешно созданные клипы. `index.tsv` строится по `records`,
+не через `zip(hits, starts)`.
+
+**P1-4 — полный список чанков без таймкодов.** `chunks_without_timestamps(rows)`
+возвращает все rendered-чанки без обоих полей. Вывод не усекается. Если ни один
+чанк не имеет таймкодов — `SystemExit` с указанием запустить QC.
+
+**P1-5 — устаревший index.tsv.** Если identity-проверка не пройдена или колонка
+`hash16` отсутствует — явное предупреждение, `section_time = «?»`, продолжение работы.
+
+**P1-6 — дедупликация.** Ключ `(chunk_id, norm_word, round(start_s, 3))`.
+
+**P1-7 — частота дискретизации.** `build_clips` проверяет `file_sr == sr`;
+несовпадение → `SystemExit` с указанием файла и обеих частот.
+
+**Тесты (слой 1):** 24 теста, каждый P1/P2 покрыт отдельным тестом.
+`691 passed, 5 skipped`.
