@@ -120,6 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="места для прослушки (после qc + assemble) → <stem>.suspects.tsv")
     su.add_argument("--section", required=True)
     su.add_argument("--first", type=int, default=None)
+    sc = sub.add_parser("stress-clips",
+                        help="клипы слов риска/ловушек по таймкодам Whisper → out/stress/clips/")
+    sc.add_argument("--section", required=True)
+    sc.add_argument("--words", nargs="+", choices=["risk", "failed", "watch"],
+                    default=["failed", "watch"],
+                    help="источники слов: risk failed watch (default: failed watch)")
     jo = sub.add_parser("joins",
                         help="метрики стыков чанков (F0, темп, громкость) → <stem>.joins.tsv")
     jo.add_argument("--section", required=True)
@@ -317,6 +323,9 @@ def _dispatch(a) -> int:
     if a.cmd == "suspects":
         from .suspects import run as suspects
         return suspects(load_config(), a.section, a.first)
+    if a.cmd == "stress-clips":
+        from .stress_clips import run as stress_clips
+        return stress_clips(load_config(), a.section, a.words)
     if a.cmd == "joins":
         from .joins import run as joins
         return joins(load_config(), a.section, a.first)
