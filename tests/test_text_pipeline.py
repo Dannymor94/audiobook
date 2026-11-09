@@ -1139,6 +1139,11 @@ def test_open_end_ellipsis_emdash():
     assert _pt("Он шёл—", _cfg(open_end="ellipsis"), open_end=True) == "Он шёл…"
 
 
+def test_open_end_ellipsis_internal_emdash():
+    """open_end=True, mode=ellipsis: internal em-dash must NOT be stripped (T10 regression)."""
+    assert _pt("А — Б", _cfg(open_end="ellipsis"), open_end=True) == "А — Б…"
+
+
 def test_open_end_false_modes_do_not_fire():
     """open_end=False: none/ellipsis modes must NOT fire; ensure_terminal still applies."""
     text = "Введение"  # heading without terminal — not a continuation chunk
