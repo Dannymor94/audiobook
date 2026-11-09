@@ -1,0 +1,8 @@
+# Verified stress forms — excluded from risk.tsv.
+# One lowercase form per entry. After confirming by ear,
+# add the form here so it stops appearing in the report.
+#
+# verified:
+#   - стоит
+#   - руки
+verified: []

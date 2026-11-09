@@ -172,6 +172,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="папка или файл с эталонными записями (только для сравнения)")
     sub.add_parser("pron-audit",
                    help="аудит text/pronounce.yaml: срабатывания по книге, мёртвые записи → out/pron_audit.tsv")
+    si = sub.add_parser("stress-inventory",
+                        help="инвентарь ударений: омографы и список риска → out/stress/risk.tsv")
+    si.add_argument("--top-n", type=int, default=None,
+                    help="топ-N частых форм (default: stress.top_n из config или 300)")
     qsec = qs.add_parser("section", help="вся секция в очередь: chunk→synth→qc→assemble→master→suspects")
     qsec.add_argument("section")
     qsec.add_argument("--workers", type=int, default=2, help="воркеров synth (default 2)")
@@ -355,6 +359,12 @@ def _dispatch(a) -> int:
     if a.cmd == "pron-audit":
         from .pron_audit import run as pron_audit
         return pron_audit(load_config())
+    if a.cmd == "stress-inventory":
+        from .stress_inventory import run as stress_inventory
+        cfg = load_config()
+        if a.top_n is not None:
+            cfg.setdefault("stress", {})["top_n"] = a.top_n
+        return stress_inventory(cfg)
     if a.cmd == "review":
         from .review import run as review
         return review(a.dir, a.title, a.meta)
