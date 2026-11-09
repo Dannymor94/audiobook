@@ -420,3 +420,300 @@ def test_example_prefers_short_sentence(tmp_path):
     rows = {r.split("\t")[0]: r.split("\t")[3] for r in risk[1:]}
     example = rows.get("замок", "")
     assert example == "Замок закрыт.", f"Short sentence not preferred: {example!r}"
+
+
+# ── Second Codex review: regression tests ────────────────────────────────────
+# P1: chunk fingerprint matching
+
+def test_find_chunk_id_no_candidates():
+    """Word absent from manifest → '?'."""
+    from audiobook.stress_inventory import _find_chunk_id
+    assert _find_chunk_id("замок", "Старый замок.", 7, []) == "?"
+
+
+def test_find_chunk_id_single_candidate():
+    """Single candidate returned without fingerprint logic."""
+    from audiobook.stress_inventory import _find_chunk_id
+    r = _find_chunk_id("замок", "Старый замок крепкий.", 7,
+                       [("0001", "Старый замок крепкий.")])
+    assert r == "0001"
+
+
+def test_find_chunk_id_fingerprint_disambiguation(tmp_path):
+    """Two chunks with the same form; fingerprint picks the correct one."""
+    from audiobook.stress_inventory import _find_chunk_id
+    candidates = [
+        ("0001", "Старый замок был крепким."),
+        ("0002", "Новый замок блестел на солнце."),
+    ]
+    r1 = _find_chunk_id("замок", "Старый замок был крепким.", 7, candidates)
+    r2 = _find_chunk_id("замок", "Новый замок блестел на солнце.", 6, candidates)
+    assert r1 == "0001", f"Expected 0001, got {r1!r}"
+    assert r2 == "0002", f"Expected 0002, got {r2!r}"
+
+
+def test_find_chunk_id_ambiguous_returns_question():
+    """Fingerprint matches multiple candidates → '?'."""
+    from audiobook.stress_inventory import _find_chunk_id
+    # Identical chunk texts → fingerprint cannot disambiguate
+    candidates = [("0001", "замок"), ("0002", "замок")]
+    r = _find_chunk_id("замок", "замок", 0, candidates)
+    assert r == "?", f"Expected '?', got {r!r}"
+
+
+def test_chunk_matching_two_chunks_fingerprint(tmp_path):
+    """Full pipeline: two chunks with same form get correct ids via fingerprint."""
+    import json, audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {
+        "01_ch.norm.txt": "Старый замок стоял там. Новый замок блестел здесь.",
+    })
+    sec_dir = root / "out" / "sections" / "01_ch"
+    sec_dir.mkdir(parents=True)
+    manifest = [
+        {"id": "0001", "n": 1, "text": "Старый замок стоял там.", "hash": "a",
+         "status": "done", "pause_after_ms": 900, "locked": False, "duration_ms": 1000},
+        {"id": "0002", "n": 2, "text": "Новый замок блестел здесь.", "hash": "b",
+         "status": "done", "pause_after_ms": 900, "locked": False, "duration_ms": 1000},
+    ]
+    with open(sec_dir / "manifest.jsonl", "w", encoding="utf-8") as f:
+        for row in manifest:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    occ_path = root / "out" / "stress" / "omographs.tsv"
+    rows = [r.split("\t") for r in occ_path.read_text(encoding="utf-8").splitlines()[1:]]
+    zamok_rows = [r for r in rows if r[0] == "замок"]
+    assert len(zamok_rows) == 2, f"Expected 2 zamok rows, got {len(zamok_rows)}"
+    # Both occurrences should map to their respective chunks
+    assert zamok_rows[0][2] == "0001", f"First замок: expected 0001, got {zamok_rows[0][2]!r}"
+    assert zamok_rows[1][2] == "0002", f"Second замок: expected 0002, got {zamok_rows[1][2]!r}"
+
+
+def test_same_form_repeated_in_one_chunk_gets_chunk_id(tmp_path):
+    """Form repeated multiple times in ONE chunk → both get same chunk_id (not '?')."""
+    import json, audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {
+        "01_ch.norm.txt": "Замок замок замок.",
+    })
+    sec_dir = root / "out" / "sections" / "01_ch"
+    sec_dir.mkdir(parents=True)
+    manifest = [
+        {"id": "0001", "n": 1, "text": "Замок замок замок.", "hash": "x",
+         "status": "done", "pause_after_ms": 900, "locked": False, "duration_ms": 1000},
+    ]
+    with open(sec_dir / "manifest.jsonl", "w", encoding="utf-8") as f:
+        f.write(json.dumps(manifest[0], ensure_ascii=False) + "\n")
+
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    occ_path = root / "out" / "stress" / "omographs.tsv"
+    rows = [r.split("\t") for r in occ_path.read_text(encoding="utf-8").splitlines()[1:]]
+    zamok_rows = [r for r in rows if r[0] == "замок"]
+    # All three occurrences should map to 0001 (single candidate, no ambiguity)
+    for i, r in enumerate(zamok_rows):
+        assert r[2] == "0001", f"Occurrence {i}: expected 0001, got {r[2]!r}"
+
+
+# P1: RUAccent per-occurrence extraction
+
+def test_ruaccent_nth_occurrence_not_first(tmp_path):
+    """Each occurrence of a repeated form gets its own RUAccent result.
+
+    Uses a mock accentizer that returns different stress marks for
+    the first and second occurrence of 'замок' in the sentence.
+    """
+    from unittest.mock import patch
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {
+        "01_ch.norm.txt": "замок замок.",
+    })
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    # Mock returns "з+амок замо+к." — first has stress on а, second on о
+    def mock_process(sent):
+        return "з+амок замо+к."
+
+    try:
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=mock_process):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    occ_path = root / "out" / "stress" / "omographs.tsv"
+    rows = [r.split("\t") for r in occ_path.read_text(encoding="utf-8").splitlines()[1:]]
+    zamok_rows = [r for r in rows if r[0] == "замок"]
+    assert len(zamok_rows) == 2, f"Expected 2 occurrences, got {len(zamok_rows)}"
+    # ruaccent column is index 5
+    r1, r2 = zamok_rows[0][5], zamok_rows[1][5]
+    assert r1 != r2, (
+        f"Both occurrences got same ruaccent {r1!r} — Nth-match extraction not working"
+    )
+
+
+# P1: RUAccent error handling
+
+def test_corrupt_gzip_dict_exits(tmp_path):
+    """Corrupt gzip file raises SystemExit (blocked condition)."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок."},
+                             with_omograph_dict=False)
+    (root / "models" / "dictionary" / "omographs.json.gz").write_bytes(b"not valid gzip")
+
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        with pytest.raises(SystemExit):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_wrong_structure_dict_exits(tmp_path):
+    """Dict containing a list instead of a dict raises SystemExit."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок."},
+                             with_omograph_dict=False)
+    with gzip.open(root / "models" / "dictionary" / "omographs.json.gz",
+                   "wt", encoding="utf-8") as f:
+        json.dump(["not", "a", "dict"], f)
+
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        with pytest.raises(SystemExit):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_ruaccent_errors_reported_to_stderr(tmp_path, capsys):
+    """RUAccent inference errors appear on stderr, not silently discarded."""
+    from unittest.mock import patch
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    def bad_process(sent):
+        raise RuntimeError("model failure")
+
+    try:
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=bad_process):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    captured = capsys.readouterr()
+    assert "ПРЕДУПРЕЖДЕНИЕ" in captured.err or "ERR:" in captured.err or \
+           "ошибок" in captured.err, \
+        f"RUAccent error not reported to stderr: {captured.err!r}"
+
+
+# P2: _char_context form guarantee
+
+def test_char_context_form_always_in_window():
+    """_char_context always includes the full form, even when it lies near the edge."""
+    from audiobook.stress_inventory import _char_context
+
+    # Form starts at char 70 — with start=30 and window of 80, form_end=75 is within range
+    sent = "а" * 70 + "замок" + "б" * 70
+    ctx = _char_context(sent, 70, 5)
+    assert len(ctx) <= 80
+    assert "замок" in ctx, f"Form not in context: {ctx!r}"
+
+
+def test_char_context_form_near_window_edge():
+    """When form_end > start+80, start is shifted leftward to include the form."""
+    from audiobook.stress_inventory import _char_context
+
+    # char_pos=0 (start of sentence), word_len=5: start=0, form_end=5 ≤ 80 → no shift needed
+    sent = "замок" + "а" * 100
+    ctx = _char_context(sent, 0, 5)
+    assert "замок" in ctx
+
+    # char_pos=50, word_len=45: start=10, form_end=95 > start+80=90 → start shifts to 15
+    sent2 = "а" * 50 + "б" * 45 + "в" * 50
+    ctx2 = _char_context(sent2, 50, 45)
+    assert len(ctx2) <= 80
+    # form = sent2[50:95] must be in ctx2
+    form_text = sent2[50:95]
+    assert ctx2 in sent2  # ctx2 must be a substring of sent2
+    assert sent2.index(ctx2) <= 50 <= sent2.index(ctx2) + 80
+
+
+# P2: name detection — sentence-level wi
+
+def test_name_detection_sentence_start_not_name(tmp_path):
+    """First word of SECOND sentence is NOT classified as a name.
+
+    Regression for the para_word_i bug: when tracking word index across
+    the whole paragraph, the first word of the second sentence had
+    para_word_i > 1 and was wrongly classified as a name.
+    """
+    _, risk, _ = _run(tmp_path, {
+        "01_ch.norm.txt": "Слово раз два. Второй пункт списка.",
+    }, omographs={})
+    reasons = {r.split("\t")[0]: r.split("\t")[2] for r in risk[1:]}
+    # 'второй' starts the second sentence → must NOT be classified as name
+    assert "name" not in reasons.get("второй", ""), (
+        f"'второй' falsely classified as name: {reasons.get('второй')!r}"
+    )
+
+
+def test_name_detection_mid_sentence_still_detected(tmp_path):
+    """Capitalised word at wi>0 within a sentence IS classified as name."""
+    _, risk, _ = _run(tmp_path, {
+        "01_ch.norm.txt": "Сказал Иван тихо. Следующее предложение.",
+    }, omographs={})
+    reasons = {r.split("\t")[0]: r.split("\t")[2] for r in risk[1:]}
+    assert "name" in reasons.get("иван", ""), (
+        f"'иван' not classified as name: {reasons.get('иван')!r}"
+    )

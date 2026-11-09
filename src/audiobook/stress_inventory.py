@@ -4,12 +4,13 @@ Produces:
   out/stress/risk.tsv      — aggregated risk list (top/homograph/name/dict)
   out/stress/omographs.tsv — per-occurrence detail for dictionary homographs
 
-No synthesis models required. RUAccent accentizer used only if models/ present
-(for context-resolved variant column in omographs.tsv); otherwise shows options.
+No synthesis models required. RUAccent used only if models/ present.
+Outputs are written atomically (temp → rename); a failed run never
+overwrites a previous result with partial data.
 
-Exit code 1 + message if models/dictionary/omographs.json.gz is missing.
-Outputs are written atomically (temp → rename) so a previous run is never
-left as an apparently-current result when this run fails.
+Fatal conditions (SystemExit, non-zero):
+  • models/dictionary/omographs.json.gz absent or unreadable
+  • omographs.json.gz has wrong structure (not a {str: [str, ...]} dict)
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import gzip
 import json
 import os
 import re
+import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -30,15 +32,28 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 # ── loaders ───────────────────────────────────────────────────────────────────
 
 def _omograph_dict() -> dict[str, list[str]]:
-    """Load omograph dictionary.  Missing file is a fatal error (blocked)."""
+    """Load omograph dictionary.  Missing or corrupt file is a fatal error."""
     p = paths.MODELS / "dictionary" / "omographs.json.gz"
     if not p.exists():
         raise SystemExit(
             f"stress-inventory: словарь омографов не найден: {p}\n"
             "Скопируй models/dictionary/ из хранилища проекта.  Статус: blocked."
         )
-    with gzip.open(p, "rt", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with gzip.open(p, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise SystemExit(
+            f"stress-inventory: словарь омографов повреждён: {p}\n"
+            f"  {exc}\nСтатус: blocked."
+        ) from None
+    if not isinstance(data, dict):
+        raise SystemExit(
+            f"stress-inventory: неверная структура словаря "
+            f"(ожидался dict, получен {type(data).__name__}): {p}\n"
+            "Статус: blocked."
+        )
+    return data
 
 
 def _load_verified(p: Path) -> set[str]:
@@ -80,10 +95,10 @@ def _load_watch_forms(p: Path) -> set[str]:
     return result
 
 
-# ── chunk-number index ────────────────────────────────────────────────────────
+# ── chunk index ───────────────────────────────────────────────────────────────
 
-def _build_chunk_index(section: str) -> dict[str, list[str]]:
-    """word (lowercase) → [chunk_id, ...] in text order, from manifest.
+def _build_chunk_index(section: str) -> dict[str, list[tuple[str, str]]]:
+    """word (lowercase) → [(chunk_id, chunk_text), ...], one entry per chunk.
 
     Returns empty dict when no manifest exists (graceful degradation;
     chunk_id column will show '?' for that section).
@@ -94,14 +109,48 @@ def _build_chunk_index(section: str) -> dict[str, list[str]]:
     try:
         from audiobook.chunker import _read_manifest
         rows = _read_manifest(manifest_path)
-        idx: dict[str, list[str]] = {}
+        idx: dict[str, list[tuple[str, str]]] = {}
         for row in rows:
+            chunk_id = row.get("id", "?")
             text = row.get("text") or ""
-            for word in _WORD.findall(text.lower()):
-                idx.setdefault(word, []).append(row["id"])
+            # One entry per (word, chunk): multiple occurrences of a word
+            # inside the same chunk collapse to one entry.
+            for word in set(_WORD.findall(text.lower())):
+                idx.setdefault(word, []).append((chunk_id, text))
         return idx
     except Exception:
         return {}
+
+
+def _find_chunk_id(form: str, sent: str, char_pos: int,
+                   candidates: list[tuple[str, str]]) -> str:
+    """Match one occurrence to a manifest chunk by text fingerprint.
+
+    Uses ±2 adjacent words as a fingerprint.  Returns chunk_id only when
+    exactly one candidate matches; otherwise '?' (ambiguous or no match).
+    This is safer than occurrence-order alignment, which breaks when the
+    manifest and norm.txt diverge.
+    """
+    if not candidates:
+        return "?"
+    if len(candidates) == 1:
+        return candidates[0][0]
+
+    # Gather adjacent words for a 5-word fingerprint centred on the target
+    all_ms = list(_WORD.finditer(sent))
+    target_wi = next((i for i, m in enumerate(all_ms) if m.start() == char_pos), None)
+    if target_wi is None:
+        return "?"
+
+    window = all_ms[max(0, target_wi - 2): target_wi + 3]
+    fp_words = [m.group().lower() for m in window]
+
+    matched = [cid for cid, ctext in candidates
+               if all(w in ctext.lower() for w in fp_words)]
+    # dict.fromkeys preserves order and removes duplicates (a chunk can appear
+    # only once in candidates, but be defensive anyway)
+    matched = list(dict.fromkeys(matched))
+    return matched[0] if len(matched) == 1 else "?"
 
 
 # ── text helpers ──────────────────────────────────────────────────────────────
@@ -111,12 +160,26 @@ def _split_sentences(para: str) -> list[str]:
 
 
 def _char_context(sent: str, char_pos: int, word_len: int) -> str:
-    """Context window around char_pos, guaranteed ≤80 chars, always contains the word.
+    """Context window, guaranteed ≤80 chars, always contains the full form.
 
-    Slices ±40 from the word's start, then truncates to 80.  For any realistic
-    Russian word (len≪40), the word itself is well within the 80-char window.
+    If word_len > 80 (impossible for Russian), returns start of the form
+    with an ellipsis and reports the limitation rather than silently truncating.
     """
+    if word_len > 80:
+        # Can't fit the form in 80 chars; return what we can with an indicator.
+        print(
+            f"  ПРЕДУПРЕЖДЕНИЕ: форма длиннее 80 символов ({word_len}) — "
+            "контекст обрезан",
+            file=sys.stderr,
+        )
+        return sent[char_pos: char_pos + 79] + "…"
+
+    # Ideal window: 40 chars before the word's start
     start = max(0, char_pos - 40)
+    # Guarantee the form END is within [start : start+80]
+    form_end = char_pos + word_len
+    if form_end > start + 80:
+        start = max(0, form_end - 80)
     return sent[start: start + 80]
 
 
@@ -154,24 +217,21 @@ def _atomic_write(path: Path, content: str) -> None:
 def run(config: dict) -> int:
     top_n = int((config.get("stress") or {}).get("top_n", 300))
 
-    omographs = _omograph_dict()          # raises SystemExit if missing
+    omographs = _omograph_dict()      # SystemExit if missing / corrupt / wrong type
     verified = _load_verified(paths.TEXT / "stress_verified.yaml")
     pronounce_forms = _load_pronounce_forms(paths.TEXT / "pronounce.yaml")
     watch_forms = _load_watch_forms(paths.TEXT / "stress_watch.yaml")
 
     form_count: Counter[str] = Counter()
-    # form → shortest sentence ≤80 chars, or ±40 context snippet if none
-    form_example: dict[str, str] = {}     # best example so far
-    form_example_len: dict[str, int] = {} # length of stored sentence (inf for snippet)
+    form_example: dict[str, str] = {}       # form → best example text
+    form_example_len: dict[str, int] = {}   # len of stored sentence; 999 = snippet
     name_forms: set[str] = set()
     occ_rows: list[dict] = []
-    occ_sents: list[str] = []  # parallel to occ_rows, for RUAccent
+    occ_sents: list[str] = []  # parallel to occ_rows, sentence for RUAccent
 
     for norm_path in sorted(paths.TEXT.glob("[0-9][0-9]_*.norm.txt")):
         section = norm_path.stem.replace(".norm", "")
         chunk_index = _build_chunk_index(section)
-        # per-section occurrence counter for each word form → chunk lookup
-        local_occ: Counter[str] = Counter()
 
         for para in norm_path.read_text(encoding="utf-8").splitlines():
             para = para.strip()
@@ -179,19 +239,19 @@ def run(config: dict) -> int:
                 continue
             sents = _split_sentences(para)
 
-            # Track word index across the whole paragraph for name detection
-            para_word_i = 0
+            for sent in sents:
+                # Reset per-sentence occurrence counter for chunk and RUAccent lookup
+                sent_form_occ: Counter[str] = Counter()
 
-            for si, sent in enumerate(sents):
-                for m in _WORD.finditer(sent):
+                for wi, m in enumerate(_WORD.finditer(sent)):
                     word = m.group()
                     lower = word.lower()
                     char_pos = m.start()
-                    para_word_i += 1
 
                     form_count[lower] += 1
 
-                    # Example: prefer sentence ≤80 chars; fallback = ±40 snippet
+                    # Example: prefer the shortest sentence ≤80 chars;
+                    # fallback = ±40 context snippet (always ≤80, always contains form)
                     stripped = sent.strip()
                     slen = len(stripped)
                     snippet = _char_context(sent, char_pos, len(word))
@@ -201,23 +261,26 @@ def run(config: dict) -> int:
                             form_example_len[lower] = slen
                         else:
                             form_example[lower] = snippet
-                            form_example_len[lower] = 999  # sentinel: snippet stored
-                    else:
-                        prev_len = form_example_len[lower]
-                        if slen <= 80 and slen < prev_len:
-                            form_example[lower] = stripped
-                            form_example_len[lower] = slen
+                            form_example_len[lower] = 999
+                    elif slen <= 80 and slen < form_example_len[lower]:
+                        form_example[lower] = stripped
+                        form_example_len[lower] = slen
 
-                    # Name: capital letter, not at word-index-0 in paragraph
-                    if word[0].isupper() and para_word_i > 1:
+                    # Name: capitalised at non-sentence-start.
+                    # wi is per-sentence (resets for each sentence), so the
+                    # first word of every sentence is correctly excluded.
+                    if word[0].isupper() and wi > 0:
                         name_forms.add(lower)
 
                     # Omograph: form has >1 accentuation in dict
                     if lower in omographs and len(omographs[lower]) > 1:
-                        occ_n = local_occ[lower]
-                        local_occ[lower] += 1
-                        ids = chunk_index.get(lower, [])
-                        chunk_id = ids[occ_n] if occ_n < len(ids) else "?"
+                        occ_in_sent = sent_form_occ[lower]
+                        sent_form_occ[lower] += 1
+                        candidates = chunk_index.get(lower, [])
+                        chunk_id = _find_chunk_id(
+                            form=lower, sent=sent,
+                            char_pos=char_pos, candidates=candidates,
+                        )
                         occ_rows.append({
                             "form": lower,
                             "section": section,
@@ -225,26 +288,40 @@ def run(config: dict) -> int:
                             "context": _char_context(sent, char_pos, len(word)),
                             "options": " / ".join(omographs[lower]),
                             "ruaccent": "",
+                            "occ_in_sent": occ_in_sent,  # used for RUAccent below
                         })
                         occ_sents.append(sent)
 
-    # Optional: resolve omograph variant with RUAccent
+    # Optional RUAccent: resolve per-occurrence stressed variant
     process = _try_accentizer()
+    ruaccent_errors = 0
     if process and occ_rows:
         for row, sent in zip(occ_rows, occ_sents):
             try:
                 accented = process(sent)
                 form = row["form"]
-                # RUAccent marks stress with '+' before the stressed vowel
+                # RUAccent marks stress with '+' before the stressed vowel.
                 pat = re.compile(
                     r"\b" + re.sub(r"([а-яёА-ЯЁ])", r"\+?\1", re.escape(form)) + r"\b",
                     re.IGNORECASE,
                 )
-                m = pat.search(accented)
-                row["ruaccent"] = m.group(0) if m else ""
-            except Exception:
-                # RUAccent inference is optional; don't hide the row
-                pass
+                # Extract the Nth match for this specific occurrence (not always first)
+                all_matches = list(pat.finditer(accented))
+                target_occ = row["occ_in_sent"]
+                row["ruaccent"] = (
+                    all_matches[target_occ].group(0)
+                    if target_occ < len(all_matches) else ""
+                )
+            except Exception as exc:
+                ruaccent_errors += 1
+                row["ruaccent"] = f"ERR:{exc}"
+
+        if ruaccent_errors:
+            print(
+                f"  ПРЕДУПРЕЖДЕНИЕ: RUAccent: {ruaccent_errors}/{len(occ_rows)} "
+                "ошибок обработки — колонка ruaccent частично заполнена",
+                file=sys.stderr,
+            )
 
     # ── build risk list ───────────────────────────────────────────────────────
 
@@ -331,6 +408,8 @@ def run(config: dict) -> int:
     if occ_rows:
         print(f"  детали омографов → {out_dir / 'omographs.tsv'}")
     if process is None and occ_rows:
-        print("  (RUAccent не загружен — колонка ruaccent пуста; "
-              "запусти с models/ для заполнения)")
+        print(
+            "  (RUAccent не загружен — колонка ruaccent пуста; "
+            "запусти с models/ для заполнения)"
+        )
     return 0
