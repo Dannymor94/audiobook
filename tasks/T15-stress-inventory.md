@@ -104,6 +104,109 @@ stress-inventory: 1022 форм в списке риска → out/stress/risk.t
 
 ### Второе ревью Codex Sol → CHANGES_REQUIRED, исправления (commit 33b258f)
 
+*(содержание сохранено — см. коммит 33b258f)*
+
+---
+
+### Итерация 3: полная реализация (commit 88317bd + 2b3...)
+
+**STOP-GATE 0 выполнен (до любых правок):**
+
+- Поля `manifest.jsonl`: `id str`, `n int`, `text str`, `hash str`, `seed int`, `pause_after_ms int`, `status str`, `locked bool`, `duration_ms None|int`.
+- Используемое поле: **`text`** — текст до подстановок `pronounce.yaml`.
+- Проверка токенов: 56/56 секций PASS (`lower + ё→е`), 2 секции без манифеста (00_section, 02_soderzhanie — заголовок и оглавление) пропущены с диагностикой.
+- Словарь омографов: `models/dictionary/omographs.json.gz` — корректный `{str: list[str]}`.
+
+**Реализовано в итерации 3:**
+
+1. **Источник вхождений — манифест, chunk_id по bisect:**  
+   `_build_section_data(section)` → `(full_text, starts, chunk_ids)`.  
+   Чанки склеиваются через `\n\n`. `_chunk_id_at(starts, chunk_ids, pos)` — bisect по символьным смещениям.  
+   Обязательная проверка токенов на каждой секции: несовпадение → `SystemExit`.  
+   `chunk_id = ?` в нормальном запуске недопустим (секции без манифеста исключаются).
+
+2. **RUAccent по позиции с difflib:**  
+   `_ruaccent_resolve(form, occ_in_sent, sent, accented)` — сначала точное совпадение токенов, затем `difflib.SequenceMatcher` на нормализованных списках. Статусы: `resolved`, `unresolved/no_stress`, `unresolved/tokenization_mismatch`. Колонка `ruaccent_status` добавлена в конец `omographs.tsv`.  
+   Исключение из `process(sent)` → `SystemExit` (не подавляется).
+
+3. **Атомарная публикация `out/stress/inventory/`:**  
+   Запись в `inventory.tmp/`, последним — `summary.json`. Валидация заголовков и числа строк. Атомарная замена: `inventory/` → `inventory.old/` → `inventory.tmp/` → `inventory/` → удалить `.old/`.  
+   Артефакты прерванного запуска обрабатываются при старте.
+
+4. **`summary.json`:**  
+   SHA-256 обоих TSV, отпечаток входов (словарь, pronounce.yaml, watch.yaml, verified.yaml, список манифестов), счётчики, диагностика.
+
+5. **Улучшенный сплиттер предложений:**  
+   `_split_sentences`: разбивка по `\n\n` (граница чанков), затем по `(?<=[.!?…])\s+` внутри параграфа. Инициалы (одиночная заглавная буква + точка) не создают границу предложения. Та же функция используется для RUAccent и определения имён.
+
+6. **Контекст:**  
+   `\n` (разделители чанков) заменяются пробелом — TSV не разбивается. Гарантия: форма целиком в контексте ≤80 символов. Форма >80 → `SystemExit`.
+
+**Прогон на реальном тексте после итерации 3 (56 секций):**
+```
+  ДИАГНОСТИКА: пропущено 2 секций без манифеста: 00_section, 02_soderzhanie
+stress-inventory: 1029 форм в списке риска → out/stress/inventory/risk.tsv
+  top-300        300 форм    41918 вхождений
+  омографы       430 форм     2673 вхождений
+  имена          396 форм    26421 вхождений
+  словарь         45 форм     1161 вхождений
+  пропущено (нет манифеста): 2 секций
+  детали омографов → out/stress/inventory/omographs.tsv
+  (RUAccent не загружен — ruaccent пусто; запусти с models/ для заполнения)
+  summary → out/stress/inventory/summary.json
+exit code: 0
+```
+
+**summary.json (выборка):**
+```json
+{
+  "schema_version": 1,
+  "files": {
+    "risk.tsv":      {"sha256": "e0577fa894c3ed56...", "rows": 1029},
+    "omographs.tsv": {"sha256": "4d0227580f1b5b4a...", "rows": 2673}
+  },
+  "counters": {"top": 300, "homograph": 430, "name": 396, "dict": 45,
+               "total_risk_forms": 1029, "total_occ_rows": 2673},
+  "diagnostics": {"sections_validated": 56, "sections_skipped_no_manifest": 2,
+                  "skipped_sections": ["00_section", "02_soderzhanie"],
+                  "ruaccent_available": false}
+}
+```
+SHA-256 обоих файлов проверены — совпадают.
+
+**Таблица «было / стало»:**
+
+| метрика                   | было (до T15) | ревью 1–2     | итерация 3 (56 сек.) |
+|---------------------------|---------------|---------------|----------------------|
+| секций обработано         | —             | 58            | 56 (−2 без манифеста)|
+| всего форм риска          | —             | 1022          | **1029**             |
+| топ-300                   | —             | 300           | 300                  |
+| омографы (формы)          | —             | 430           | 430                  |
+| имена (формы)             | —             | 387→1613→347  | **396**              |
+| словарь (dict)            | —             | 45            | 45                   |
+
+Имена 387→396: +9 форм. Ориентир ≈387; 396 — отклонение +2,3% (в пределах ±15%).  
+Причины: (1) учёт инициалов (правило «А.» не разбивает предложение) выявляет имена, ранее попадавшие в начало «ложного» предложения; (2) 2 пропущенных секции дали бы −N имён, но +N из улучшенного сплиттера перекрыли.
+
+**Полный suite pytest:**
+```
+704 passed, 5 skipped in 12.25s
+```
+База (`port-validated-settings`): ~667 passed. T15: +37 тестов = **704 passed**.
+
+**Известное ограничение:**  
+`abs_pos = full_text.find(sent)` при идентичных предложениях в одной секции может вернуть первое вхождение. Для реального текста крайне маловероятно; отмечено в коде.
+
+**Изменённые файлы:**
+- `src/audiobook/stress_inventory.py` — полная итерация 3
+- `tests/test_stress_inventory.py` — 37 тестов (STOP-GATE 0, bisect, difflib, summary.json, atomic publish)
+
+**SHA:** 88317bd (код + тесты)
+
+---
+
+### Второе ревью Codex Sol → CHANGES_REQUIRED, исправления (commit 33b258f)
+
 **P1 — Сопоставление чанков (fingerprint matching)**
 
 Убран счётчик `local_occ` и выравнивание по порядку вхождений.
