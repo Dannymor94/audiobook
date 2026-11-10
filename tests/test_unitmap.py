@@ -543,3 +543,63 @@ def test_i2_prime_key_between_anchors_passes():
     result = annotate_units(chunks, units)
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
+
+
+# ── T15-6C5b: global source order across units ───────────────────────────────
+
+
+def test_i2_prime_global_order_reversed_across_units_raises():
+    # Required regression: chunks "second" then "first" but source has unit1="first", unit2="second".
+    # Chunk 1 matches unit 2 ("second"), chunk 2 would need unit 1 ("first") → backward → error.
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "first"),
+        _unit("paragraph", "second"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("second", id_="0002"),
+        _chunk("first", id_="0003"),
+        _chunk("Конец", id_="0004"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+def test_i2_prime_global_order_forward_across_units_passes():
+    # Consecutive zero-token chunks in increasing unit order → valid.
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "first"),
+        _unit("paragraph", "second"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("first", id_="0002"),
+        _chunk("second", id_="0003"),
+        _chunk("Конец", id_="0004"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[2]["unit_id"] == 2
+
+
+def test_i2_prime_global_order_same_unit_overlap_raises():
+    # Two zero-token chunks mapping to the same position in the same unit → overlap rejected.
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "word"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("word", id_="0002"),
+        _chunk("word", id_="0003"),  # same key, same unit → global_zero_pos blocks it
+        _chunk("Конец", id_="0004"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)

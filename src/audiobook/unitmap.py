@@ -77,14 +77,15 @@ def _resolve_zero_token(
     units: list[dict],
     unit_match_end: dict[int, int],
     consumed_end: dict[int, int],
+    global_zero_pos: tuple[int, int],
     section: str,
 ) -> tuple[int, str]:
     """I2′: resolve a zero-Cyrillic-token chunk via text-anchor search.
 
     Searches only within the character interval strictly after the lower Cyrillic
     anchor token and before the upper Cyrillic anchor token.  Rejects text already
-    consumed by prior Cyrillic chunks (tracked in consumed_end).  Zero-token chunks
-    do not advance abs_pos; consecutive ones are ordered via unit_match_end.
+    consumed by prior Cyrillic chunks (consumed_end) and enforces that all zero-token
+    matches occur in monotonically increasing source order across units (global_zero_pos).
 
     Returns (unit_id, kind).  Raises AnnotationError on any ambiguity or failure.
     """
@@ -123,12 +124,14 @@ def _resolve_zero_token(
             break
 
     # Search for key in source units[lower_uid..upper_uid], bounded by anchor char spans.
-    #   lower_uid: start at max(consumed_end, unit_match_end) — rejects overlap with
-    #              prior Cyrillic chunk and enforces I2′ ordering.
+    #   lower_uid: start at max(consumed_end, unit_match_end, global_zero_pos end) —
+    #              rejects overlap with prior Cyrillic chunk, enforces I2′ per-unit ordering,
+    #              and enforces global monotonic source order across units.
     #   upper_uid: end before upper_char_start — stays strictly before next Cyrillic token.
-    #   intermediate units: bounded only by unit_match_end (I2′ ordering).
+    #   intermediate units: bounded by unit_match_end and global_zero_pos.
     # Positions are in the whitespace-normalised unit text; consumed_end / upper_char_start
     # are from original text positions (no-op when whitespace is already normalised).
+    global_uid, global_end = global_zero_pos
     matches: list[tuple[int, int]] = []  # (unit_id, start_pos_in_norm_text)
     for uid in range(lower_uid, upper_uid + 1):
         norm_unit = _norm_ws(units[uid].get("text", ""))
@@ -137,6 +140,13 @@ def _resolve_zero_token(
             lb = max(consumed_end.get(uid, 0), unit_match_end.get(uid, 0))
         else:
             lb = unit_match_end.get(uid, 0)
+
+        # Global source order: skip units before the last zero-token match;
+        # within the same unit, advance lb past the previous match end.
+        if uid < global_uid:
+            continue
+        if uid == global_uid:
+            lb = max(lb, global_end)
 
         if uid == upper_uid and upper_char_start is not None:
             ub = min(upper_char_start, len(norm_unit))
@@ -211,6 +221,10 @@ def annotate_units(
     # consumed_end: char end of each unit's last Cyrillic chunk including non-Cyrillic suffix,
     # used to restrict I2′ search to unconsumed source text.
     consumed_end: dict[int, int] = {}
+    # global_zero_pos: (unit_id, char_end) of the last resolved zero-token chunk.
+    # Enforces that consecutive zero-token chunks map to monotonically increasing source positions
+    # across unit boundaries (within-unit ordering is also covered by unit_match_end).
+    global_zero_pos: tuple[int, int] = (-1, -1)
 
     annotated: list[dict] = []
     abs_pos = 0
@@ -223,9 +237,11 @@ def annotate_units(
             # I2′: resolve via text-anchor search
             uid, kind = _resolve_zero_token(
                 chunk, i, all_chunk_toks, abs_pos,
-                unit_stream, units, unit_match_end, consumed_end, section,
+                unit_stream, units, unit_match_end, consumed_end,
+                global_zero_pos, section,
             )
             annotated.append({**chunk, "unit_id": uid, "kind": kind})
+            global_zero_pos = (uid, unit_match_end[uid])
             # abs_pos is NOT advanced — zero-token chunks consume no token positions
             continue
 
