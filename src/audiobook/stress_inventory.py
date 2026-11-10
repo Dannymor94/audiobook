@@ -20,6 +20,10 @@ Fatal conditions (SystemExit, non-zero):
   • Any exception from RUAccent init (ImportError, FileNotFoundError, OSError, or other)
   • Word form longer than 80 characters
   • No sections have a manifest (sections_validated == 0)
+  • No Cyrillic tokens found across all processed sections
+  • Missing manifest for a section not in sections: allowlist (exclude.yaml)
+  • Allowlisted section token count mismatch (norm.txt changed)
+  • Allowlisted section now has a manifest (stale exclusion)
 
 Allowed non-fatal uncertainty (rc=0, logged in summary):
   • unresolved/no_stress — RUAccent returned no stress mark for the form
@@ -125,6 +129,26 @@ def _load_exclude_forms(p: Path) -> set[str]:
     import yaml
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     return set(str(w).lower() for w in (data.get("exclude") or []))
+
+
+def _load_section_skip(p: Path) -> dict[str, dict]:
+    """Return {section_name: {tokens, reason}} from exclude.yaml sections: key.
+
+    Sections in this dict are allowed to have missing manifests.
+    """
+    if not p.exists():
+        return {}
+    import yaml
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    result: dict[str, dict] = {}
+    for entry in data.get("sections") or []:
+        sec = str(entry.get("section", "")).strip()
+        if sec:
+            result[sec] = {
+                "tokens": int(entry.get("tokens", -1)),
+                "reason": str(entry.get("reason", "")),
+            }
+    return result
 
 
 def _load_pronounce_forms(p: Path) -> set[str]:
@@ -495,6 +519,7 @@ def run(config: dict) -> int:  # noqa: C901
     exclude_p = paths.TEXT / "stress_inventory_exclude.yaml"
     omographs = _omograph_dict()
     exclude_forms = _load_exclude_forms(exclude_p)
+    section_skip = _load_section_skip(exclude_p)
     verified = _load_verified(paths.TEXT / "stress_verified.yaml")
     pronounce_forms = _load_pronounce_forms(paths.TEXT / "pronounce.yaml")
     watch_forms = _load_watch_forms(paths.TEXT / "stress_watch.yaml")
@@ -520,9 +545,33 @@ def run(config: dict) -> int:  # noqa: C901
         section = norm_path.stem.replace(".norm", "")
         norm_paths.append(norm_path)
         manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
-        if not manifest_path.exists():
+
+        if section in section_skip:
+            if manifest_path.exists():
+                raise SystemExit(
+                    f"stress-inventory: секция '{section}' в allowlist, но манифест существует.\n"
+                    "Удали запись из sections: в stress_inventory_exclude.yaml.\n"
+                    "Статус: blocked."
+                )
+            actual = len(_cyrillic_tokens(norm_path.read_text(encoding="utf-8")))
+            expected = section_skip[section]["tokens"]
+            if actual != expected:
+                raise SystemExit(
+                    f"stress-inventory: секция '{section}' в allowlist: "
+                    f"токенов {actual}, ожидалось {expected}.\n"
+                    "Обнови tokens: в stress_inventory_exclude.yaml.\n"
+                    "Статус: blocked."
+                )
             skipped_sections.append(section)
             continue
+
+        if not manifest_path.exists():
+            raise SystemExit(
+                f"stress-inventory: манифест отсутствует для секции '{section}'.\n"
+                "Добавь запись в sections: в stress_inventory_exclude.yaml "
+                "или запусти chunker.\nСтатус: blocked."
+            )
+
 
         manifest_paths.append(manifest_path)
         full_text, starts, chunk_ids = _build_section_data(section, paragraph_ms)
@@ -588,7 +637,7 @@ def run(config: dict) -> int:  # noqa: C901
 
     if skipped_sections:
         print(
-            f"  ДИАГНОСТИКА: пропущено {len(skipped_sections)} секций без манифеста: "
+            f"  ДИАГНОСТИКА: пропущено {len(skipped_sections)} секций (allowlist): "
             f"{', '.join(skipped_sections)}",
             file=sys.stderr,
         )
@@ -597,6 +646,12 @@ def run(config: dict) -> int:  # noqa: C901
         raise SystemExit(
             "stress-inventory: ни одна секция не содержит манифест.\n"
             "Запусти chunker для генерации манифестов перед stress-inventory.\n"
+            "Статус: blocked."
+        )
+
+    if not form_count:
+        raise SystemExit(
+            "stress-inventory: ни одной словоформы не найдено во всех секциях.\n"
             "Статус: blocked."
         )
 

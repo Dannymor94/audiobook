@@ -1,0 +1,19 @@
+# Strict inventory exclusions — forms listed here are NEVER shown in
+# risk.tsv, even if they are top-N, omographs, or names. Use sparingly:
+# prefer stress_verified.yaml for forms confirmed by ear.
+#
+# exclude:
+#   - это
+#   - что
+exclude: []
+
+# Sections allowed to have missing manifests.
+# tokens: exact Cyrillic token count from norm.txt (guards against silent drift).
+# If a listed section gains a manifest the entry becomes stale and run() fails.
+sections:
+  - section: 00_section
+    tokens: 0
+    reason: "title page — no synthesized audio"
+  - section: 02_soderzhanie
+    tokens: 1
+    reason: "table of contents — no synthesized audio"

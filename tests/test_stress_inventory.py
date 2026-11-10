@@ -1213,3 +1213,167 @@ def test_gen_dir_created_with_current_json(tmp_path):
     result = load_current(stress_dir)
     assert result is not None
     assert result["algo_version"] == 2
+
+# ── T15-6B1: section exclusion allowlist ─────────────────────────────────────
+
+def _make_env_with_skip(tmp_path, norm_texts, sections_yaml=None, manifests=None, **kwargs):
+    """Like _make_env but writes custom sections: block into exclude.yaml."""
+    root, config = _make_env(tmp_path, norm_texts, manifests=manifests, **kwargs)
+    if sections_yaml is not None:
+        exclude_p = root / "text" / "stress_inventory_exclude.yaml"
+        # File may not exist yet (created lazily by _load_exclude_forms); write it
+        base = "exclude: []\n"
+        if exclude_p.exists():
+            base = exclude_p.read_text(encoding="utf-8")
+        exclude_p.write_text(base + sections_yaml, encoding="utf-8")
+    return root, config
+
+
+def _run_with_paths(root, config):
+    """Call run() with patched paths and _try_accentizer; return rc."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            return run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_section_allowlist_valid_skip(tmp_path):
+    """Missing manifest + matching allowlist entry and token count → skip (rc=0)."""
+    # 01_ch has manifest; 02_extra has no manifest but is allowlisted with tokens=1
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {"01_ch.norm.txt": "замок стоит.", "02_extra.norm.txt": "слово"},
+        manifests={"01_ch": [
+            {"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+             "seed": 1, "pause_after_ms": 900, "status": "done",
+             "locked": False, "duration_ms": None}
+        ]},
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 1\n"
+            "    reason: test\n"
+        ),
+        with_omograph_dict=True,
+    )
+    rc = _run_with_paths(root, config)
+    assert rc == 0
+
+
+def test_section_missing_manifest_no_allowlist_exits(tmp_path):
+    """Missing manifest for a section not in allowlist → SystemExit."""
+    root, config = _make_env(
+        tmp_path,
+        {"01_ch.norm.txt": "замок стоит.", "02_extra.norm.txt": "слово"},
+        manifests={"01_ch": [
+            {"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+             "seed": 1, "pause_after_ms": 900, "status": "done",
+             "locked": False, "duration_ms": None}
+        ]},
+    )
+    with pytest.raises(SystemExit):
+        _run_with_paths(root, config)
+
+
+def test_section_allowlist_wrong_token_count_exits(tmp_path):
+    """Allowlisted section with wrong token count → SystemExit."""
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {"01_ch.norm.txt": "замок стоит.", "02_extra.norm.txt": "слово"},
+        manifests={"01_ch": [
+            {"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+             "seed": 1, "pause_after_ms": 900, "status": "done",
+             "locked": False, "duration_ms": None}
+        ]},
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 99\n"  # wrong — actual is 1
+            "    reason: test\n"
+        ),
+    )
+    with pytest.raises(SystemExit):
+        _run_with_paths(root, config)
+
+
+def test_section_allowlist_stale_has_manifest_exits(tmp_path):
+    """Allowlisted section that now has a manifest → SystemExit (stale exclusion)."""
+    # 02_extra is in allowlist but we also create a manifest for it
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {"01_ch.norm.txt": "замок стоит.", "02_extra.norm.txt": "слово"},
+        manifests={
+            "01_ch": [
+                {"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+                 "seed": 1, "pause_after_ms": 900, "status": "done",
+                 "locked": False, "duration_ms": None}
+            ],
+            "02_extra": [
+                {"id": "0001", "n": 1, "text": "слово", "hash": "x",
+                 "seed": 1, "pause_after_ms": 900, "status": "done",
+                 "locked": False, "duration_ms": None}
+            ],
+        },
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 1\n"
+            "    reason: test\n"
+        ),
+    )
+    with pytest.raises(SystemExit):
+        _run_with_paths(root, config)
+
+
+def test_zero_occurrences_exits(tmp_path):
+    """Sections with manifests but no Cyrillic text → SystemExit."""
+    root, config = _make_env(
+        tmp_path,
+        {"01_ch.norm.txt": "..."},  # no Cyrillic
+        manifests={"01_ch": [
+            {"id": "0001", "n": 1, "text": "...", "hash": "x",
+             "seed": 1, "pause_after_ms": 900, "status": "done",
+             "locked": False, "duration_ms": None}
+        ]},
+    )
+    with pytest.raises(SystemExit):
+        _run_with_paths(root, config)
+
+
+def test_section_allowlist_failure_does_not_publish(tmp_path):
+    """When section allowlist check fails, existing inventory is not overwritten."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    # First: successful run with only 01_ch
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    inventory_dir = root / "out" / "stress" / "inventory"
+    try:
+        from audiobook.stress_inventory import run
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
+        sentinel = (inventory_dir / "risk.tsv").read_text(encoding="utf-8")
+
+        # Add a second norm file without manifest or allowlist → fail
+        (root / "text" / "03_new.norm.txt").write_text("слово", encoding="utf-8")
+        with pytest.raises(SystemExit):
+            with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+                run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    assert (inventory_dir / "risk.tsv").read_text(encoding="utf-8") == sentinel
