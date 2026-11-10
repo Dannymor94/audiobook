@@ -1377,3 +1377,138 @@ def test_section_allowlist_failure_does_not_publish(tmp_path):
         apaths.OUT = orig_out
 
     assert (inventory_dir / "risk.tsv").read_text(encoding="utf-8") == sentinel
+
+# ── T15-6B2: section counters and coverage ────────────────────────────────────
+
+def _summary_for(root):
+    """Read summary.json from out/stress/inventory/."""
+    return json.loads(
+        (root / "out" / "stress" / "inventory" / "summary.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+def test_section_counters_two_processed_one_excluded(tmp_path):
+    """2 processed + 1 excluded → total=3, processed=2, excluded=1."""
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {
+            "01_ch.norm.txt": "замок стоит.",
+            "02_ch.norm.txt": "мука лежала.",
+            "03_extra.norm.txt": "слово слово слово слово слово",  # 5 tokens, excluded
+        },
+        manifests={
+            "01_ch": [{"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+                        "seed": 1, "pause_after_ms": 900, "status": "done",
+                        "locked": False, "duration_ms": None}],
+            "02_ch": [{"id": "0001", "n": 1, "text": "мука лежала.", "hash": "x",
+                        "seed": 1, "pause_after_ms": 900, "status": "done",
+                        "locked": False, "duration_ms": None}],
+        },
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 03_extra\n"
+            "    tokens: 5\n"
+            "    reason: test\n"
+        ),
+    )
+    _run_with_paths(root, config)
+    d = _summary_for(root)["diagnostics"]
+    assert d["sections_total"] == 3
+    assert d["sections_processed"] == 2
+    assert d["sections_excluded"] == 1
+
+
+def test_excluded_tokens_counted(tmp_path):
+    """Excluded section with 5 tokens → excluded_tokens=5 in summary."""
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {
+            "01_ch.norm.txt": "замок стоит.",
+            "02_extra.norm.txt": "слово слово слово слово слово",
+        },
+        manifests={
+            "01_ch": [{"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+                        "seed": 1, "pause_after_ms": 900, "status": "done",
+                        "locked": False, "duration_ms": None}],
+        },
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 5\n"
+            "    reason: test\n"
+        ),
+    )
+    _run_with_paths(root, config)
+    d = _summary_for(root)["diagnostics"]
+    assert d["excluded_tokens"] == 5
+
+
+def test_total_tokens_includes_excluded(tmp_path):
+    """Coverage denominator (total_tokens) includes excluded section tokens."""
+    # 01_ch: 2 tokens ("замок стоит"); 02_extra: 5 tokens (excluded)
+    # total_tokens must be 2 + 5 = 7
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {
+            "01_ch.norm.txt": "замок стоит.",
+            "02_extra.norm.txt": "слово слово слово слово слово",
+        },
+        manifests={
+            "01_ch": [{"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+                        "seed": 1, "pause_after_ms": 900, "status": "done",
+                        "locked": False, "duration_ms": None}],
+        },
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 5\n"
+            "    reason: test\n"
+        ),
+        omographs={},
+    )
+    _run_with_paths(root, config)
+    s = _summary_for(root)
+    assert s["counters"]["total_tokens"] == 7, s["counters"]["total_tokens"]
+
+
+def test_excluded_section_no_risk_occurrences(tmp_path):
+    """Excluded section's words do not appear in risk.tsv."""
+    # 01_ch has "замок" (omograph). 02_extra has "замок замок" but is excluded.
+    # Risk rows must come only from 01_ch; excluded words must not inflate freq.
+    root, config = _make_env_with_skip(
+        tmp_path,
+        {
+            "01_ch.norm.txt": "замок стоит.",
+            "02_extra.norm.txt": "замок замок замок замок замок",
+        },
+        manifests={
+            "01_ch": [{"id": "0001", "n": 1, "text": "замок стоит.", "hash": "x",
+                        "seed": 1, "pause_after_ms": 900, "status": "done",
+                        "locked": False, "duration_ms": None}],
+        },
+        sections_yaml=(
+            "\nsections:\n"
+            "  - section: 02_extra\n"
+            "    tokens: 5\n"
+            "    reason: test\n"
+        ),
+    )
+    _run_with_paths(root, config)
+    inv = root / "out" / "stress" / "inventory"
+    risk = {r.split("\t")[0]: int(r.split("\t")[1])
+            for r in (inv / "risk.tsv").read_text(encoding="utf-8").splitlines()[1:]}
+    # "замок" frequency must be 1 (only from 01_ch), not 6
+    assert risk.get("замок", 0) == 1
+
+
+def test_zero_excluded_sections_unchanged(tmp_path):
+    """When no sections are excluded, sections_excluded=0 and excluded_tokens=0."""
+    _, risk, _ = _run(tmp_path, {"01_ch.norm.txt": "замок стоит."})
+    # Can't get summary from _run directly; use _run_with_paths
+    root, config = _make_env(tmp_path / "s2", {"01_ch.norm.txt": "замок стоит."})
+    _run_with_paths(root, config)
+    d = _summary_for(root)["diagnostics"]
+    assert d["sections_excluded"] == 0
+    assert d["excluded_tokens"] == 0
+    assert d["sections_processed"] == d["sections_total"]

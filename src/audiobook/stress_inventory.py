@@ -540,6 +540,7 @@ def run(config: dict) -> int:  # noqa: C901
     skipped_sections: list[str] = []
     sections_validated = 0
     invalid_context_count = 0
+    excluded_tokens = 0
 
     for norm_path in sorted(paths.TEXT.glob("[0-9][0-9]_*.norm.txt")):
         section = norm_path.stem.replace(".norm", "")
@@ -562,6 +563,7 @@ def run(config: dict) -> int:  # noqa: C901
                     "Обнови tokens: в stress_inventory_exclude.yaml.\n"
                     "Статус: blocked."
                 )
+            excluded_tokens += actual
             skipped_sections.append(section)
             continue
 
@@ -779,7 +781,7 @@ def run(config: dict) -> int:  # noqa: C901
                 by_reason[reason] += 1
                 occ_by_reason[reason] += r["freq"]
 
-    total_tokens = sum(form_count.values())
+    total_tokens = sum(form_count.values()) + excluded_tokens
     risk_token_count = sum(form_count[f] for f in all_risk if f in form_count)
     risk_coverage = round(risk_token_count / total_tokens, 4) if total_tokens else 0.0
 
@@ -821,6 +823,10 @@ def run(config: dict) -> int:  # noqa: C901
             "risk_token_coverage": risk_coverage,
         },
         "diagnostics": {
+            "sections_total": sections_validated + len(skipped_sections),
+            "sections_processed": sections_validated,
+            "sections_excluded": len(skipped_sections),
+            "excluded_tokens": excluded_tokens,
             "sections_validated": sections_validated,
             "sections_skipped_no_manifest": len(skipped_sections),
             "skipped_sections": skipped_sections,
