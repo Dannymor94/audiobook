@@ -219,6 +219,7 @@ class AnnotationError(Exception):
 def _resolve_zero_token(
     chunk: dict,
     chunk_idx: int,
+    manifest_chunks: list[dict],
     all_chunk_toks: list[list[str]],
     abs_pos: int,
     unit_stream: list[tuple[str, int, str, int, int]],
@@ -275,11 +276,37 @@ def _resolve_zero_token(
     # abs_pos is not advanced for zero-token chunks, so unit_stream[abs_pos] is always next.
     upper_uid = len(units) - 1
     upper_char_start: int | None = None
+    next_cyr_chunk_idx: int | None = None
     for j in range(chunk_idx + 1, len(all_chunk_toks)):
         if all_chunk_toks[j]:
             if abs_pos < len(unit_stream):
                 _, upper_uid, _, upper_char_start, _ = unit_stream[abs_pos]
+            next_cyr_chunk_idx = j
             break
+
+    # Prefix-adjusted upper bound (fix 6C7c): if the next Cyrillic chunk has a
+    # non-Cyrillic prefix, its source span starts before upper_char_start.
+    # Zero-token match must end strictly before the prefix, not just before the
+    # Cyrillic anchor.  Fail closed if the prefix cannot be located.
+    prefix_ub: int | None = upper_char_start
+    if upper_char_start is not None and next_cyr_chunk_idx is not None:
+        next_raw = manifest_chunks[next_cyr_chunk_idx].get("text", "")
+        cyr_in_next = list(_CYR.finditer(next_raw))
+        if cyr_in_next:
+            prefix = next_raw[:cyr_in_next[0].start()]
+            norm_prefix, _, _ = _build_offset_map(prefix)
+            if norm_prefix:
+                unit_text = units[upper_uid].get("text", "")
+                p_matches = find_exact_in_unit(prefix, unit_text, orig_ub=upper_char_start)
+                if not p_matches:
+                    raise AnnotationError(
+                        "zero-token chunk: next chunk's non-Cyrillic prefix not found "
+                        "in unit before its Cyrillic content (I2′)",
+                        section=section,
+                        chunk_id=chunk_id,
+                    )
+                # Rightmost match = closest to the Cyrillic anchor = actual prefix position.
+                prefix_ub = p_matches[-1][0]
 
     global_uid, global_end = global_zero_pos
 
@@ -303,7 +330,7 @@ def _resolve_zero_token(
         else:
             lb = unit_match_end.get(uid, 0)
 
-        ub: int | None = upper_char_start if (uid == upper_uid and upper_char_start is not None) else None
+        ub: int | None = prefix_ub if (uid == upper_uid and prefix_ub is not None) else None
 
         # Enforce global monotonic source order across units.
         if uid < global_uid:
@@ -390,7 +417,7 @@ def annotate_units(
         if not toks:
             # I2′: resolve via M1/M2 matching
             uid, kind, match = _resolve_zero_token(
-                chunk, i, all_chunk_toks, abs_pos,
+                chunk, i, manifest_chunks, all_chunk_toks, abs_pos,
                 unit_stream, units, unit_match_end, consumed_end,
                 global_zero_pos, section,
             )

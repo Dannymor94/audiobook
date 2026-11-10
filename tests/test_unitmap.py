@@ -1030,3 +1030,77 @@ def test_6c7b_valid_zero_token_after_suffix_passes():
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
     assert result[1]["match"] == "exact"
+
+
+# ── T15-6C7c: prevent overlap with next chunk's non-Cyrillic prefix ───────────
+
+
+def test_6c7c_sol_p1_prefix_blocks_zero_token_overlap():
+    """Sol P1 repro: zero-token must not consume text belonging to next chunk's prefix.
+
+    'abc' in the unit is claimed as a prefix by the following 'abc Конец' chunk;
+    the zero-token 'abc' must be rejected.
+    """
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),        # zero-token; 'abc' belongs to next chunk
+        _chunk("abc Конец", id_="0003"),  # prefix 'abc ' immediately precedes 'Конец'
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7c_nbsp_prefix_blocks_zero_token():
+    """NBSP in next chunk's prefix is treated as whitespace; overlap still rejected."""
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("abc Конец", id_="0003"),  # NBSP between prefix and Cyrillic
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7c_double_space_prefix_blocks_zero_token():
+    """Double space in next chunk's prefix collapses to match single space in unit."""
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("abc  Конец", id_="0003"),  # double space: prefix 'abc  ' → norm 'abc'
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7c_decomposed_prefix_blocks_zero_token():
+    """Decomposed Unicode prefix (NFC-equivalent) correctly blocks the zero-token."""
+    # Unit has precomposed é (1 orig char); next chunk has decomposed e+́ as prefix.
+    units = [_unit("paragraph", "Начало \xe9 Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("\xe9", id_="0002"),           # zero-token: same as next chunk's prefix
+        _chunk("é Конец", id_="0003"),  # prefix 'é ' NFC-matches '\xe9'
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7c_valid_zero_token_before_distinct_prefix():
+    """Zero-token with distinct text from the next chunk's prefix resolves correctly."""
+    units = [_unit("paragraph", "Начало xyz abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("xyz", id_="0002"),        # zero-token: 'xyz' is distinct from prefix 'abc'
+        _chunk("abc Конец", id_="0003"),  # prefix 'abc' starts at pos 11
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["kind"] == "text"
+    assert result[1]["match"] == "exact"
