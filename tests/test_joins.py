@@ -13,6 +13,7 @@ from audiobook.joins import (
     _join_row,
     _flags,
     _within_para_pairs,
+    is_within_para,
 )
 
 _SR = 24_000
@@ -143,6 +144,37 @@ def test_flags_f0_octave_fires_negative_direction():
     row = {"f0_diff_st": -11.8, "slope_tail_st_s": 0.0,
            "rms_diff_db": 1.0, "tempo_diff_pct": 5.0}
     assert "F0_OCTAVE?" in _flags(row, thresholds)
+
+
+# ── is_within_para predicate ──────────────────────────────────────────────────
+
+def test_is_within_para_same_unit_text_short():
+    assert is_within_para(0, 0, "text", "text", 400, 900) is True
+
+
+def test_is_within_para_different_units():
+    assert is_within_para(0, 1, "text", "text", 400, 900) is False
+
+
+def test_is_within_para_heading_text():
+    assert is_within_para(0, 0, "heading", "text", 400, 900) is False
+
+
+def test_is_within_para_stack_stack():
+    assert is_within_para(0, 0, "stack", "stack", 400, 900) is False
+
+
+def test_is_within_para_step_text():
+    assert is_within_para(0, 0, "step", "text", 400, 900) is False
+
+
+def test_is_within_para_long_pause():
+    assert is_within_para(0, 0, "text", "text", 1000, 900) is False
+
+
+def test_is_within_para_pause_equal_to_threshold():
+    # pause_after_ms must be strictly less than paragraph_ms
+    assert is_within_para(0, 0, "text", "text", 900, 900) is False
 
 
 # ── within_para_pairs ─────────────────────────────────────────────────────────

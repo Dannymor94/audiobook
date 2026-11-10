@@ -128,6 +128,27 @@ def _join_row(y_i: np.ndarray, y_j: np.ndarray,
 
 # ── paragraph-pair detection ───────────────────────────────────────────────────
 
+def is_within_para(
+    unit_id_i: int,
+    unit_id_j: int,
+    kind_i: str,
+    kind_j: str,
+    pause_after_ms: float,
+    paragraph_ms: int,
+) -> bool:
+    """True iff two adjacent chunks belong to the same prose paragraph.
+
+    Both chunks must be in the same source unit, both must have kind 'text',
+    and the pause between them must be shorter than the paragraph boundary.
+    """
+    return (
+        unit_id_i == unit_id_j
+        and kind_i == "text"
+        and kind_j == "text"
+        and pause_after_ms < paragraph_ms
+    )
+
+
 def _within_para_pairs(units: list[dict], config: dict) -> list[tuple[int, int]]:
     """Return manifest index pairs (k, k+1) that are adjacent chunks of the
     same prose paragraph.  Uses chunker structure, not a raw ms threshold."""
@@ -167,11 +188,11 @@ def _within_para_pairs(units: list[dict], config: dict) -> list[tuple[int, int]]
 
     pairs = []
     for k in range(len(chunks) - 1):
-        if (unit_of[k] == unit_of[k + 1]
-                and chunks[k].get("kind") == "text"
-                and chunks[k + 1].get("kind") == "text"
-                # redundant with unit equality, but defensive
-                and chunks[k]["pause_after_ms"] < p_par):
+        if is_within_para(
+            unit_of[k], unit_of[k + 1],
+            chunks[k].get("kind", ""), chunks[k + 1].get("kind", ""),
+            chunks[k]["pause_after_ms"], p_par,
+        ):
             pairs.append((k, k + 1))
     return pairs
 
