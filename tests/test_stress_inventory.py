@@ -1,7 +1,8 @@
 """Layer-1 tests for stress_inventory — no models, no network, tmp_path only.
 
 Base from port-validated-settings + 14 (second review) = 33 tests now,
-iteration-3 additions = 42, iteration-4 additions bring the total to 52.
+iteration-3 additions = 42, iteration-4 additions bring the total to 52,
+iteration-5 additions bring the total to 57.
 """
 from __future__ import annotations
 
@@ -681,7 +682,8 @@ def test_risk_tsv_deterministic_across_hashseeds(tmp_path):
             cwd=str(Path(__file__).parent.parent),
         )
         assert result.returncode == 0, f"PYTHONHASHSEED={seed}:\n{result.stderr}"
-        hashes.add(result.stdout.strip())
+        # Last line is the sha256; earlier lines are inventory stats (gen_id differs by timestamp)
+        hashes.add(result.stdout.strip().splitlines()[-1])
     assert len(hashes) == 1, f"Non-deterministic: {hashes}"
 
 
@@ -776,8 +778,9 @@ def test_intra_paragraph_chunks_joined_with_space(tmp_path):
         "01_ch.norm.txt": "замок стоял. мука рассыпалась.",
     }, manifests={
         "01_ch": [
+            # pause_after_ms=350 < 900 → same paragraph, space separator before next chunk
             {"id": "0001", "n": 1, "text": "замок стоял.", "hash": "a",
-             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+             "seed": 1, "pause_after_ms": 350, "status": "done", "locked": False, "duration_ms": None},
             {"id": "0002", "n": 2, "text": "мука рассыпалась.", "hash": "b",
              "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
         ],
@@ -787,7 +790,7 @@ def test_intra_paragraph_chunks_joined_with_space(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import _build_section_data
-        full_text, starts, chunk_ids = _build_section_data("01_ch")
+        full_text, starts, chunk_ids = _build_section_data("01_ch", paragraph_ms=900)
         assert "\n\n" not in full_text, f"Found \\n\\n in same-paragraph chunks: {full_text!r}"
         assert " " in full_text, f"No space between same-paragraph chunks: {full_text!r}"
         assert len(starts) == 2
@@ -1010,3 +1013,93 @@ def test_all_manifests_missing_exits(tmp_path):
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
         apaths.OUT = orig_out
+
+
+# ── iteration-5 integration tests ─────────────────────────────────────────────
+
+def test_exclude_yaml_removes_form(tmp_path):
+    """Form in stress_inventory_exclude.yaml is absent from risk.tsv regardless of reason."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок замок замок замок замок."})
+    # Write exclude yaml
+    (root / "text" / "stress_inventory_exclude.yaml").write_text(
+        "exclude:\n  - замок\n", encoding="utf-8"
+    )
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    inv = root / "out" / "stress" / "inventory"
+    forms = {r.split("\t")[0] for r in (inv / "risk.tsv").read_text(encoding="utf-8").splitlines()[1:]}
+    assert "замок" not in forms, f"'замок' in risk.tsv despite being in exclude.yaml: {forms}"
+
+
+def test_fingerprint_has_algo_version(tmp_path):
+    """summary.json inputs.algo_version matches INVENTORY_ALGO_VERSION."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "Замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        from audiobook.stress_fp import INVENTORY_ALGO_VERSION
+        run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    summary = json.loads(
+        (root / "out" / "stress" / "inventory" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["inputs"]["algo_version"] == INVENTORY_ALGO_VERSION
+    assert summary["algo_version"] == INVENTORY_ALGO_VERSION
+
+
+def test_gen_dir_created_with_current_json(tmp_path):
+    """After publish, gen/<gen_id>/ exists and inventory/current.json points to it."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "Замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import run
+        run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    stress_dir = root / "out" / "stress"
+    cur_path = stress_dir / "inventory" / "current.json"
+    assert cur_path.exists(), "inventory/current.json not written"
+    cur = json.loads(cur_path.read_text(encoding="utf-8"))
+    gen_id = cur["gen_id"]
+    gen_dir = stress_dir / "gen" / gen_id
+    assert gen_dir.exists(), f"gen/{gen_id}/ not created"
+    assert (gen_dir / "risk.tsv").exists()
+    assert (gen_dir / "summary.json").exists()
+    # SHA must match
+    actual_sha = hashlib.sha256((gen_dir / "summary.json").read_bytes()).hexdigest()
+    assert actual_sha == cur["summary_sha256"], "current.json SHA mismatch"
+
+    # load_current must succeed without error
+    from audiobook.stress_fp import load_current
+    result = load_current(stress_dir)
+    assert result is not None
+    assert result["algo_version"] == 2

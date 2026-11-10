@@ -74,6 +74,19 @@ AUDIOBOOK_DEVICE=cpu ./run.sh ...  # репетиция Windows на Mac
 
 ---
 
+## INVENTORY_ALGO_VERSION bump rules
+
+`INVENTORY_ALGO_VERSION` в `src/audiobook/stress_fp.py` определяет версию алгоритма инвентаря ударений.
+Увеличить на 1 при изменении:
+- логики определения границ параграфов (разделитель space/`\n\n`);
+- критериев классификации форм (top/homograph/name/dict);
+- набора колонок в `risk.tsv` или `omographs.tsv`;
+- схемы `summary.json` (добавление/удаление полей).
+
+При повышении обновить константу в `stress_fp.py` и дописать в коммит-сообщение `algo_version: N → N+1`.
+
+---
+
 ## Стиль
 
 - Код, имена, комментарии — английский. Вывод CLI, сообщения `doctor`, документы — русский.

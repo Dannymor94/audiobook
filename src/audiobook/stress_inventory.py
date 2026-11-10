@@ -1,19 +1,23 @@
-"""Stress risk inventory from manifest.jsonl + text/*.norm.txt  — Iteration 4.
+"""Stress risk inventory from manifest.jsonl + text/*.norm.txt  — Iteration 5.
 
 Outputs (out/stress/inventory/):
   risk.tsv      — aggregated risk list (top/homograph/name/dict)
   omographs.tsv — per-occurrence detail for dictionary homographs
   summary.json  — SHA-256 of both TSVs, input fingerprint, counters
+  current.json  — {gen_id, summary_sha256} pointer to gen/<gen_id>/
 
-Source of occurrences: manifest.jsonl chunk texts (not norm.txt directly).
-chunk_id is resolved by bisect on character intervals, never by occurrence order.
-Chunks within the same norm.txt paragraph are joined with a space; chunks from
-different paragraphs are separated by \\n\\n.
+Generation archive (out/stress/gen/<gen_id>/):
+  same three files, immutable once written.
+
+Paragraph boundaries are determined by pause_after_ms from manifest rows:
+  pause_after_ms < paragraph_ms  → space separator (same paragraph)
+  pause_after_ms >= paragraph_ms → \\n\\n separator (paragraph boundary)
+This matches the boundary logic in joins.py exactly.
 
 Fatal conditions (SystemExit, non-zero):
   • models/dictionary/omographs.json.gz absent, corrupt, or wrong structure/types
   • Token mismatch between manifest and norm.txt for any section
-  • Any exception from RUAccent init (non-ImportError) or inference on a sentence
+  • Any exception from RUAccent init (non-ImportError, FileNotFoundError, OSError)
   • Word form longer than 80 characters
   • No sections have a manifest (sections_validated == 0)
 
@@ -38,6 +42,7 @@ from collections import Counter
 from pathlib import Path
 
 from audiobook import paths
+from audiobook.stress_fp import INVENTORY_ALGO_VERSION, stress_params
 
 _WORD = re.compile(r"[а-яёА-ЯЁ]+")
 _WORD_PLUS = re.compile(r"[а-яёА-ЯЁ+]+")
@@ -68,7 +73,6 @@ def _omograph_dict() -> dict[str, list[str]]:
             f"stress-inventory: неверная структура словаря "
             f"(ожидался dict, получен {type(data).__name__}): {p}\nСтатус: blocked."
         )
-    # Per-element type check: each value must be list[str]
     for key, val in data.items():
         if not isinstance(val, list) or not all(isinstance(s, str) for s in val):
             raise SystemExit(
@@ -97,6 +101,32 @@ def _load_verified(p: Path) -> set[str]:
     return set(str(w).lower() for w in (data.get("verified") or []))
 
 
+def _load_exclude_forms(p: Path) -> set[str]:
+    """Strict exclusions — forms here never appear in risk.tsv regardless of reason.
+
+    File format (YAML):
+      exclude:
+        - форма1
+        - форма2
+    """
+    if not p.exists():
+        p.write_text(
+            "# Strict inventory exclusions — forms listed here are NEVER shown in\n"
+            "# risk.tsv, even if they are top-N, omographs, or names. Use sparingly:\n"
+            "# prefer stress_verified.yaml for forms confirmed by ear.\n"
+            "#\n"
+            "# exclude:\n"
+            "#   - это\n"
+            "#   - что\n"
+            "exclude: []\n",
+            encoding="utf-8",
+        )
+        return set()
+    import yaml
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    return set(str(w).lower() for w in (data.get("exclude") or []))
+
+
 def _load_pronounce_forms(p: Path) -> set[str]:
     if not p.exists():
         return set()
@@ -117,54 +147,27 @@ def _load_watch_forms(p: Path) -> set[str]:
     return result
 
 
-# ── section data (manifest-based, paragraph-aware) ────────────────────────────
+# ── section data (manifest-based, pause-aware paragraph detection) ─────────────
 
 def _cyrillic_tokens(text: str) -> list[str]:
     return [w.lower().replace("ё", "е") for w in _WORD.findall(text)]
 
 
-def _assign_chunk_paragraphs(norm_text: str, rows: list[dict]) -> list[int]:
-    """Return paragraph index for each chunk by sequential token matching.
-
-    Norm.txt paragraphs are split by '\\n\\n'.  Each chunk's cyrillic tokens
-    must appear consecutively in the flattened norm token stream.  Empty chunks
-    inherit the previous chunk's paragraph.
-    """
-    paragraphs = norm_text.split("\n\n")
-    tok_to_para: list[int] = []
-    for para_idx, para in enumerate(paragraphs):
-        for _ in _cyrillic_tokens(para):
-            tok_to_para.append(para_idx)
-
-    chunk_paras: list[int] = []
-    norm_pos = 0
-
-    for row in rows:
-        chunk_toks = _cyrillic_tokens(row.get("text", ""))
-        if not chunk_toks:
-            chunk_paras.append(chunk_paras[-1] if chunk_paras else 0)
-        else:
-            if norm_pos >= len(tok_to_para):
-                raise SystemExit(
-                    "stress-inventory: манифест содержит больше токенов, чем norm.txt.\n"
-                    "Статус: blocked."
-                )
-            chunk_paras.append(tok_to_para[norm_pos])
-            norm_pos += len(chunk_toks)
-
-    return chunk_paras
-
-
-def _build_section_data(section: str) -> tuple[str, list[int], list[str]]:
+def _build_section_data(
+    section: str, paragraph_ms: int
+) -> tuple[str, list[int], list[str]]:
     """Concatenate manifest chunk texts into one string; build bisect intervals.
 
-    Chunks within the same norm.txt paragraph are joined with a space.
-    Chunks from different paragraphs are separated by '\\n\\n'.
+    Paragraph boundaries are determined by pause_after_ms from manifest rows:
+      row["pause_after_ms"] < paragraph_ms  → space (same paragraph continues)
+      row["pause_after_ms"] >= paragraph_ms → \\n\\n (new paragraph)
+
+    This matches joins.py _within_para_pairs() boundary logic exactly.
 
     Returns (full_text, starts, chunk_ids) where starts[i] is the character
     offset of chunk chunk_ids[i] inside full_text.
 
-    Also validates that _cyrillic_tokens(full_text) == _cyrillic_tokens(norm.txt).
+    Also validates _cyrillic_tokens(full_text) == _cyrillic_tokens(norm.txt).
     Raises SystemExit on token mismatch.
     """
     manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
@@ -183,41 +186,30 @@ def _build_section_data(section: str) -> tuple[str, list[int], list[str]]:
         ) from None
 
     norm_path = paths.TEXT / f"{section}.norm.txt"
-    if norm_path.exists():
-        norm_text = norm_path.read_text(encoding="utf-8")
-        chunk_paras = _assign_chunk_paragraphs(norm_text, rows)
-    else:
-        # No norm.txt: each chunk is treated as its own paragraph
-        norm_text = None
-        chunk_paras = list(range(len(rows)))
+    norm_text = norm_path.read_text(encoding="utf-8") if norm_path.exists() else None
 
-    # Build full_text with correct separators
     full_parts: list[str] = []
     starts: list[int] = []
     chunk_ids: list[str] = []
     pos = 0
-    prev_para = -1
 
-    for row, para_idx in zip(rows, chunk_paras):
+    for i, row in enumerate(rows):
         text = row.get("text") or ""
         cid = row.get("id", "?")
 
         if pos == 0:
             sep = ""
-        elif para_idx == prev_para:
-            sep = " "    # same paragraph — space
         else:
-            sep = "\n\n"  # new paragraph
+            prev_pause = rows[i - 1].get("pause_after_ms", paragraph_ms)
+            sep = " " if prev_pause < paragraph_ms else "\n\n"
 
         starts.append(pos + len(sep))
         chunk_ids.append(cid)
         full_parts.append(sep + text)
         pos += len(sep) + len(text)
-        prev_para = para_idx
 
     full_text = "".join(full_parts)
 
-    # Mandatory token validation against norm.txt
     if norm_text is not None:
         m_toks = _cyrillic_tokens(full_text)
         n_toks = _cyrillic_tokens(norm_text)
@@ -252,8 +244,7 @@ def _split_sentences_with_pos(text: str) -> list[tuple[str, int]]:
     """Split text into (sentence, absolute_start_in_text) pairs.
 
     Respects paragraph boundaries (\\n\\n).  Single-letter initials (А., В.)
-    do not create sentence boundaries.  Used for BOTH name detection and
-    RUAccent processing — same function, same boundaries.
+    do not create sentence boundaries.
     """
     result: list[tuple[str, int]] = []
     para_offset = 0
@@ -328,6 +319,28 @@ def _try_accentizer():
         ) from exc
 
 
+def _ruaccent_meta() -> dict:
+    """Return {version, nn_fingerprint} for RUAccent, best-effort.
+
+    Uses sys.modules to avoid triggering onnxruntime side effects when
+    ruaccent was not imported during this run (weights missing).
+    """
+    ra = sys.modules.get("ruaccent")
+    if ra is None:
+        return {"version": "not_loaded"}
+    version = getattr(ra, "__version__", "unknown")
+    nn_path = paths.MODELS / "nn"
+    if nn_path.exists():
+        # Fast fingerprint: sorted (name, size) pairs — avoids reading weights
+        entries = sorted(
+            (str(p.relative_to(nn_path)), p.stat().st_size)
+            for p in nn_path.rglob("*") if p.is_file()
+        )
+        h = hashlib.sha256(json.dumps(entries).encode()).hexdigest()
+        return {"version": version, "nn_fingerprint": h}
+    return {"version": version, "nn_fingerprint": "absent"}
+
+
 def _ruaccent_resolve(form: str, occ_in_sent: int, sent: str,
                       accented: str) -> tuple[str, str]:
     """Match RUAccent output for one specific occurrence of form in sent.
@@ -341,10 +354,8 @@ def _ruaccent_resolve(form: str, occ_in_sent: int, sent: str,
       "unresolved/no_stress"           — form found, no '+' present
       "unresolved/tokenization_mismatch"  — SequenceMatcher gap covers position
     """
-    # Preserve ё — do NOT normalise here; "все" and "всё" must stay distinct
     form_exact = form.lower()
     input_toks_exact = [m.group().lower() for m in _WORD.finditer(sent)]
-    # Normalised versions used only for SequenceMatcher alignment
     input_toks_norm = [t.replace("ё", "е") for t in input_toks_exact]
 
     acc_toks_plus = [m.group() for m in _WORD_PLUS.finditer(accented)]
@@ -398,12 +409,36 @@ def _prepare_tmp_dir(stress_dir: Path) -> Path:
     return tmp_dir
 
 
-def _atomic_publish_inventory(tmp_dir: Path, inventory_dir: Path) -> None:
-    """Replace inventory/ with inventory.tmp/ atomically.
+def _atomic_publish_inventory(
+    tmp_dir: Path, stress_dir: Path, gen_id: str
+) -> None:
+    """Replace inventory/ with inventory.tmp/ atomically and archive to gen/<gen_id>/.
 
-    Sequence: inventory/ → inventory.old/ → inventory.tmp/ → inventory/ → delete old/.
+    Sequence:
+      1. Write current.json into tmp_dir
+      2. Copy tmp_dir → gen/<gen_id>/  (immutable archive)
+      3. inventory/ → inventory.old/ → tmp_dir → inventory/ → delete old/
     """
-    old_dir = inventory_dir.parent / "inventory.old"
+    inventory_dir = stress_dir / "inventory"
+    old_dir = stress_dir / "inventory.old"
+    gen_dir = stress_dir / "gen" / gen_id
+
+    # Write current.json (summary SHA already computed by caller)
+    summary_sha = hashlib.sha256(
+        (tmp_dir / "summary.json").read_bytes()
+    ).hexdigest()
+    cur = {"gen_id": gen_id, "summary_sha256": summary_sha}
+    (tmp_dir / "current.json").write_text(
+        json.dumps(cur, indent=2), encoding="utf-8"
+    )
+
+    # Archive to gen/<gen_id>/ before the rename (so it survives a crash)
+    gen_dir.parent.mkdir(parents=True, exist_ok=True)
+    if gen_dir.exists():
+        shutil.rmtree(gen_dir)
+    shutil.copytree(tmp_dir, gen_dir)
+
+    # Atomic swap
     if inventory_dir.exists():
         inventory_dir.rename(old_dir)
     tmp_dir.rename(inventory_dir)
@@ -430,7 +465,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def _input_fingerprint(omograph_path: Path, pronounce_p: Path,
-                        watch_p: Path, verified_p: Path,
+                        watch_p: Path, verified_p: Path, exclude_p: Path,
                         section_manifest_paths: list[Path],
                         norm_paths: list[Path],
                         top_n: int) -> dict:
@@ -439,32 +474,38 @@ def _input_fingerprint(omograph_path: Path, pronounce_p: Path,
         return _file_sha256(p) if p.exists() else "absent"
 
     return {
+        "algo_version": INVENTORY_ALGO_VERSION,
         "top_n": top_n,
         "dict": {"path": str(omograph_path), "sha256": _sha(omograph_path)},
         "pronounce": {"sha256": _sha(pronounce_p)},
         "watch": {"sha256": _sha(watch_p)},
         "verified": {"sha256": _sha(verified_p)},
+        "exclude": {"sha256": _sha(exclude_p)},
         "manifests": {
             mp.parent.name: _sha(mp) for mp in section_manifest_paths
         },
         "norm_texts": {
             np.name: _sha(np) for np in norm_paths
         },
+        "ruaccent": _ruaccent_meta(),
     }
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def run(config: dict) -> int:  # noqa: C901
-    top_n = int((config.get("stress") or {}).get("top_n", 300))
+    params = stress_params(config)
+    top_n = params["top_n"]
+    paragraph_ms = params["paragraph_ms"]
 
     # Recover any interrupted atomic publish BEFORE failure-prone loaders.
-    # This ensures inventory.old/ is restored to inventory/ even if a loader fails.
     stress_dir = paths.OUT / "stress"
     stress_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = _prepare_tmp_dir(stress_dir)
 
+    exclude_p = paths.TEXT / "stress_inventory_exclude.yaml"
     omographs = _omograph_dict()
+    exclude_forms = _load_exclude_forms(exclude_p)
     verified = _load_verified(paths.TEXT / "stress_verified.yaml")
     pronounce_forms = _load_pronounce_forms(paths.TEXT / "pronounce.yaml")
     watch_forms = _load_watch_forms(paths.TEXT / "stress_watch.yaml")
@@ -495,7 +536,7 @@ def run(config: dict) -> int:  # noqa: C901
             continue
 
         manifest_paths.append(manifest_path)
-        full_text, starts, chunk_ids = _build_section_data(section)
+        full_text, starts, chunk_ids = _build_section_data(section, paragraph_ms)
         sections_validated += 1
 
         for sent, sent_abs_start in _split_sentences_with_pos(full_text):
@@ -533,7 +574,6 @@ def run(config: dict) -> int:  # noqa: C901
                     form_example[lower] = stripped
                     form_example_len[lower] = slen
 
-                # Omograph: >1 accentuation variant in dictionary
                 if lower in omographs and len(omographs[lower]) > 1:
                     occ_in_sent = sent_form_occ[lower]
                     sent_form_occ[lower] += 1
@@ -541,7 +581,6 @@ def run(config: dict) -> int:  # noqa: C901
                     chunk_id = _chunk_id_at(starts, chunk_ids, global_pos)
                     context = _char_context(full_text, global_pos, word_len)
 
-                    # Track invalid contexts (form not found in context window)
                     form_text = full_text[global_pos:global_pos + word_len]
                     if form_text.lower() not in context.lower():
                         invalid_context_count += 1
@@ -581,7 +620,6 @@ def run(config: dict) -> int:  # noqa: C901
     ruaccent_mismatch = 0
 
     if process and occ_rows:
-        # Group row indices by sentence text — call process() once per unique sentence
         sent_to_indices: dict[str, list[int]] = {}
         for idx, sent in enumerate(occ_sents):
             sent_to_indices.setdefault(sent, []).append(idx)
@@ -614,13 +652,17 @@ def run(config: dict) -> int:  # noqa: C901
     omograph_forms = {r["form"] for r in occ_rows}
     known_forms = set(form_count)
 
+    # exclude_forms: strict exclusions (never appear regardless of reason)
+    # verified: forms confirmed by ear (also excluded)
+    excluded = exclude_forms | verified
+
     all_risk = (
         top_forms
         | omograph_forms
         | (name_forms & known_forms)
         | (pronounce_forms & known_forms)
         | (watch_forms & known_forms)
-    ) - verified
+    ) - excluded
 
     _REASON_ORDER = {"top": 0, "homograph": 1, "name": 2, "dict": 3}
     top_ranked = [f for f, _ in form_count.most_common(top_n)]
@@ -684,7 +726,7 @@ def run(config: dict) -> int:  # noqa: C901
                 f"ожидалось {expected_rows}, фактически {len(lines) - 1}"
             )
 
-    # --- summary.json (written last) ------------------------------------------
+    # --- summary.json (written last before publish) ---------------------------
     by_reason: Counter[str] = Counter()
     occ_by_reason: Counter[str] = Counter()
     for r in risk_rows:
@@ -697,8 +739,12 @@ def run(config: dict) -> int:  # noqa: C901
     risk_token_count = sum(form_count[f] for f in all_risk if f in form_count)
     risk_coverage = round(risk_token_count / total_tokens, 4) if total_tokens else 0.0
 
+    gen_id = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
     summary = {
         "schema_version": 1,
+        "algo_version": INVENTORY_ALGO_VERSION,
+        "gen_id": gen_id,
         "created_at": datetime.datetime.utcnow().isoformat() + "Z",
         "files": {
             "risk.tsv": {
@@ -715,6 +761,7 @@ def run(config: dict) -> int:  # noqa: C901
             paths.TEXT / "pronounce.yaml",
             paths.TEXT / "stress_watch.yaml",
             paths.TEXT / "stress_verified.yaml",
+            exclude_p,
             manifest_paths,
             norm_paths,
             top_n,
@@ -746,8 +793,8 @@ def run(config: dict) -> int:  # noqa: C901
         encoding="utf-8",
     )
 
-    # --- atomic publish -------------------------------------------------------
-    _atomic_publish_inventory(tmp_dir, stress_dir / "inventory")
+    # --- atomic publish with gen archive -------------------------------------
+    _atomic_publish_inventory(tmp_dir, stress_dir, gen_id)
 
     # --- console summary ------------------------------------------------------
     inventory_dir = stress_dir / "inventory"
@@ -760,6 +807,8 @@ def run(config: dict) -> int:  # noqa: C901
         print(f"  {label:<12} {by_reason[reason]:4d} форм  {occ_by_reason[reason]:7d} вхождений")
     if skipped_sections:
         print(f"  пропущено (нет манифеста): {len(skipped_sections)} секций")
+    if exclude_forms:
+        print(f"  исключено (exclude): {len(exclude_forms)} форм")
     if verified:
         print(f"  исключено (verified): {len(verified)} форм")
     if occ_rows:
@@ -777,5 +826,6 @@ def run(config: dict) -> int:  # noqa: C901
     if invalid_context_count:
         print(f"  ПРЕДУПРЕЖДЕНИЕ: invalid_context={invalid_context_count}", file=sys.stderr)
     print(f"  coverage={risk_coverage:.1%}  tokens={total_tokens}")
+    print(f"  gen → {stress_dir / 'gen' / gen_id}")
     print(f"  summary → {inventory_dir / 'summary.json'}")
     return 0
