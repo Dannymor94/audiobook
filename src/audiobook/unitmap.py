@@ -54,6 +54,27 @@ def _m2_ok(unit_text: str, orig_e: int) -> bool:
     return ch.isspace()
 
 
+def _combining_seqs(text: str) -> list[tuple[int, int]]:
+    """Return (orig_start, orig_end) for each Unicode combining character sequence.
+
+    Each sequence is a maximal run: a base character (combining class 0, or any
+    character when at index 0 or following a class-0 char) followed by zero or more
+    combining marks (combining class != 0).  Lone combiners at the start of a string
+    form their own sequence.  Canonical reordering within a sequence is handled by
+    applying NFC to the whole sequence, so all NFC chars it produces map to the same
+    [orig_start, orig_end) span.
+    """
+    seqs: list[tuple[int, int]] = []
+    i, n = 0, len(text)
+    while i < n:
+        start = i
+        i += 1
+        while i < n and unicodedata.combining(text[i]) != 0:
+            i += 1
+        seqs.append((start, i))
+    return seqs
+
+
 def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
     """NFC-normalize text and collapse whitespace, tracking original char offsets.
 
@@ -63,22 +84,21 @@ def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
       orig_end_map[i]   — exclusive end index in original text for norm[i]; -1 for seps
 
     Uses str.split() whitespace semantics (handles NBSP, tabs, repeated whitespace).
-    Handles decomposed Unicode by scanning forward until NFC(prefix) starts with
-    the target NFC codepoint, so multi-original-char → single-NFC-char sequences
-    report the full original span.
+    Handles decomposed Unicode and canonical combining-mark reordering via
+    _combining_seqs: each combining character sequence is NFC-normalised as a unit,
+    and every NFC codepoint it produces maps to the whole sequence's original span.
+    This prevents zero-length or wrong spans caused by reordering (e.g. NFC of
+    "à̕" = "à̕" where both NFC chars map to original span (0, 3)).
     """
-    nfc = unicodedata.normalize("NFC", text)
-
     # Build nfc_to_orig: (orig_start, orig_end) in original text for each NFC codepoint.
     nfc_to_orig: list[tuple[int, int]] = []
-    orig_i = 0
-    for nfc_ch in nfc:
-        orig_start = orig_i
-        while orig_i < len(text):
-            orig_i += 1
-            if unicodedata.normalize("NFC", text[orig_start:orig_i]).startswith(nfc_ch):
-                break
-        nfc_to_orig.append((orig_start, orig_i))
+    for orig_start, orig_end in _combining_seqs(text):
+        seq_nfc = unicodedata.normalize("NFC", text[orig_start:orig_end])
+        for _ in seq_nfc:
+            nfc_to_orig.append((orig_start, orig_end))
+
+    nfc = "".join(c for orig_s, orig_e in _combining_seqs(text)
+                  for c in unicodedata.normalize("NFC", text[orig_s:orig_e]))
 
     # Collapse whitespace using isspace() (matches str.split() semantics: NBSP etc.).
     tokens: list[tuple[int, int]] = []  # (nfc_start, nfc_end) per non-ws token
@@ -153,9 +173,9 @@ def find_exact_in_unit(
         orig_s = src_start_map[idx]
         orig_e = src_end_map[end_idx]
 
-        # Skip separator-space endpoints (key doesn't start/end with space after ws-collapse,
-        # so this guards against pathological edge cases only).
-        if orig_s != -1 and orig_e != -1 and orig_s >= orig_lb and orig_e <= orig_ub:
+        # Reject separator spaces (-1) and zero-length spans (combining-mark reordering
+        # can produce NFC chars whose sequence's orig span has already been fully consumed).
+        if orig_s != -1 and orig_e != -1 and orig_s < orig_e and orig_s >= orig_lb and orig_e <= orig_ub:
             results.append((orig_s, orig_e))
 
         pos = idx + 1

@@ -909,3 +909,63 @@ def test_m1_m2_s12_match_field_codepoint():
     ]
     result = annotate_units(chunks, units)
     assert result[1]["match"] == "tolerant:46"  # '.' == U+002E == 46
+
+
+# ── T15-6C7a: Unicode offset correctness (combining-mark reordering) ──────────
+
+
+def test_sol_p2_repro_1_combining_reorder_orig_lb_filters():
+    """Sol P2 repro 1: lone combiner in NFC overlaps orig span before orig_lb=3."""
+    # "à̕" has len 3; NFC = "à̕".  '̕' in NFC maps to
+    # the whole combining sequence (0,3).  With orig_lb=3, orig_s=0 < 3 → rejected.
+    result = find_exact_in_unit("̕", "à̕", orig_lb=3)
+    assert result == []
+
+
+def test_sol_p2_repro_2_char_after_reordered_seq_correct_offset():
+    """Sol P2 repro 2: char after reordered combining seq gets correct original offset."""
+    # "à̕ X": combining seq (0,3) → NFC "à̕"; 'X' at orig (4,5).
+    result = find_exact_in_unit("X", "à̕ X")
+    assert result == [(4, 5)]
+
+
+def test_combining_reorder_no_zero_length_span():
+    """Every returned span must be non-empty; zero-length spans are rejected."""
+    # '̕' in NFC maps to whole combining seq (0,3), not phantom (3,3).
+    result = find_exact_in_unit("̕", "à̕")
+    assert all(s < e for s, e in result), "zero-length span detected"
+    assert result == [(0, 3)]
+
+
+def test_combining_reorder_char_immediately_after_seq():
+    """Char immediately after a 3-orig-char combining seq has offset 3, not 1."""
+    # "à̕b": seq (0,3) + 'b' at (3,4).
+    result = find_exact_in_unit("b", "à̕b")
+    assert result == [(3, 4)]
+
+
+def test_combining_reorder_space_after_seq_then_next_word():
+    """Space between reordered seq and next word doesn't confuse offsets."""
+    result = find_exact_in_unit("fin", "à̕ fin")
+    assert result == [(4, 7)]
+
+
+def test_nfc_decomposed_source_precomposed_key_span():
+    """Decomposed source (e+́) matched by precomposed key (é) → span (0,2)."""
+    # Existing test covers this; here we verify no cascade into next char.
+    result = find_exact_in_unit("fin", "é fin")
+    assert result == [(3, 6)]
+
+
+def test_nbsp_combining_class_zero_starts_new_seq():
+    """NBSP (class 0) starts a new combining seq; offsets after it are correct."""
+    # "a b": NBSP at (1,2), 'b' at (2,3).
+    result = find_exact_in_unit("b", "a b")
+    assert result == [(2, 3)]
+
+
+def test_lone_combiner_at_start_is_own_seq():
+    """A lone combiner with no base character forms its own sequence."""
+    # "̀abc": lone grave at (0,1), then 'a' at (1,2) etc.
+    result = find_exact_in_unit("abc", "̀abc")
+    assert result == [(1, 4)]
