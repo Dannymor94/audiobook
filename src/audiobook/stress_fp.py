@@ -14,7 +14,7 @@ from pathlib import Path
 # Bump when: paragraph separator logic changes, scoring changes, new risk
 # categories added, TSV columns added/removed, summary.json schema changes.
 # See CLAUDE.md → "INVENTORY_ALGO_VERSION bump rules".
-INVENTORY_ALGO_VERSION: int = 2
+INVENTORY_ALGO_VERSION: int = 3
 
 
 def stress_params(cfg: dict) -> dict:

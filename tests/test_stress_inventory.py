@@ -1188,6 +1188,15 @@ def test_fingerprint_has_algo_version(tmp_path):
     assert summary["algo_version"] == INVENTORY_ALGO_VERSION
 
 
+def test_algo_version_is_3():
+    """INVENTORY_ALGO_VERSION must be exactly 3 (T15 unit-boundary + I2' matching).
+
+    Bump this test when the version is intentionally raised again.
+    """
+    from audiobook.stress_fp import INVENTORY_ALGO_VERSION
+    assert INVENTORY_ALGO_VERSION == 3
+
+
 def test_gen_dir_created_with_current_json(tmp_path):
     """After publish, gen/<gen_id>/ exists and inventory/current.json points to it."""
     import audiobook.paths as apaths
@@ -1223,7 +1232,8 @@ def test_gen_dir_created_with_current_json(tmp_path):
     from audiobook.stress_fp import load_current
     result = load_current(stress_dir)
     assert result is not None
-    assert result["algo_version"] == 2
+    from audiobook.stress_fp import INVENTORY_ALGO_VERSION
+    assert result["algo_version"] == INVENTORY_ALGO_VERSION
 
 # ── T15-6B1: section exclusion allowlist ─────────────────────────────────────
 
