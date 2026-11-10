@@ -1104,3 +1104,84 @@ def test_6c7c_valid_zero_token_before_distinct_prefix():
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
     assert result[1]["match"] == "exact"
+
+
+# ── T15-6C7d: regression coverage — repeated consumption via annotate_units ───
+
+
+def test_6c7d_combining_seq_repeated_consumption_blocked():
+    """Second zero-token cannot re-consume a combining-sequence span already matched.
+
+    Unit has 'a\\u0315\\u0300 xyz'.  NFC produces 'à\\u0315 xyz'; '\\u0315' in NFC
+    maps to the whole combining sequence (0,3).  After the first zero-token claims
+    that span, unit_match_end[uid]=3 blocks any subsequent match within [0,3).
+    """
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "à̕ xyz"),  # combining seq (0,3) + 'xyz'
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("̕", id_="0002"),    # zero-token: matches combining seq (0,3)
+        _chunk("̕", id_="0003"),    # second: same key, same span → blocked
+        _chunk("Конец", id_="0004"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7d_combining_seq_sequential_consumption_passes():
+    """Two zero-tokens in the same unit consume non-overlapping spans successfully.
+
+    First zero-token matches the combining sequence; second matches 'xyz' after it.
+    """
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "à̕ xyz"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("̕", id_="0002"),    # matches combining seq (0,3)
+        _chunk("xyz", id_="0003"),       # matches 'xyz' at (4,7) after the seq
+        _chunk("Конец", id_="0004"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[1]["match"] == "exact"
+    assert result[2]["unit_id"] == 1
+    assert result[2]["match"] == "exact"
+
+
+def test_6c7d_suffix_and_prefix_both_active_valid():
+    """Both suffix (6C7b) and prefix (6C7c) bounds active; zero-token in the middle passes."""
+    # Unit: "Начало suf zero pre Конец"
+    # chunk1 = "Начало suf" → suffix 'suf' consumed up to pos 11
+    # chunk2 = "zero" → zero-token: must land after suf and before pre
+    # chunk3 = "pre Конец" → prefix 'pre' blocks from pos 12
+    units = [_unit("paragraph", "Начало suf zero pre Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["match"] == "exact"
+
+
+def test_6c7d_suffix_and_prefix_both_active_overlap_raises():
+    """With both suffix and prefix active, a key that overlaps either is rejected."""
+    # Unit: "Начало suf zero pre Конец"
+    # chunk2 = "suf" → would need pos after suf (pos 11) but 'suf' is at (7,10) → blocked
+    units = [_unit("paragraph", "Начало suf zero pre Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),
+        _chunk("suf", id_="0002"),        # 'suf' is in consumed suffix → I2' error
+        _chunk("pre Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
