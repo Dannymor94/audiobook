@@ -479,3 +479,67 @@ def test_i2_prime_consecutive_zero_token_reversed_order_raises():
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
     assert "no occurrence" in exc_info.value.reason
+
+
+# ── T15-6C5a: anchor interval bounds ─────────────────────────────────────────
+# Zero-token key must NOT match outside the strict interval [lower_anchor, upper_anchor).
+
+
+def test_i2_prime_key_before_lower_anchor_raises():
+    # Source: "abc Начало Конец"
+    # Chunks: Начало | abc | Конец
+    # "abc" precedes the lower anchor "Начало" → rejected.
+    units = [_unit("paragraph", "abc Начало Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+def test_i2_prime_key_after_upper_anchor_raises():
+    # Source: "Начало Конец abc"
+    # Chunks: Начало | abc | Конец
+    # "abc" follows the upper anchor "Конец" → rejected.
+    units = [_unit("paragraph", "Начало Конец abc")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+def test_i2_prime_key_in_prior_chunk_suffix_raises():
+    # Source: "Начало abc Конец"
+    # Chunks: "Начало abc" | abc | Конец
+    # "abc" is claimed by the first Cyrillic chunk's suffix → consumed_end blocks it.
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало abc", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+def test_i2_prime_key_between_anchors_passes():
+    # Source: "abc Начало abc Конец"
+    # Chunks: Начало | abc | Конец
+    # "abc" at pos 11 is strictly between lower anchor "Начало" and upper anchor "Конец".
+    units = [_unit("paragraph", "abc Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["kind"] == "text"

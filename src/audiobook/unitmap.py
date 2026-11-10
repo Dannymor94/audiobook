@@ -73,17 +73,18 @@ def _resolve_zero_token(
     chunk_idx: int,
     all_chunk_toks: list[list[str]],
     abs_pos: int,
-    unit_stream: list[tuple[str, int, str]],
+    unit_stream: list[tuple[str, int, str, int, int]],
     units: list[dict],
     unit_match_end: dict[int, int],
+    consumed_end: dict[int, int],
     section: str,
 ) -> tuple[int, str]:
     """I2′: resolve a zero-Cyrillic-token chunk via text-anchor search.
 
-    Anchors are the nearest preceding/following Cyrillic chunks.  Searches only
-    source units between those anchors.  Zero-token chunks do not advance abs_pos,
-    so consecutive zero-token chunks share the same anchor boundaries and ordering
-    is enforced via unit_match_end.
+    Searches only within the character interval strictly after the lower Cyrillic
+    anchor token and before the upper Cyrillic anchor token.  Rejects text already
+    consumed by prior Cyrillic chunks (tracked in consumed_end).  Zero-token chunks
+    do not advance abs_pos; consecutive ones are ordered via unit_match_end.
 
     Returns (unit_id, kind).  Raises AnnotationError on any ambiguity or failure.
     """
@@ -105,34 +106,49 @@ def _resolve_zero_token(
             chunk_id=chunk_id,
         )
 
-    # Lower anchor: unit owning the last token consumed before this chunk.
+    # Lower anchor: unit and char position just after the last consumed Cyrillic token.
     lower_uid = 0
     if abs_pos > 0:
-        _, lower_uid, _ = unit_stream[abs_pos - 1]
+        _, lower_uid, _, _, _ = unit_stream[abs_pos - 1]
 
-    # Upper anchor: unit owning the first token of the next Cyrillic chunk.
-    # Zero-token chunks don't advance abs_pos, so the next Cyrillic chunk's
-    # first token is always at abs_pos in unit_stream.
+    # Upper anchor: unit and char start of the first token in the next Cyrillic chunk.
+    # Zero-token chunks don't advance abs_pos, so unit_stream[abs_pos] is always the
+    # next unconsumed Cyrillic token.
     upper_uid = len(units) - 1
+    upper_char_start: int | None = None
     for j in range(chunk_idx + 1, len(all_chunk_toks)):
         if all_chunk_toks[j]:
             if abs_pos < len(unit_stream):
-                _, upper_uid, _ = unit_stream[abs_pos]
+                _, upper_uid, _, upper_char_start, _ = unit_stream[abs_pos]
             break
 
-    # Search for key in whitespace-normalised unit texts[lower_uid..upper_uid].
-    # Only consider occurrences at or after unit_match_end[uid] (consecutive order).
+    # Search for key in source units[lower_uid..upper_uid], bounded by anchor char spans.
+    #   lower_uid: start at max(consumed_end, unit_match_end) — rejects overlap with
+    #              prior Cyrillic chunk and enforces I2′ ordering.
+    #   upper_uid: end before upper_char_start — stays strictly before next Cyrillic token.
+    #   intermediate units: bounded only by unit_match_end (I2′ ordering).
+    # Positions are in the whitespace-normalised unit text; consumed_end / upper_char_start
+    # are from original text positions (no-op when whitespace is already normalised).
     matches: list[tuple[int, int]] = []  # (unit_id, start_pos_in_norm_text)
     for uid in range(lower_uid, upper_uid + 1):
         norm_unit = _norm_ws(units[uid].get("text", ""))
-        min_start = unit_match_end.get(uid, 0)
-        search_from = 0
+
+        if uid == lower_uid:
+            lb = max(consumed_end.get(uid, 0), unit_match_end.get(uid, 0))
+        else:
+            lb = unit_match_end.get(uid, 0)
+
+        if uid == upper_uid and upper_char_start is not None:
+            ub = min(upper_char_start, len(norm_unit))
+        else:
+            ub = len(norm_unit)
+
+        search_from = lb
         while True:
             pos = norm_unit.find(key, search_from)
-            if pos == -1:
+            if pos == -1 or pos + len(key) > ub:
                 break
-            if pos >= min_start:
-                matches.append((uid, pos))
+            matches.append((uid, pos))
             search_from = pos + 1
 
     if not matches:
@@ -179,18 +195,22 @@ def annotate_units(
       I2′ — zero-token chunk that is empty, unresolvable, duplicate, or cross-unit
       I3  — chunk spans multiple source units or units with conflicting kinds
     """
-    # Build flat unit token stream: (token, unit_id, kind) per Cyrillic word.
-    unit_stream: list[tuple[str, int, str]] = []
+    # Build flat unit token stream with char spans: (token, unit_id, kind, char_start, char_end).
+    unit_stream: list[tuple[str, int, str, int, int]] = []
     for uid, unit in enumerate(units):
         kind = _unit_kind(unit)
-        for tok in _tokens(unit.get("text", "")):
-            unit_stream.append((tok, uid, kind))
+        for m in _CYR.finditer(unit.get("text", "")):
+            tok = m.group().lower().replace("ё", "е")
+            unit_stream.append((tok, uid, kind, m.start(), m.end()))
 
     # Precompute token lists for all chunks (needed for I2′ lookahead).
     all_chunk_toks = [_tokens(c.get("text", "")) for c in manifest_chunks]
 
-    # Tracks last match end position (in norm unit text) per unit for I2′ ordering.
+    # unit_match_end: last match end position (in norm unit text) per unit, for I2′ ordering.
     unit_match_end: dict[int, int] = {}
+    # consumed_end: char end of each unit's last Cyrillic chunk including non-Cyrillic suffix,
+    # used to restrict I2′ search to unconsumed source text.
+    consumed_end: dict[int, int] = {}
 
     annotated: list[dict] = []
     abs_pos = 0
@@ -203,7 +223,7 @@ def annotate_units(
             # I2′: resolve via text-anchor search
             uid, kind = _resolve_zero_token(
                 chunk, i, all_chunk_toks, abs_pos,
-                unit_stream, units, unit_match_end, section,
+                unit_stream, units, unit_match_end, consumed_end, section,
             )
             annotated.append({**chunk, "unit_id": uid, "kind": kind})
             # abs_pos is NOT advanced — zero-token chunks consume no token positions
@@ -221,7 +241,7 @@ def annotate_units(
                     chunk_id=chunk_id,
                     mismatch_idx=abs_idx,
                 )
-            unit_tok, uid, kind = unit_stream[abs_idx]
+            unit_tok, uid, kind, _, _ = unit_stream[abs_idx]
             if unit_tok != tok:
                 raise AnnotationError(
                     f"token mismatch: manifest={tok!r} unit={unit_tok!r} (I1)",
@@ -248,6 +268,19 @@ def annotate_units(
             )
 
         abs_pos += len(toks)
+
+        # Track consumed_end: advance past any non-Cyrillic suffix of this chunk.
+        _, uid_last, _, _, char_end_last = unit_stream[abs_pos - 1]
+        chunk_raw = chunk.get("text", "")
+        last_cyr = list(_CYR.finditer(chunk_raw))
+        suffix = chunk_raw[last_cyr[-1].end():] if last_cyr else ""
+        if suffix:
+            unit_text = units[uid_last].get("text", "")
+            pos = unit_text.find(suffix, char_end_last)
+            consumed_end[uid_last] = (pos + len(suffix)) if pos >= 0 else char_end_last
+        else:
+            consumed_end[uid_last] = char_end_last
+
         annotated.append({
             **chunk,
             "unit_id": next(iter(seen_units)),
