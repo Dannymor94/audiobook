@@ -440,14 +440,27 @@ def annotate_units(
         abs_pos += len(toks)
 
         # Track consumed_end: advance past any non-Cyrillic suffix of this chunk.
+        # Uses NFC+ws-aware matching (fix 6C7b) so double-space / NBSP / decomposed
+        # Unicode in the chunk suffix correctly block the same span in the unit text.
         _, uid_last, _, _, char_end_last = unit_stream[abs_pos - 1]
         chunk_raw = chunk.get("text", "")
         last_cyr = list(_CYR.finditer(chunk_raw))
         suffix = chunk_raw[last_cyr[-1].end():] if last_cyr else ""
         if suffix:
             unit_text = units[uid_last].get("text", "")
-            pos = unit_text.find(suffix, char_end_last)
-            consumed_end[uid_last] = (pos + len(suffix)) if pos >= 0 else char_end_last
+            norm_suffix, _, _ = _build_offset_map(suffix)
+            if norm_suffix:
+                matches = find_exact_in_unit(suffix, unit_text, orig_lb=char_end_last)
+                if not matches:
+                    raise AnnotationError(
+                        "chunk non-Cyrillic suffix not found in unit after Cyrillic anchor; "
+                        "cannot establish consumed end",
+                        section=section,
+                        chunk_id=chunk_id,
+                    )
+                consumed_end[uid_last] = matches[0][1]  # first = closest to anchor
+            else:
+                consumed_end[uid_last] = char_end_last
         else:
             consumed_end[uid_last] = char_end_last
 

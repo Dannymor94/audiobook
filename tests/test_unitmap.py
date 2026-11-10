@@ -969,3 +969,64 @@ def test_lone_combiner_at_start_is_own_seq():
     # "̀abc": lone grave at (0,1), then 'a' at (1,2) etc.
     result = find_exact_in_unit("abc", "̀abc")
     assert result == [(1, 4)]
+
+
+# ── T15-6C7b: prevent reuse of previous chunk's non-Cyrillic suffix ───────────
+
+
+def test_6c7b_sol_p1_double_space_suffix_blocks_reuse():
+    """Sol P1 repro: double-space in chunk suffix must block subsequent zero-token match.
+
+    Old str.find missed the suffix, leaving consumed_end too low; zero-token
+    'abc' was then incorrectly matched against already-consumed text.
+    """
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало  abc", id_="0001"),  # double space → suffix "  abc"
+        _chunk("abc", id_="0002"),           # zero-token: should be blocked
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7b_decomposed_suffix_blocks_reuse():
+    """Decomposed suffix in chunk (NFC-equivalent to source) correctly blocks reuse."""
+    # Unit has precomposed é (U+00E9); chunk suffix has decomposed e+combining_acute.
+    units = [_unit("paragraph", "Начало \xe9 Конец")]
+    chunks = [
+        _chunk("Начало é", id_="0001"),  # decomposed é as suffix
+        _chunk("\xe9", id_="0002"),             # zero-token: blocked after NFC match
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7b_nbsp_suffix_blocks_reuse():
+    """NBSP in chunk suffix is treated as whitespace; consumed text is correctly blocked."""
+    units = [_unit("paragraph", "Начало xyz Конец")]
+    chunks = [
+        _chunk("Начало xyz", id_="0001"),  # NBSP before xyz in suffix
+        _chunk("xyz", id_="0002"),              # zero-token: blocked
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c7b_valid_zero_token_after_suffix_passes():
+    """Zero-token chunk AFTER the previous chunk's suffix still resolves correctly."""
+    units = [_unit("paragraph", "Начало abc xyz Конец")]
+    chunks = [
+        _chunk("Начало abc", id_="0001"),  # suffix " abc" consumed up to pos 10
+        _chunk("xyz", id_="0002"),          # zero-token: starts at pos 11, valid
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["kind"] == "text"
+    assert result[1]["match"] == "exact"
