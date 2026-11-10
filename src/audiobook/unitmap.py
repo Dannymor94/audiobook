@@ -13,6 +13,10 @@ import unicodedata
 _CYR = re.compile(r"[а-яёА-ЯЁ]+")
 _WS = re.compile(r"\s+")
 _TRAILING_TERM = re.compile(r"[.!?…]+$")
+# M2 tolerant matching: T = {".", "…"} — only characters text_prep can append.
+_M2_TERMINAL: frozenset[str] = frozenset((".", "…"))
+# Characters that, when following an M2 match, disqualify it.
+_PUNCT_AFTER_M2: frozenset[str] = frozenset((".", "!", "?", "…"))
 
 
 def _tokens(text: str) -> list[str]:
@@ -35,6 +39,19 @@ def _norm_ws(text: str) -> str:
 def _match_key(text: str) -> str:
     """Normalize whitespace and strip trailing sentence-terminal punctuation."""
     return _TRAILING_TERM.sub("", _norm_ws(text))
+
+
+def _m2_ok(unit_text: str, orig_e: int) -> bool:
+    """True when an M2 match ending at orig_e is valid: at boundary or followed by whitespace.
+
+    Rejects if followed by sentence punctuation [.!?…].
+    """
+    if orig_e >= len(unit_text):
+        return True
+    ch = unit_text[orig_e]
+    if ch in _PUNCT_AFTER_M2:
+        return False
+    return ch.isspace()
 
 
 def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
@@ -190,15 +207,26 @@ def _resolve_zero_token(
     consumed_end: dict[int, int],
     global_zero_pos: tuple[int, int],
     section: str,
-) -> tuple[int, str]:
-    """I2′: resolve a zero-Cyrillic-token chunk via text-anchor search.
+) -> tuple[int, str, str]:
+    """I2′: resolve a zero-Cyrillic-token chunk via M1 (exact) or M2 (tolerant) matching.
 
-    Searches only within the character interval strictly after the lower Cyrillic
-    anchor token and before the upper Cyrillic anchor token.  Rejects text already
-    consumed by prior Cyrillic chunks (consumed_end) and enforces that all zero-token
-    matches occur in monotonically increasing source order across units (global_zero_pos).
+    M1: NFC + ws-collapsed exact match of the full normalized chunk text.
+    M2: permitted only when the normalized chunk ends with a character in T = {".", "…"}.
+        Removes exactly one terminal char; the remaining key must contain a letter or digit.
+        Source occurrence must end at unit boundary or be followed by whitespace, and must
+        NOT be followed by sentence punctuation [.!?…].
 
-    Returns (unit_id, kind).  Raises AnnotationError on any ambiguity or failure.
+    All M1 and M2 candidates are gathered across the anchor interval bounded by:
+      - consumed_end: excludes text claimed by prior Cyrillic chunks
+      - unit_match_end: enforces per-unit ordering of zero-token matches (original coords)
+      - global_zero_pos: enforces global monotonic source order across units
+      - upper_char_start: stays before the next Cyrillic anchor token
+
+    Accepts only when the union of all candidate positions is exactly one distinct
+    (unit_id, orig_start, orig_end) triple.
+
+    Returns (unit_id, kind, match) where match is "exact" or "tolerant:<codepoint>".
+    Raises AnnotationError on failure — no manuscript text in error messages.
     """
     chunk_id = str(chunk.get("id", ""))
     raw_text = chunk.get("text", "")
@@ -210,22 +238,21 @@ def _resolve_zero_token(
             chunk_id=chunk_id,
         )
 
-    key = _match_key(raw_text)
-    if not key:
+    norm_key, _, _ = _build_offset_map(raw_text)
+    if not norm_key:
         raise AnnotationError(
             "chunk text reduces to empty after normalization (I2′)",
             section=section,
             chunk_id=chunk_id,
         )
 
-    # Lower anchor: unit and char position just after the last consumed Cyrillic token.
+    # Lower anchor: unit owning the last consumed Cyrillic token.
     lower_uid = 0
     if abs_pos > 0:
         _, lower_uid, _, _, _ = unit_stream[abs_pos - 1]
 
-    # Upper anchor: unit and char start of the first token in the next Cyrillic chunk.
-    # Zero-token chunks don't advance abs_pos, so unit_stream[abs_pos] is always the
-    # next unconsumed Cyrillic token.
+    # Upper anchor: unit owning the first token of the next Cyrillic chunk.
+    # abs_pos is not advanced for zero-token chunks, so unit_stream[abs_pos] is always next.
     upper_uid = len(units) - 1
     upper_char_start: int | None = None
     for j in range(chunk_idx + 1, len(all_chunk_toks)):
@@ -234,69 +261,65 @@ def _resolve_zero_token(
                 _, upper_uid, _, upper_char_start, _ = unit_stream[abs_pos]
             break
 
-    # Search for key in source units[lower_uid..upper_uid], bounded by anchor char spans.
-    #   lower_uid: start at max(consumed_end, unit_match_end, global_zero_pos end) —
-    #              rejects overlap with prior Cyrillic chunk, enforces I2′ per-unit ordering,
-    #              and enforces global monotonic source order across units.
-    #   upper_uid: end before upper_char_start — stays strictly before next Cyrillic token.
-    #   intermediate units: bounded by unit_match_end and global_zero_pos.
-    # Positions are in the whitespace-normalised unit text; consumed_end / upper_char_start
-    # are from original text positions (no-op when whitespace is already normalised).
     global_uid, global_end = global_zero_pos
-    matches: list[tuple[int, int]] = []  # (unit_id, start_pos_in_norm_text)
+
+    # M2 key: strip exactly one terminal char in T, keep only if alphanumeric content remains.
+    m2_key: str | None = None
+    m2_terminal_cp: int = 0
+    if norm_key[-1] in _M2_TERMINAL and len(norm_key) > 1:
+        candidate = norm_key[:-1]
+        if any(c.isalpha() or c.isdigit() for c in candidate):
+            m2_key = candidate
+            m2_terminal_cp = ord(norm_key[-1])
+
+    # Gather M1 and M2 candidates: (uid, orig_start, orig_end, match_str).
+    # All bounds are in original text coordinates.
+    candidates: list[tuple[int, int, int, str]] = []
     for uid in range(lower_uid, upper_uid + 1):
-        norm_unit = _norm_ws(units[uid].get("text", ""))
+        unit_text = units[uid].get("text", "")
 
         if uid == lower_uid:
             lb = max(consumed_end.get(uid, 0), unit_match_end.get(uid, 0))
         else:
             lb = unit_match_end.get(uid, 0)
 
-        # Global source order: skip units before the last zero-token match;
-        # within the same unit, advance lb past the previous match end.
+        ub: int | None = upper_char_start if (uid == upper_uid and upper_char_start is not None) else None
+
+        # Enforce global monotonic source order across units.
         if uid < global_uid:
             continue
         if uid == global_uid:
             lb = max(lb, global_end)
 
-        if uid == upper_uid and upper_char_start is not None:
-            ub = min(upper_char_start, len(norm_unit))
-        else:
-            ub = len(norm_unit)
+        for orig_s, orig_e in find_exact_in_unit(norm_key, unit_text, orig_lb=lb, orig_ub=ub):
+            candidates.append((uid, orig_s, orig_e, "exact"))
 
-        search_from = lb
-        while True:
-            pos = norm_unit.find(key, search_from)
-            if pos == -1 or pos + len(key) > ub:
-                break
-            matches.append((uid, pos))
-            search_from = pos + 1
+        if m2_key is not None:
+            for orig_s, orig_e in find_exact_in_unit(m2_key, unit_text, orig_lb=lb, orig_ub=ub):
+                if _m2_ok(unit_text, orig_e):
+                    candidates.append((uid, orig_s, orig_e, f"tolerant:{m2_terminal_cp}"))
 
-    if not matches:
+    distinct: set[tuple[int, int, int]] = {(u, s, e) for u, s, e, _ in candidates}
+
+    if not distinct:
         raise AnnotationError(
-            f"zero-token chunk: no occurrence in units {lower_uid}–{upper_uid} (I2′)",
+            f"zero-token chunk: no M1/M2 match in units {lower_uid}–{upper_uid} (I2′)",
+            section=section,
+            chunk_id=chunk_id,
+        )
+    if len(distinct) > 1:
+        raise AnnotationError(
+            f"zero-token chunk: {len(distinct)} ambiguous positions (I2′)",
             section=section,
             chunk_id=chunk_id,
         )
 
-    matched_uids = {uid for uid, _ in matches}
-    if len(matched_uids) > 1:
-        raise AnnotationError(
-            f"zero-token chunk: occurrence spans units {sorted(matched_uids)} (I2′)",
-            section=section,
-            chunk_id=chunk_id,
-        )
+    uid_m, orig_s_m, orig_e_m = next(iter(distinct))
+    match_types = {mt for u, s, e, mt in candidates if u == uid_m and s == orig_s_m and e == orig_e_m}
+    match_str = "exact" if "exact" in match_types else next(iter(match_types))
 
-    if len(matches) > 1:
-        raise AnnotationError(
-            f"zero-token chunk: duplicate occurrence in unit {matches[0][0]} (I2′)",
-            section=section,
-            chunk_id=chunk_id,
-        )
-
-    matched_uid, match_pos = matches[0]
-    unit_match_end[matched_uid] = match_pos + len(key)
-    return matched_uid, _unit_kind(units[matched_uid])
+    unit_match_end[uid_m] = orig_e_m
+    return uid_m, _unit_kind(units[uid_m]), match_str
 
 
 def annotate_units(
@@ -327,7 +350,7 @@ def annotate_units(
     # Precompute token lists for all chunks (needed for I2′ lookahead).
     all_chunk_toks = [_tokens(c.get("text", "")) for c in manifest_chunks]
 
-    # unit_match_end: last match end position (in norm unit text) per unit, for I2′ ordering.
+    # unit_match_end: orig_end of last I2′ match per unit (original text coordinates).
     unit_match_end: dict[int, int] = {}
     # consumed_end: char end of each unit's last Cyrillic chunk including non-Cyrillic suffix,
     # used to restrict I2′ search to unconsumed source text.
@@ -345,13 +368,13 @@ def annotate_units(
         toks = all_chunk_toks[i]
 
         if not toks:
-            # I2′: resolve via text-anchor search
-            uid, kind = _resolve_zero_token(
+            # I2′: resolve via M1/M2 matching
+            uid, kind, match = _resolve_zero_token(
                 chunk, i, all_chunk_toks, abs_pos,
                 unit_stream, units, unit_match_end, consumed_end,
                 global_zero_pos, section,
             )
-            annotated.append({**chunk, "unit_id": uid, "kind": kind})
+            annotated.append({**chunk, "unit_id": uid, "kind": kind, "match": match})
             global_zero_pos = (uid, unit_match_end[uid])
             # abs_pos is NOT advanced — zero-token chunks consume no token positions
             continue

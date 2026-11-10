@@ -325,7 +325,7 @@ def test_i2_prime_duplicate_occurrence_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
-    assert "duplicate" in exc_info.value.reason
+    assert "ambiguous" in exc_info.value.reason
 
 
 # Scenario 5: missing occurrence — key not found in any unit in the anchor
@@ -345,7 +345,7 @@ def test_i2_prime_missing_occurrence_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
-    assert "no occurrence" in exc_info.value.reason
+    assert "no M1/M2 match" in exc_info.value.reason
 
 
 # Scenario 6: match only before lower anchor — key exists in a unit whose
@@ -367,7 +367,7 @@ def test_i2_prime_match_before_lower_anchor_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
-    assert "no occurrence" in exc_info.value.reason
+    assert "no M1/M2 match" in exc_info.value.reason
 
 
 # Scenario 7: whitespace-only chunk → error.
@@ -403,7 +403,7 @@ def test_i2_prime_cross_unit_occurrence_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
-    assert "spans units" in exc_info.value.reason
+    assert "ambiguous" in exc_info.value.reason
 
 
 # Scenario 9a: first chunk is zero-token (no prev Cyrillic anchor).
@@ -478,7 +478,7 @@ def test_i2_prime_consecutive_zero_token_reversed_order_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
-    assert "no occurrence" in exc_info.value.reason
+    assert "no M1/M2 match" in exc_info.value.reason
 
 
 # ── T15-6C5a: anchor interval bounds ─────────────────────────────────────────
@@ -699,3 +699,213 @@ def test_exact_ub_boundary_exclusive():
     text = "abc xyz"
     result = find_exact_in_unit("abc", text, orig_ub=2)
     assert result == []
+
+
+# ── T15-6C5c1b: M1/M2 matching via annotate_units ────────────────────────────
+# 12 punctuation scenarios from the architect's spec.
+
+
+def _zchunk(text: str, id_: str) -> dict:
+    """Zero-Cyrillic-token chunk helper."""
+    return {"text": text, "id": id_, "pause_after_ms": 400}
+
+
+# S1: different punctuation on chunk vs source → no match, STOP.
+
+def test_m1_m2_s1_different_punc_stops():
+    # Chunk "abc!" (ends '!', not in M2_TERMINAL), source has "abc?" — no M1 or M2.
+    units = [_unit("paragraph", "Начало abc? Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc!", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+# S2: chunk has terminal ".", source lacks it → tolerant match.
+
+def test_m1_m2_s2_tolerant_dot():
+    # Source "abc" (no dot); chunk "abc." — M2 strips dot, finds "abc" at boundary.
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc.", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "tolerant:46"  # ord('.') == 46
+
+
+# S3: chunk "abc.", source "abc." → exact match (M2 "abc" blocked by following ".").
+
+def test_m1_m2_s3_exact_when_source_has_dot():
+    units = [_unit("paragraph", "Начало abc. Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc.", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "exact"
+
+
+# S4: exact at one position, tolerant at another → two distinct positions, STOP.
+
+def test_m1_m2_s4_exact_plus_tolerant_stops():
+    # Source: "abc. xyz abc " — M1 finds "abc." at (7,11), M2 "abc" at (12,15) followed by ' '.
+    # Two distinct positions → STOP.
+    units = [_unit("paragraph", "Начало abc. xyz abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc.", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "ambiguous" in exc_info.value.reason
+
+
+# S5a: unique "..." in source → exact.
+
+def test_m1_m2_s5a_unique_ellipsis_exact():
+    units = [_unit("paragraph", "Начало ... Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("...", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "exact"
+
+
+# S5b: duplicate "..." in source → two positions, STOP.
+
+def test_m1_m2_s5b_duplicate_ellipsis_stops():
+    units = [_unit("paragraph", "Начало ... mid ... Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("...", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "ambiguous" in exc_info.value.reason
+
+
+# S6: case difference → no match, STOP (matching is case-sensitive).
+
+def test_m1_m2_s6_case_mismatch_stops():
+    units = [_unit("paragraph", "Начало ABC Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+# S7a: NBSP in source, regular space in chunk → match (ws-collapsed).
+
+def test_m1_m2_s7a_nbsp_matches():
+    units = [_unit("paragraph", "Начало a b Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("a b", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["match"] == "exact"
+
+
+# S7b: multiple spaces in source, single space in chunk → match.
+
+def test_m1_m2_s7b_multiple_spaces_match():
+    units = [_unit("paragraph", "Начало a   b Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("a b", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "exact"
+
+
+# S8a: missing match → STOP.
+
+def test_m1_m2_s8a_missing_stops():
+    units = [_unit("paragraph", "Начало xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("nothere", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "no M1/M2 match" in exc_info.value.reason
+
+
+# S9: punctuation-only chunk → M1 only (M2 key would have no alphanumeric).
+
+def test_m1_m2_s9_punctuation_only_m1_only():
+    # "..." ends with '.', M2 key ".." has no letter/digit → not attempted.
+    units = [_unit("paragraph", "Начало ... Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("...", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "exact"
+
+
+# S10: tolerant with "…" (U+2026) terminal.
+
+def test_m1_m2_s10_tolerant_ellipsis_char():
+    # Chunk "abc…", source "abc" at boundary → tolerant match, codepoint 8230.
+    units = [_unit("paragraph", "Начало abc Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc…", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == f"tolerant:{ord(chr(0x2026))}"  # tolerant:8230
+
+
+# S11: M2 blocked when followed by "!" (not whitespace).
+
+def test_m1_m2_s11_m2_blocked_by_exclamation():
+    # Source "abc!xyz" — M2 "abc" at (7,10) followed by '!' → rejected.
+    # M1 "abc." not found either → STOP.
+    units = [_unit("paragraph", "Начало abc!xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("abc.", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+
+
+# S12: M2 match recorded with correct codepoint.
+
+def test_m1_m2_s12_match_field_codepoint():
+    # Match field should encode the stripped terminal char's codepoint.
+    units = [_unit("paragraph", "Начало word Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _zchunk("word.", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["match"] == "tolerant:46"  # '.' == U+002E == 46
