@@ -351,3 +351,66 @@ exit code: 0
 **Изменённые файлы:** `src/audiobook/stress_inventory.py`, `tests/test_stress_inventory.py`, `tasks/T15-stress-inventory.md`.
 
 **SHA:** d66bb58
+
+---
+
+### Итерация 5: архитектурный контракт T15/T17 (commit 139da4e)
+
+**STOP-GATE перед изменением границ параграфов:**
+`joins.py:174` определяет same-paragraph как `chunks[k]["pause_after_ms"] < p_par`. Поле `pause_after_ms` присутствует во всех строках `manifest.jsonl`. Переиспользование возможно — токен-матчинг `_assign_chunk_paragraphs` заменён на `pause_after_ms`-based логику.
+
+**Таблица аудита (требования → статус до итерации 5):**
+
+| № | требование | было | итерация 5 |
+|---|-----------|------|------------|
+| 1 | Единая функция границ параграфов (joins.py) | MISSING | ✓ `pause_after_ms < paragraph_ms` |
+| 2 | `stress_fp.py`, semantic fingerprint | MISSING | ✓ новый модуль |
+| 3 | `stress_params(cfg)` | MISSING | ✓ в `stress_fp.py` |
+| 4 | RUAccent version + SHA моделей | MISSING | ✓ `_ruaccent_meta()` via sys.modules |
+| 5 | `INVENTORY_ALGO_VERSION` + правило в CLAUDE.md | MISSING | ✓ algo_version=2, правило в CLAUDE.md |
+| 6 | `stress_inventory_exclude.yaml` | MISSING | ✓ `_load_exclude_forms()` |
+| 7 | Общий модуль публикации поколений (T15+T17) | MISSING | ✓ `stress_fp.load_current()` |
+| 8 | `inventory/current.json`, `gen/<gen_id>/` | MISSING | ✓ атомарная публикация + архив |
+| 9 | Публичный API для T17 | MISSING | ✓ `stress_fp.py` как точка входа |
+| 10 | Полный отказ при ошибке RUAccent init | PASS | PASS |
+
+**Новые возможности:**
+- `src/audiobook/stress_fp.py` — общий модуль: `INVENTORY_ALGO_VERSION=2`, `stress_params(cfg)`, `load_current(stress_dir)`
+- `out/stress/gen/<gen_id>/` — иммутабельный архив каждого запуска
+- `out/stress/inventory/current.json` — `{gen_id, summary_sha256}` с проверкой целостности
+- `text/stress_inventory_exclude.yaml` — строгие исключения (форма никогда не попадает в risk.tsv)
+- `summary.json.inputs.algo_version` и `summary.json.algo_version = 2`
+- `summary.json.inputs.ruaccent = {version, nn_fingerprint}` без import-side-effects
+
+**Прогон на реальном тексте (итерация 5):**
+```
+  ДИАГНОСТИКА: пропущено 2 секций без манифеста: 00_section, 02_soderzhanie
+stress-inventory: 1030 форм в списке риска → out/stress/inventory/risk.tsv
+  top-300        300 форм    41918 вхождений
+  омографы       430 форм     2673 вхождений
+  имена          403 форм    27253 вхождений
+  словарь         45 форм     1161 вхождений
+  RUAccent: resolved=2644, no_stress=29, mismatch=0
+  coverage=60.5%  tokens=76036
+  gen → out/stress/gen/20261110_031800
+exit code: 0
+```
+
+**Имён 578→403:** переход на `pause_after_ms` ставит правильные границы — чанки с `pause_after_ms=900` разделяются `\n\n`, только `pause_after_ms<900` → пробел. В реальных манифестах большинство чанков заканчиваются `pause_after_ms=900` (граница параграфа), поэтому слов-«имён» стало меньше. Это корректный результат: ориентир joins.py достигнут.
+
+**Верификация:**
+- `inventory/current.json` указывает на `gen/<gen_id>/`, SHA-256 совпадает ✓
+- `summary.json.algo_version = 2` ✓
+- `inputs.ruaccent.version = 1.5.8.3`, `inputs.ruaccent.nn_fingerprint` = SHA файлового дерева ✓
+- `invalid_context_count=0`, `mismatch=0` ✓
+
+**Новые тесты (3):**
+`test_exclude_yaml_removes_form`, `test_fingerprint_has_algo_version`, `test_gen_dir_created_with_current_json`
+
+**Полный suite:** `718 passed, 5 skipped`
+
+**Арифметика:** база ~667 + 51 (T15) = 718.
+
+**Изменённые файлы:** `src/audiobook/stress_fp.py` (новый), `src/audiobook/stress_inventory.py`, `tests/test_stress_inventory.py`, `CLAUDE.md`, `tasks/T15-stress-inventory.md`.
+
+**SHA:** 139da4e
