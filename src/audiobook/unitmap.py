@@ -133,6 +133,43 @@ def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
     return "".join(norm_chars), orig_start_map, orig_end_map
 
 
+def _find_normalized(
+    key: str,
+    unit_text: str,
+    *,
+    orig_lb: int,
+    orig_ub: int,
+) -> list[tuple[int, int, int]]:
+    """Return (norm_pos, orig_start, orig_end) for each valid match of key in unit_text.
+
+    norm_pos is the start index in the NFC+ws-collapsed unit text.  Two matches at
+    different norm_pos are distinct occurrences even if their source spans coincide
+    (e.g. two identical combining marks inside the same combining sequence).
+    """
+    norm_key, _, _ = _build_offset_map(key)
+    if not norm_key:
+        return []
+    norm_src, src_start_map, src_end_map = _build_offset_map(unit_text)
+    if not norm_src:
+        return []
+
+    results: list[tuple[int, int, int]] = []
+    pos = 0
+    while True:
+        idx = norm_src.find(norm_key, pos)
+        if idx == -1:
+            break
+        end_idx = idx + len(norm_key) - 1  # inclusive last char index in norm
+        orig_s = src_start_map[idx]
+        orig_e = src_end_map[end_idx]
+        # Reject separator spaces (-1) and zero-length spans.
+        if orig_s != -1 and orig_e != -1 and orig_s < orig_e and orig_s >= orig_lb and orig_e <= orig_ub:
+            results.append((idx, orig_s, orig_e))
+        pos = idx + 1
+
+    return results
+
+
 def find_exact_in_unit(
     key: str,
     unit_text: str,
@@ -153,34 +190,7 @@ def find_exact_in_unit(
     """
     if orig_ub is None:
         orig_ub = len(unit_text)
-
-    norm_key, _, _ = _build_offset_map(key)
-    if not norm_key:
-        return []
-
-    norm_src, src_start_map, src_end_map = _build_offset_map(unit_text)
-    if not norm_src:
-        return []
-
-    results: list[tuple[int, int]] = []
-    pos = 0
-    while True:
-        idx = norm_src.find(norm_key, pos)
-        if idx == -1:
-            break
-        end_idx = idx + len(norm_key) - 1  # inclusive last char index in norm
-
-        orig_s = src_start_map[idx]
-        orig_e = src_end_map[end_idx]
-
-        # Reject separator spaces (-1) and zero-length spans (combining-mark reordering
-        # can produce NFC chars whose sequence's orig span has already been fully consumed).
-        if orig_s != -1 and orig_e != -1 and orig_s < orig_e and orig_s >= orig_lb and orig_e <= orig_ub:
-            results.append((orig_s, orig_e))
-
-        pos = idx + 1
-
-    return results
+    return [(s, e) for _, s, e in _find_normalized(key, unit_text, orig_lb=orig_lb, orig_ub=orig_ub)]
 
 
 class AnnotationError(Exception):
@@ -319,9 +329,11 @@ def _resolve_zero_token(
             m2_key = candidate
             m2_terminal_cp = ord(norm_key[-1])
 
-    # Gather M1 and M2 candidates: (uid, orig_start, orig_end, match_str).
-    # All bounds are in original text coordinates.
-    candidates: list[tuple[int, int, int, str]] = []
+    # Gather M1 and M2 candidates: (uid, orig_start, orig_end, match_str, norm_pos).
+    # norm_pos is the index in the unit's NFC+ws-collapsed string — used for deduplication.
+    # Two matches at different norm_pos are distinct occurrences even when their source
+    # spans coincide (e.g. two identical combining marks in one combining sequence).
+    candidates: list[tuple[int, int, int, str, int]] = []
     for uid in range(lower_uid, upper_uid + 1):
         unit_text = units[uid].get("text", "")
 
@@ -330,7 +342,7 @@ def _resolve_zero_token(
         else:
             lb = unit_match_end.get(uid, 0)
 
-        ub: int | None = prefix_ub if (uid == upper_uid and prefix_ub is not None) else None
+        ub: int = prefix_ub if (uid == upper_uid and prefix_ub is not None) else len(unit_text)
 
         # Enforce global monotonic source order across units.
         if uid < global_uid:
@@ -338,15 +350,17 @@ def _resolve_zero_token(
         if uid == global_uid:
             lb = max(lb, global_end)
 
-        for orig_s, orig_e in find_exact_in_unit(norm_key, unit_text, orig_lb=lb, orig_ub=ub):
-            candidates.append((uid, orig_s, orig_e, "exact"))
+        for np, orig_s, orig_e in _find_normalized(norm_key, unit_text, orig_lb=lb, orig_ub=ub):
+            candidates.append((uid, orig_s, orig_e, "exact", np))
 
         if m2_key is not None:
-            for orig_s, orig_e in find_exact_in_unit(m2_key, unit_text, orig_lb=lb, orig_ub=ub):
+            for np, orig_s, orig_e in _find_normalized(m2_key, unit_text, orig_lb=lb, orig_ub=ub):
                 if _m2_ok(unit_text, orig_e):
-                    candidates.append((uid, orig_s, orig_e, f"tolerant:{m2_terminal_cp}"))
+                    candidates.append((uid, orig_s, orig_e, f"tolerant:{m2_terminal_cp}", np))
 
-    distinct: set[tuple[int, int, int]] = {(u, s, e) for u, s, e, _ in candidates}
+    # Deduplicate by (uid, norm_pos): same normalized position = same occurrence,
+    # regardless of whether M1 and M2 happen to share source spans.
+    distinct: set[tuple[int, int]] = {(u, np) for u, _, _, _, np in candidates}
 
     if not distinct:
         raise AnnotationError(
@@ -361,9 +375,13 @@ def _resolve_zero_token(
             chunk_id=chunk_id,
         )
 
-    uid_m, orig_s_m, orig_e_m = next(iter(distinct))
-    match_types = {mt for u, s, e, mt in candidates if u == uid_m and s == orig_s_m and e == orig_e_m}
+    uid_m, norm_pos_m = next(iter(distinct))
+    winning = [(orig_s, orig_e, mt) for u, orig_s, orig_e, mt, np in candidates
+               if u == uid_m and np == norm_pos_m]
+    match_types = {mt for _, _, mt in winning}
     match_str = "exact" if "exact" in match_types else next(iter(match_types))
+    # Prefer M1 orig_e (includes terminal char); fall back to first candidate's orig_e.
+    orig_e_m = next((e for _, e, mt in winning if mt == "exact"), winning[0][1])
 
     unit_match_end[uid_m] = orig_e_m
     return uid_m, _unit_kind(units[uid_m]), match_str

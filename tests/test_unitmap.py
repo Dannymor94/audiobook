@@ -1347,3 +1347,93 @@ def test_6c9b_later_duplicate_prefix_does_not_substitute():
     ]
     with pytest.raises(AnnotationError):
         annotate_units(chunks, units)
+
+
+# ── T15-6C9c: preserve Unicode match identity ──────────────────────────────────
+
+
+def test_6c9c_sol_p2_find_exact_returns_two_entries():
+    """find_exact_in_unit on a unit with two identical combining marks returns two spans.
+
+    Both occurrences share the same source span (the whole combining sequence covers
+    the entire string), but they are distinct normalized occurrences.
+    """
+    # "a" + U+0315 + U+0315: one combining sequence, two identical combining marks.
+    result = find_exact_in_unit("̕", "a̕̕")
+    assert len(result) == 2, f"expected 2 entries, got {result}"
+    assert result[0] == result[1] == (0, 3)
+
+
+def test_6c9c_sol_p2_annotate_raises_on_combining_ambiguity():
+    """Full Sol P2: two identical combining marks → ambiguous zero-token match → STOP."""
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "a̕̕"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("̕", id_="0002"),   # zero-token; ambiguous — two occurrences
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
+
+
+def test_6c9c_single_combining_mark_passes():
+    """One genuine combining-mark occurrence is unambiguous and resolves correctly."""
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "a̕"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("̕", id_="0002"),   # zero-token; exactly one occurrence
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[1]["match"] == "exact"
+
+
+def test_6c9c_m1_m2_same_norm_pos_counts_as_one():
+    """M1 and M2 candidates at the same norm_pos are one occurrence, not two.
+
+    Chunk text ends with '.'; M1 matches 'foo.' and M2 would match 'foo' at the
+    same start position.  After _m2_ok filtering (rejected: '.' follows 'foo'),
+    only M1 remains → not ambiguous.
+    """
+    # Unit: "Начало foo. Конец" — 'foo.' ends with terminal, M2's 'foo' is followed by '.'
+    units = [_unit("paragraph", "Начало foo. Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("foo.", id_="0002"),    # zero-token: M1 matches, M2 rejected by _m2_ok
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["match"] == "exact"
+
+
+def test_6c9c_exact_and_tolerant_at_different_positions_raises():
+    """M1 at one position and M2 at a different position → two distinct occurrences → STOP."""
+    # Unit: "Начало foo bar. Конец"
+    # Chunk text: "foo." — M1 looks for 'foo.', M2 for 'foo'.
+    # 'foo.' at pos=7 (M1 exact), 'foo' at pos=7 (M2, but _m2_ok rejects it since '.' follows)
+    # and 'foo' at pos=7 only. Actually let's design a case where they DO differ:
+    # Unit: "Начало foo bar Конец" — M1 'foo.' not found, M2 'foo' found at one pos.
+    # That's just one occurrence, should PASS. Let's use:
+    # Unit: "Начало foo. bar foo Конец" — M1 'foo.' at pos 7, M2 'foo' also at pos 7
+    # (_m2_ok: char after 'foo' is '.', rejected) AND 'foo' at pos 15 (_m2_ok: space → ok)
+    # → distinct by norm_pos: M1 at 7, M2 at 15 → 2 → STOP.
+    units = [_unit("paragraph", "Начало foo. bar foo Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("foo.", id_="0002"),   # M1 matches at pos 7; M2 'foo' at pos 15 (space after)
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2" in str(exc_info.value)
