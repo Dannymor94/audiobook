@@ -815,7 +815,7 @@ def test_intra_paragraph_chunks_joined_with_space(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import _build_section_data
-        full_text, starts, chunk_ids = _build_section_data("01_ch", paragraph_ms=900)
+        full_text, starts, chunk_ids, _ = _build_section_data("01_ch", paragraph_ms=900)
         assert "\n\n" not in full_text, f"Found \\n\\n in same-paragraph chunks: {full_text!r}"
         assert " " in full_text, f"No space between same-paragraph chunks: {full_text!r}"
         assert len(starts) == 2
@@ -1572,7 +1572,7 @@ def test_6c3_same_unit_short_pause_gives_space(tmp_path):
     """Same source unit + text kind + pause < paragraph_ms → space separator."""
     units = [{"type": "paragraph", "text": "слово раз слово два"}]
     rows = [_row(1, "слово раз", pause=400), _row(2, "слово два")]
-    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    full_text, _, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
     assert " " in full_text and "\n\n" not in full_text
 
 
@@ -1581,7 +1581,7 @@ def test_6c3_different_units_gives_paragraph_break(tmp_path):
     units = [{"type": "paragraph", "text": "слово раз"},
              {"type": "paragraph", "text": "слово два"}]
     rows = [_row(1, "слово раз", pause=400), _row(2, "слово два")]
-    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    full_text, _, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
     assert "\n\n" in full_text
 
 
@@ -1590,7 +1590,7 @@ def test_6c3_heading_kind_gives_paragraph_break(tmp_path):
     units = [{"type": "heading", "text": "Глава"},
              {"type": "paragraph", "text": "текст главы"}]
     rows = [_row(1, "Глава", pause=50), _row(2, "текст главы")]
-    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    full_text, _, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
     assert "\n\n" in full_text
 
 
@@ -1598,7 +1598,7 @@ def test_6c3_same_unit_long_pause_gives_paragraph_break(tmp_path):
     """Same unit but pause ≥ paragraph_ms → \\n\\n."""
     units = [{"type": "paragraph", "text": "слово раз слово два"}]
     rows = [_row(1, "слово раз", pause=1000), _row(2, "слово два")]
-    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    full_text, _, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
     assert "\n\n" in full_text
 
 
@@ -1606,5 +1606,97 @@ def test_6c3_annotation_failure_is_fatal(tmp_path):
     """Token mismatch between manifest and units → SystemExit (no silent fallback)."""
     units = [{"type": "paragraph", "text": "слово раз"}]
     rows = [_row(1, "совсем другой текст")]
+    with pytest.raises(SystemExit):
+        _build_section(tmp_path, units, rows)
+
+
+# ── T15-6C5c1c: zero_token_chunks diagnostics ────────────────────────────────
+
+
+def _zrow(n, text, pause=400):
+    """Zero-Cyrillic-token manifest row (URL-like text has no Cyrillic)."""
+    return {"id": f"{n:04d}", "n": n, "text": text, "hash": "x",
+            "seed": 1, "pause_after_ms": pause, "status": "done",
+            "locked": False, "duration_ms": None}
+
+
+def test_6c5c1c_no_zero_token_gives_empty_list(tmp_path):
+    """Sections with only Cyrillic chunks produce empty zero_token_chunks."""
+    units = [{"type": "paragraph", "text": "слово раз слово два"}]
+    rows = [_row(1, "слово раз", pause=400), _row(2, "слово два")]
+    _, _, _, zt = _build_section(tmp_path, units, rows)
+    assert zt == []
+
+
+def test_6c5c1c_exact_match_diagnostic(tmp_path):
+    """Zero-token chunk with exact M1 match produces correct diagnostic entry."""
+    units = [
+        {"type": "paragraph", "text": "Начало http://example.com Конец"},
+    ]
+    rows = [
+        _row(1, "Начало", pause=400),
+        _zrow(2, "http://example.com", pause=400),
+        _row(3, "Конец"),
+    ]
+    _, _, _, zt = _build_section(tmp_path, units, rows)
+    assert len(zt) == 1
+    entry = zt[0]
+    assert entry["section"] == "01_test"
+    assert entry["chunk_id"] == "0002"
+    assert entry["unit_id"] == 0
+    assert entry["kind"] == "text"
+    assert entry["match"] == "exact"
+    # text_classes must not reveal raw text — only categories
+    assert isinstance(entry["text_classes"], list)
+    assert "letter" in entry["text_classes"] or "punct" in entry["text_classes"]
+    # Raw text must not appear in entry
+    for v in entry.values():
+        assert "example" not in str(v), "raw text leaked into diagnostic"
+
+
+def test_6c5c1c_tolerant_match_diagnostic(tmp_path):
+    """Zero-token chunk with M2 tolerant match reports correct match field."""
+    units = [
+        {"type": "paragraph", "text": "Начало http://example.com Конец"},
+    ]
+    rows = [
+        _row(1, "Начало", pause=400),
+        _zrow(2, "http://example.com.", pause=400),  # trailing dot → M2 tolerant
+        _row(3, "Конец"),
+    ]
+    _, _, _, zt = _build_section(tmp_path, units, rows)
+    assert len(zt) == 1
+    assert zt[0]["match"].startswith("tolerant:")
+    assert zt[0]["match"] == "tolerant:46"  # '.' == 46
+
+
+def test_6c5c1c_text_classes_no_raw_text(tmp_path):
+    """text_classes contains only category names, never source content."""
+    units = [{"type": "paragraph", "text": "Начало 3.14 Конец"}]
+    rows = [
+        _row(1, "Начало", pause=400),
+        _zrow(2, "3.14", pause=400),
+        _row(3, "Конец"),
+    ]
+    _, _, _, zt = _build_section(tmp_path, units, rows)
+    assert len(zt) == 1
+    tc = zt[0]["text_classes"]
+    assert isinstance(tc, list)
+    assert all(isinstance(c, str) for c in tc)
+    # "3.14" has digits and punctuation
+    assert "digit" in tc
+    assert "punct" in tc
+    # No raw text
+    assert "3.14" not in str(tc)
+
+
+def test_6c5c1c_failed_mapping_raises(tmp_path):
+    """AnnotationError from annotate_units propagates as SystemExit (fail closed)."""
+    units = [{"type": "paragraph", "text": "Начало Конец"}]
+    rows = [
+        _row(1, "Начало", pause=400),
+        _zrow(2, "NOTFOUND", pause=400),  # no match in source → AnnotationError
+        _row(3, "Конец"),
+    ]
     with pytest.raises(SystemExit):
         _build_section(tmp_path, units, rows)

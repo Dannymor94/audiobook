@@ -177,17 +177,39 @@ def _cyrillic_tokens(text: str) -> list[str]:
     return [w.lower().replace("ё", "е") for w in _WORD.findall(text)]
 
 
+def _text_classes(text: str) -> list[str]:
+    """Character-class signature for a chunk — never includes source text."""
+    import unicodedata
+    classes: set[str] = set()
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat[0] == "L":
+            classes.add("letter")
+        elif cat[0] == "N":
+            classes.add("digit")
+        elif cat[0] == "P":
+            classes.add("punct")
+        elif cat[0] == "S":
+            classes.add("symbol")
+        elif cat[0] == "Z" or ch.isspace():
+            classes.add("space")
+        else:
+            classes.add("other")
+    return sorted(classes)
+
+
 def _build_section_data(
     section: str, paragraph_ms: int
-) -> tuple[str, list[int], list[str]]:
+) -> tuple[str, list[int], list[str], list[dict]]:
     """Concatenate manifest chunk texts into one string; build bisect intervals.
 
     Paragraph boundaries are determined by joins.is_within_para():
       same source unit, both kind 'text', pause_after_ms < paragraph_ms → space
       otherwise → \\n\\n
 
-    Returns (full_text, starts, chunk_ids) where starts[i] is the character
-    offset of chunk chunk_ids[i] inside full_text.
+    Returns (full_text, starts, chunk_ids, zero_token_diags) where:
+      - starts[i] is the character offset of chunk chunk_ids[i] inside full_text
+      - zero_token_diags is a list of diagnostic dicts for zero-Cyrillic-token chunks
 
     Also validates _cyrillic_tokens(full_text) == _cyrillic_tokens(norm.txt).
     Raises SystemExit on annotation failure or token mismatch.
@@ -226,6 +248,7 @@ def _build_section_data(
     full_parts: list[str] = []
     starts: list[int] = []
     chunk_ids: list[str] = []
+    zero_token_diags: list[dict] = []
     pos = 0
 
     for i, (row, ann) in enumerate(zip(rows, annotated)):
@@ -248,6 +271,16 @@ def _build_section_data(
         full_parts.append(sep + text)
         pos += len(sep) + len(text)
 
+        if "match" in ann:  # zero-Cyrillic-token chunk annotated by I2′
+            zero_token_diags.append({
+                "section": section,
+                "chunk_id": str(cid),
+                "unit_id": ann["unit_id"],
+                "kind": ann["kind"],
+                "match": ann["match"],
+                "text_classes": _text_classes(text),
+            })
+
     full_text = "".join(full_parts)
 
     if norm_text is not None:
@@ -269,7 +302,7 @@ def _build_section_data(
                 "Статус: blocked."
             )
 
-    return full_text, starts, chunk_ids
+    return full_text, starts, chunk_ids, zero_token_diags
 
 
 def _chunk_id_at(starts: list[int], chunk_ids: list[str], pos: int) -> str:
@@ -557,6 +590,7 @@ def run(config: dict) -> int:  # noqa: C901
     sections_validated = 0
     invalid_context_count = 0
     excluded_tokens = 0
+    all_zero_token_chunks: list[dict] = []
 
     for norm_path in sorted(paths.TEXT.glob("[0-9][0-9]_*.norm.txt")):
         section = norm_path.stem.replace(".norm", "")
@@ -592,7 +626,8 @@ def run(config: dict) -> int:  # noqa: C901
 
 
         manifest_paths.append(manifest_path)
-        full_text, starts, chunk_ids = _build_section_data(section, paragraph_ms)
+        full_text, starts, chunk_ids, zt_diags = _build_section_data(section, paragraph_ms)
+        all_zero_token_chunks.extend(zt_diags)
         sections_validated += 1
 
         for sent, sent_abs_start in _split_sentences_with_pos(full_text):
@@ -852,6 +887,7 @@ def run(config: dict) -> int:  # noqa: C901
             "ruaccent_errors": 0,
             "invalid_context_count": invalid_context_count,
             "ruaccent_available": process is not None,
+            "zero_token_chunks": all_zero_token_chunks,
         },
     }
     (tmp_dir / "summary.json").write_text(
