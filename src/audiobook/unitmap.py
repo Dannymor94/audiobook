@@ -57,12 +57,10 @@ def _m2_ok(unit_text: str, orig_e: int) -> bool:
 def _combining_seqs(text: str) -> list[tuple[int, int]]:
     """Return (orig_start, orig_end) for each Unicode combining character sequence.
 
-    Each sequence is a maximal run: a base character (combining class 0, or any
-    character when at index 0 or following a class-0 char) followed by zero or more
-    combining marks (combining class != 0).  Lone combiners at the start of a string
-    form their own sequence.  Canonical reordering within a sequence is handled by
-    applying NFC to the whole sequence, so all NFC chars it produces map to the same
-    [orig_start, orig_end) span.
+    Each sequence is a base character (combining class 0) followed by zero or more
+    combining marks (class != 0).  Lone combiners at index 0 form their own sequence.
+    NFC is applied per-sequence so all resulting codepoints map to the same orig span,
+    correctly handling canonical combining-mark reordering.
     """
     seqs: list[tuple[int, int]] = []
     i, n = 0, len(text)
@@ -79,18 +77,19 @@ def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
     """NFC-normalize text and collapse whitespace, tracking original char offsets.
 
     Returns (norm, orig_start_map, orig_end_map):
-      norm             — NFC text with str.split()-collapsed whitespace
-      orig_start_map[i] — start index in original text for norm[i]; -1 for sep spaces
-      orig_end_map[i]   — exclusive end index in original text for norm[i]; -1 for seps
+      norm              -- NFC text with str.split()-collapsed whitespace
+      orig_start_map[i] -- start index in original text for norm[i]; -1 for sep spaces
+      orig_end_map[i]   -- exclusive end index in original text for norm[i]; -1 for seps
 
-    Uses str.split() whitespace semantics (handles NBSP, tabs, repeated whitespace).
-    Handles decomposed Unicode and canonical combining-mark reordering via
-    _combining_seqs: each combining character sequence is NFC-normalised as a unit,
-    and every NFC codepoint it produces maps to the whole sequence's original span.
-    This prevents zero-length or wrong spans caused by reordering (e.g. NFC of
-    "à̕" = "à̕" where both NFC chars map to original span (0, 3)).
+    Two-stage normalization:
+    1. Per-combining-sequence NFC: groups each base char + its combining marks and
+       NFC-normalizes as a unit, mapping all resulting codepoints to the whole
+       sequence span.  Handles canonical combining-mark reordering correctly.
+    2. Cross-sequence Hangul Jamo composition: Jamo (all ccc=0) are separate
+       combining sequences but compose via NFC into precomposed syllable blocks.
+       A second NFC pass detects and merges these, unioning the orig spans.
     """
-    # Build nfc_to_orig: (orig_start, orig_end) in original text for each NFC codepoint.
+    # Stage 1: per-combining-sequence NFC.
     nfc_to_orig: list[tuple[int, int]] = []
     for orig_start, orig_end in _combining_seqs(text):
         seq_nfc = unicodedata.normalize("NFC", text[orig_start:orig_end])
@@ -99,6 +98,28 @@ def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
 
     nfc = "".join(c for orig_s, orig_e in _combining_seqs(text)
                   for c in unicodedata.normalize("NFC", text[orig_s:orig_e]))
+
+    # Stage 2: cross-sequence Hangul Jamo composition.
+    # Per-sequence NFC leaves Jamo uncomposed; full NFC composes them.
+    nfc_full = unicodedata.normalize("NFC", nfc)
+    if nfc_full != nfc:
+        new_nfc_to_orig: list[tuple[int, int]] = []
+        nfc_i = 0
+        for full_ch in nfc_full:
+            for end in range(nfc_i + 1, len(nfc) + 1):
+                if unicodedata.normalize("NFC", nfc[nfc_i:end]) == full_ch:
+                    span = (
+                        min(nfc_to_orig[j][0] for j in range(nfc_i, end)),
+                        max(nfc_to_orig[j][1] for j in range(nfc_i, end)),
+                    )
+                    new_nfc_to_orig.append(span)
+                    nfc_i = end
+                    break
+            else:
+                new_nfc_to_orig.append(nfc_to_orig[nfc_i])
+                nfc_i += 1
+        nfc = nfc_full
+        nfc_to_orig = new_nfc_to_orig
 
     # Collapse whitespace using isspace() (matches str.split() semantics: NBSP etc.).
     tokens: list[tuple[int, int]] = []  # (nfc_start, nfc_end) per non-ws token
@@ -131,7 +152,6 @@ def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
             orig_end_map.append(-1)
 
     return "".join(norm_chars), orig_start_map, orig_end_map
-
 
 def _find_normalized(
     key: str,

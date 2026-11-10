@@ -1437,3 +1437,96 @@ def test_6c9c_exact_and_tolerant_at_different_positions_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2" in str(exc_info.value)
+
+# ── T15-6C9d: full NFC-equivalent source offset mapping ────────────────────────
+
+
+def test_6c9d_sol_p2_hangul_jamo_composition():
+    """Sol P2: find_exact_in_unit with composed key in decomposed source returns [(0, 2)]."""
+    # ᄀ (Choseong Kiyeok) + ᅡ (Jungseong A) → NFC → 가 (가)
+    result = find_exact_in_unit("가", "가")
+    assert result == [(0, 2)]
+
+
+def test_6c9d_hangul_mid_text():
+    """Hangul Jamo in the middle of a string maps to correct original span."""
+    # "X" + jamo + "Y"  — orig positions: X=0, ᄀ=1, ᅡ=2, Y=3
+    result = find_exact_in_unit("가", "X가Y")
+    assert result == [(1, 3)]
+
+
+def test_6c9d_hangul_two_syllables_distinct():
+    """Two distinct Hangul syllables (from Jamo) are found as two separate occurrences."""
+    # 가 → 가 and 나 → 나
+    result_ga = find_exact_in_unit("가", "가나")
+    assert result_ga == [(0, 2)]
+    result_na = find_exact_in_unit("나", "가나")
+    assert result_na == [(2, 4)]
+
+
+def test_6c9d_combining_reorder_match():
+    """Key with ccc-reordered combining marks matches source with canonical order."""
+    # NFC of a + ̈ (diaeresis, ccc=230) = ä; searching ä in original finds it.
+    result = find_exact_in_unit("ä", "ä")
+    assert result == [(0, 2)]
+
+
+def test_6c9d_combining_reorder_cross_order():
+    """Composed search key matches decomposed source regardless of combiner order."""
+    # a + grave (̀, ccc=230) + diaeresis (̈, ccc=230) in original.
+    # NFC: a + ̀ → à, then à + ̈ → no precomposed → à̈
+    # Searching for à̈ (NFC) in original à̈ (also NFC: à̈) → match.
+    source = "à̈"
+    key = "à̈"  # à + combining diaeresis (NFC of source)
+    result = find_exact_in_unit(key, source)
+    assert len(result) == 1
+    assert result[0] == (0, 3)
+
+
+def test_6c9d_nbsp_whitespace_collapse():
+    """NBSP between words is treated as whitespace; match uses collapsed orig spans."""
+    # "foo bar" — NBSP collapses to space in norm, orig positions stay correct.
+    result = find_exact_in_unit("foo", "foo bar")
+    assert result == [(0, 3)]
+    result2 = find_exact_in_unit("bar", "foo bar")
+    assert result2 == [(4, 7)]
+
+
+def test_6c9d_repeated_chars_source_bounds():
+    """Source bounds (orig_lb, orig_ub) correctly filter repeated identical chars."""
+    result = find_exact_in_unit("a", "aaa", orig_lb=1)
+    # orig_lb=1 excludes the first 'a' at (0,1); returns (1,2) and (2,3)
+    assert result == [(1, 2), (2, 3)]
+
+
+def test_6c9d_source_ub_excludes_tail():
+    """orig_ub correctly excludes matches starting or ending beyond the bound."""
+    result = find_exact_in_unit("b", "abc", orig_ub=2)
+    # 'b' is at (1,2), orig_e=2 ≤ ub=2 → included
+    assert result == [(1, 2)]
+    result2 = find_exact_in_unit("c", "abc", orig_ub=2)
+    # 'c' is at (2,3), orig_e=3 > ub=2 → excluded
+    assert result2 == []
+
+
+def test_6c9d_6c9c_norm_pos_ambiguity_still_detected():
+    """Combining-mark ambiguity (from 6C9c) is preserved under the new offset mapping."""
+    # Two ̕ in source: distinct norm_pos, distinct orig spans → ambiguous.
+    result = find_exact_in_unit("̕", "a̕̕")
+    assert len(result) == 2
+
+
+def test_6c9d_annotate_hangul_zero_token_passes():
+    """Hangul syllable chunk (precomposed) matches a Jamo source unit via NFC normalization."""
+    units = [
+        _unit("paragraph", "\u041d\u0430\u0447\u0430\u043b\u043e"),  # Начало
+        _unit("paragraph", "\u1100\u1161"),  # Jamo source, NFC = \uac00
+        _unit("paragraph", "\u041a\u043e\u043d\u0435\u0446"),  # Конец
+    ]
+    chunks = [
+        _chunk("\u041d\u0430\u0447\u0430\u043b\u043e", id_="0001"),
+        _chunk("\uac00", id_="0002"),  # precomposed syllable
+        _chunk("\u041a\u043e\u043d\u0435\u0446", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
