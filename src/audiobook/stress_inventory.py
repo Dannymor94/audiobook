@@ -182,17 +182,15 @@ def _build_section_data(
 ) -> tuple[str, list[int], list[str]]:
     """Concatenate manifest chunk texts into one string; build bisect intervals.
 
-    Paragraph boundaries are determined by pause_after_ms from manifest rows:
-      row["pause_after_ms"] < paragraph_ms  → space (same paragraph continues)
-      row["pause_after_ms"] >= paragraph_ms → \\n\\n (new paragraph)
-
-    This matches joins.py _within_para_pairs() boundary logic exactly.
+    Paragraph boundaries are determined by joins.is_within_para():
+      same source unit, both kind 'text', pause_after_ms < paragraph_ms → space
+      otherwise → \\n\\n
 
     Returns (full_text, starts, chunk_ids) where starts[i] is the character
     offset of chunk chunk_ids[i] inside full_text.
 
     Also validates _cyrillic_tokens(full_text) == _cyrillic_tokens(norm.txt).
-    Raises SystemExit on token mismatch.
+    Raises SystemExit on annotation failure or token mismatch.
     """
     manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
     if not manifest_path.exists():
@@ -201,12 +199,25 @@ def _build_section_data(
         )
 
     try:
-        from audiobook.chunker import _read_manifest
+        from audiobook.chunker import _read_manifest, load_units
         rows = _read_manifest(manifest_path)
     except Exception as exc:
         raise SystemExit(
             f"stress-inventory: не удалось прочитать манифест {manifest_path}: {exc}\n"
             "Статус: blocked."
+        ) from None
+
+    nn, slug = section.split("_", 1)
+    units = load_units(nn, slug)
+
+    from audiobook.unitmap import annotate_units, AnnotationError
+    from audiobook.joins import is_within_para
+    try:
+        annotated = annotate_units(rows, units, section=section)
+    except AnnotationError as exc:
+        raise SystemExit(
+            f"stress-inventory: не удалось аннотировать секцию '{section}':\n"
+            f"  {exc}\nСтатус: blocked."
         ) from None
 
     norm_path = paths.TEXT / f"{section}.norm.txt"
@@ -217,15 +228,20 @@ def _build_section_data(
     chunk_ids: list[str] = []
     pos = 0
 
-    for i, row in enumerate(rows):
+    for i, (row, ann) in enumerate(zip(rows, annotated)):
         text = row.get("text") or ""
         cid = row.get("id", "?")
 
         if pos == 0:
             sep = ""
         else:
-            prev_pause = rows[i - 1].get("pause_after_ms", paragraph_ms)
-            sep = " " if prev_pause < paragraph_ms else "\n\n"
+            prev_ann = annotated[i - 1]
+            sep = " " if is_within_para(
+                prev_ann["unit_id"], ann["unit_id"],
+                prev_ann["kind"], ann["kind"],
+                rows[i - 1].get("pause_after_ms", paragraph_ms),
+                paragraph_ms,
+            ) else "\n\n"
 
         starts.append(pos + len(sep))
         chunk_ids.append(cid)

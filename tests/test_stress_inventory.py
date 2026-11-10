@@ -40,8 +40,19 @@ def _make_env(tmp_path: Path, norm_texts: dict[str, str],
     out_dir = tmp_path / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    blocks_dir = text_dir / "blocks"
+    blocks_dir.mkdir(exist_ok=True)
     for name, content in norm_texts.items():
         (text_dir / name).write_text(content, encoding="utf-8")
+        # Auto-create blocks.json: one paragraph block per splitlines() line.
+        # load_units consumes every line (including empty ones between paragraphs).
+        sec = name.replace(".norm.txt", "")
+        all_lines = content.splitlines()
+        n_blocks = len(all_lines) if all_lines else 1
+        blocks_data = {"blocks": [{"type": "paragraph"} for _ in range(n_blocks)]}
+        (blocks_dir / f"{sec}.blocks.json").write_text(
+            json.dumps(blocks_data), encoding="utf-8"
+        )
 
     if with_omograph_dict:
         odict = omographs if omographs is not None else {
@@ -1512,3 +1523,88 @@ def test_zero_excluded_sections_unchanged(tmp_path):
     assert d["sections_excluded"] == 0
     assert d["excluded_tokens"] == 0
     assert d["sections_processed"] == d["sections_total"]
+
+
+# ── T15-6C3: is_within_para integration in _build_section_data ───────────────
+
+def _build_section(tmp_path, units_data, manifest_rows, section="01_test", paragraph_ms=900):
+    """Call _build_section_data with synthetic units and manifest rows.
+
+    units_data: list of {"type": str, "text": str}
+    """
+    import audiobook.paths as apaths
+    orig_text, orig_out = apaths.TEXT, apaths.OUT
+
+    text_dir = tmp_path / "text"
+    text_dir.mkdir(parents=True, exist_ok=True)
+    blocks_dir = text_dir / "blocks"
+    blocks_dir.mkdir(parents=True, exist_ok=True)
+    sec_dir = tmp_path / "out" / "sections" / section
+    sec_dir.mkdir(parents=True, exist_ok=True)
+
+    norm_text = "\n".join(u["text"] for u in units_data)
+    (text_dir / f"{section}.norm.txt").write_text(norm_text, encoding="utf-8")
+    (blocks_dir / f"{section}.blocks.json").write_text(
+        json.dumps({"blocks": [{"type": u["type"]} for u in units_data]}),
+        encoding="utf-8",
+    )
+    with open(sec_dir / "manifest.jsonl", "w", encoding="utf-8") as f:
+        for row in manifest_rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    apaths.TEXT = text_dir
+    apaths.OUT = tmp_path / "out"
+    try:
+        from audiobook.stress_inventory import _build_section_data
+        return _build_section_data(section, paragraph_ms)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.OUT = orig_out
+
+
+def _row(n, text, pause=900):
+    return {"id": f"{n:04d}", "n": n, "text": text, "hash": "x",
+            "seed": 1, "pause_after_ms": pause, "status": "done",
+            "locked": False, "duration_ms": None}
+
+
+def test_6c3_same_unit_short_pause_gives_space(tmp_path):
+    """Same source unit + text kind + pause < paragraph_ms → space separator."""
+    units = [{"type": "paragraph", "text": "слово раз слово два"}]
+    rows = [_row(1, "слово раз", pause=400), _row(2, "слово два")]
+    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    assert " " in full_text and "\n\n" not in full_text
+
+
+def test_6c3_different_units_gives_paragraph_break(tmp_path):
+    """Different source units → \\n\\n even with short pause."""
+    units = [{"type": "paragraph", "text": "слово раз"},
+             {"type": "paragraph", "text": "слово два"}]
+    rows = [_row(1, "слово раз", pause=400), _row(2, "слово два")]
+    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    assert "\n\n" in full_text
+
+
+def test_6c3_heading_kind_gives_paragraph_break(tmp_path):
+    """Heading chunk → \\n\\n regardless of pause."""
+    units = [{"type": "heading", "text": "Глава"},
+             {"type": "paragraph", "text": "текст главы"}]
+    rows = [_row(1, "Глава", pause=50), _row(2, "текст главы")]
+    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    assert "\n\n" in full_text
+
+
+def test_6c3_same_unit_long_pause_gives_paragraph_break(tmp_path):
+    """Same unit but pause ≥ paragraph_ms → \\n\\n."""
+    units = [{"type": "paragraph", "text": "слово раз слово два"}]
+    rows = [_row(1, "слово раз", pause=1000), _row(2, "слово два")]
+    full_text, _, _ = _build_section(tmp_path, units, rows, paragraph_ms=900)
+    assert "\n\n" in full_text
+
+
+def test_6c3_annotation_failure_is_fatal(tmp_path):
+    """Token mismatch between manifest and units → SystemExit (no silent fallback)."""
+    units = [{"type": "paragraph", "text": "слово раз"}]
+    rows = [_row(1, "совсем другой текст")]
+    with pytest.raises(SystemExit):
+        _build_section(tmp_path, units, rows)
