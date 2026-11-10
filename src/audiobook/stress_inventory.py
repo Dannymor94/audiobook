@@ -17,7 +17,7 @@ This matches the boundary logic in joins.py exactly.
 Fatal conditions (SystemExit, non-zero):
   • models/dictionary/omographs.json.gz absent, corrupt, or wrong structure/types
   • Token mismatch between manifest and norm.txt for any section
-  • Any exception from RUAccent init (non-ImportError, FileNotFoundError, OSError)
+  • Any exception from RUAccent init (ImportError, FileNotFoundError, OSError, or other)
   • Word form longer than 80 characters
   • No sections have a manifest (sections_validated == 0)
 
@@ -297,21 +297,10 @@ def _char_context(full_text: str, char_pos: int, word_len: int) -> str:
 # ── RUAccent resolution ───────────────────────────────────────────────────────
 
 def _try_accentizer():
-    """Return accentizer.process_all callable, or None if unavailable.
-
-    ImportError / FileNotFoundError / OSError → graceful None
-      (library not installed or model weights not downloaded).
-    Any other exception from _get_accentizer() → SystemExit
-      (models present but corrupt / incompatible).
-    """
+    """Return accentizer.process_all callable, or raise SystemExit on any init failure."""
     try:
         from audiobook.accent import _get_accentizer  # noqa: PLC0415
-    except ImportError:
-        return None
-    try:
         return _get_accentizer().process_all
-    except (FileNotFoundError, OSError):
-        return None  # weights not downloaded — graceful skip
     except Exception as exc:
         raise SystemExit(
             f"stress-inventory: RUAccent инициализация завершилась с ошибкой:\n"

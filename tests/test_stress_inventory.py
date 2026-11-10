@@ -2,7 +2,7 @@
 
 Base from port-validated-settings + 14 (second review) = 33 tests now,
 iteration-3 additions = 42, iteration-4 additions bring the total to 52,
-iteration-5 additions bring the total to 57.
+iteration-5 additions bring the total to 57; T15-6A adds 3 more (60).
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -83,7 +84,11 @@ def _make_env(tmp_path: Path, norm_texts: dict[str, str],
 
 
 def _run(tmp_path, norm_texts, **kwargs):
-    """Patch paths and run stress_inventory.run; return (rc, risk_lines, occ_lines)."""
+    """Patch paths and run stress_inventory.run; return (rc, risk_lines, occ_lines).
+
+    _try_accentizer is patched to return None (no model weights in CI).
+    Tests that need RUAccent behaviour mock it themselves via patch(...).
+    """
     import audiobook.paths as apaths
     orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
 
@@ -93,7 +98,8 @@ def _run(tmp_path, norm_texts, **kwargs):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        rc = run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            rc = run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -301,7 +307,8 @@ def test_summary_json_written(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -331,7 +338,8 @@ def test_summary_json_counters(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -365,7 +373,8 @@ def test_failed_run_preserves_previous_inventory(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -408,7 +417,8 @@ def test_stale_tmp_cleaned_on_start(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -574,7 +584,8 @@ def test_stress_verified_created_if_missing(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -640,7 +651,8 @@ def test_risk_tsv_deterministic_same_process(tmp_path):
         apaths.OUT = root / "out"
         try:
             from audiobook.stress_inventory import run
-            run(config)
+            with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+                run(config)
         finally:
             apaths.TEXT = orig_text
             apaths.MODELS = orig_models
@@ -667,8 +679,10 @@ def test_risk_tsv_deterministic_across_hashseeds(tmp_path):
         f"p.TEXT=__import__('pathlib').Path(r'{root}/text');"
         f"p.MODELS=__import__('pathlib').Path(r'{root}/models');"
         f"p.OUT=__import__('pathlib').Path(r'{root}/out');"
+        "from unittest.mock import patch;"
         "from audiobook.stress_inventory import run;"
-        "run({'stress':{'top_n':5}});"
+        "_p=patch('audiobook.stress_inventory._try_accentizer',return_value=None);_p.start();"
+        "run({'stress':{'top_n':5}});_p.stop();"
         "import hashlib;"
         f"h=hashlib.sha256(open(r'{root}/out/stress/inventory/risk.tsv','rb').read()).hexdigest();"
         "print(h)"
@@ -827,20 +841,112 @@ def test_ruaccent_init_error_is_fatal():
             sys.modules["audiobook.accent"] = orig
 
 
-def test_ruaccent_init_noimport_is_ok():
-    """_try_accentizer: ImportError from accent module → returns None gracefully."""
+def test_ruaccent_init_importerror_is_fatal():
+    """_try_accentizer: ImportError from accent module → SystemExit."""
     import sys
+    from types import ModuleType
     orig = sys.modules.get("audiobook.accent", "MISSING")
     sys.modules["audiobook.accent"] = None  # causes ImportError on import
     try:
         from audiobook.stress_inventory import _try_accentizer
-        result = _try_accentizer()
+        with pytest.raises(SystemExit):
+            _try_accentizer()
     finally:
         if orig == "MISSING":
             sys.modules.pop("audiobook.accent", None)
         else:
             sys.modules["audiobook.accent"] = orig
-    assert result is None
+
+
+def test_ruaccent_init_oserror_is_fatal():
+    """_try_accentizer: OSError from _get_accentizer() → SystemExit."""
+    import sys
+    from types import ModuleType
+
+    fake_accent = ModuleType("audiobook.accent")
+
+    def bad_get_accentizer():
+        raise OSError("device not found")
+
+    fake_accent._get_accentizer = bad_get_accentizer
+    orig = sys.modules.get("audiobook.accent")
+    sys.modules["audiobook.accent"] = fake_accent
+    try:
+        from audiobook.stress_inventory import _try_accentizer
+        with pytest.raises(SystemExit):
+            _try_accentizer()
+    finally:
+        if orig is None:
+            sys.modules.pop("audiobook.accent", None)
+        else:
+            sys.modules["audiobook.accent"] = orig
+
+
+def test_ruaccent_init_filenotfound_is_fatal():
+    """_try_accentizer: FileNotFoundError from _get_accentizer() → SystemExit."""
+    import sys
+    from types import ModuleType
+
+    fake_accent = ModuleType("audiobook.accent")
+
+    def bad_get_accentizer():
+        raise FileNotFoundError("weights missing")
+
+    fake_accent._get_accentizer = bad_get_accentizer
+    orig = sys.modules.get("audiobook.accent")
+    sys.modules["audiobook.accent"] = fake_accent
+    try:
+        from audiobook.stress_inventory import _try_accentizer
+        with pytest.raises(SystemExit):
+            _try_accentizer()
+    finally:
+        if orig is None:
+            sys.modules.pop("audiobook.accent", None)
+        else:
+            sys.modules["audiobook.accent"] = orig
+
+
+def test_ruaccent_init_failure_does_not_publish(tmp_path):
+    """When RUAccent init fails, existing inventory is not overwritten."""
+    import audiobook.paths as apaths
+    from types import ModuleType
+    from unittest.mock import patch
+
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "Замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    # Write a sentinel file into existing inventory/
+    inventory_dir = root / "out" / "stress" / "inventory"
+    inventory_dir.mkdir(parents=True)
+    sentinel = inventory_dir / "risk.tsv"
+    sentinel.write_text("sentinel", encoding="utf-8")
+
+    fake_accent = ModuleType("audiobook.accent")
+
+    def _bad_init():
+        raise OSError("boom")
+
+    fake_accent._get_accentizer = _bad_init
+
+    orig_accent = sys.modules.get("audiobook.accent")
+    sys.modules["audiobook.accent"] = fake_accent
+    try:
+        from audiobook.stress_inventory import run
+        with pytest.raises(SystemExit):
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+        if orig_accent is None:
+            sys.modules.pop("audiobook.accent", None)
+        else:
+            sys.modules["audiobook.accent"] = orig_accent
+
+    assert sentinel.read_text(encoding="utf-8") == "sentinel"
 
 
 def test_wrong_dict_value_type_exits(tmp_path):
@@ -945,19 +1051,19 @@ def test_second_rename_failure_recovery(tmp_path):
 
     try:
         from audiobook.stress_inventory import run
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            # First successful run
+            run(config)
+            inv = root / "out" / "stress" / "inventory"
+            good = (inv / "risk.tsv").read_text(encoding="utf-8")
 
-        # First successful run
-        run(config)
-        inv = root / "out" / "stress" / "inventory"
-        good = (inv / "risk.tsv").read_text(encoding="utf-8")
+            # Simulate interrupted atomic: inventory/ renamed to .old/, second rename failed
+            inv.rename(inv.parent / "inventory.old")
+            assert not inv.exists()
+            assert (inv.parent / "inventory.old").exists()
 
-        # Simulate interrupted atomic: inventory/ renamed to .old/, second rename failed
-        inv.rename(inv.parent / "inventory.old")
-        assert not inv.exists()
-        assert (inv.parent / "inventory.old").exists()
-
-        # Next run must recover .old/ and produce a valid report
-        run(config)
+            # Next run must recover .old/ and produce a valid report
+            run(config)
 
         assert inv.exists(), "inventory/ not restored"
         assert (inv / "risk.tsv").exists()
@@ -981,11 +1087,12 @@ def test_top_n_change_in_fingerprint(tmp_path):
     top_n_values = []
     try:
         from audiobook.stress_inventory import run
-        for n in (5, 10):
-            run({"stress": {"top_n": n}})
-            s = json.loads((root / "out" / "stress" / "inventory" / "summary.json")
-                           .read_text(encoding="utf-8"))
-            top_n_values.append(s["inputs"]["top_n"])
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            for n in (5, 10):
+                run({"stress": {"top_n": n}})
+                s = json.loads((root / "out" / "stress" / "inventory" / "summary.json")
+                               .read_text(encoding="utf-8"))
+                top_n_values.append(s["inputs"]["top_n"])
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -1032,7 +1139,8 @@ def test_exclude_yaml_removes_form(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -1055,7 +1163,8 @@ def test_fingerprint_has_algo_version(tmp_path):
     try:
         from audiobook.stress_inventory import run
         from audiobook.stress_fp import INVENTORY_ALGO_VERSION
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
@@ -1079,7 +1188,8 @@ def test_gen_dir_created_with_current_json(tmp_path):
     apaths.OUT = root / "out"
     try:
         from audiobook.stress_inventory import run
-        run(config)
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=None):
+            run(config)
     finally:
         apaths.TEXT = orig_text
         apaths.MODELS = orig_models
