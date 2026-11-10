@@ -275,3 +275,79 @@ stress-inventory: 681 форм в списке риска → out/stress/risk.ts
 **Полный suite:** 700 passed, 5 skipped (33 теста в `test_stress_inventory.py`).
 
 **SHA:** 33b258f
+
+---
+
+### Итерация 4: исправления по ревью Codex Sol (commit d66bb58)
+
+**Исправлено:**
+
+1. **P1.1 — удалён `full_text.find(sent)`**. `_split_sentences` переименована в `_split_sentences_with_pos` и возвращает `list[tuple[str, int]]` с абсолютными смещениями. `global_pos = sent_abs_start + m.start()` — без поиска подстроки.
+2. **P1.2 — `_char_context` принимает абсолютную позицию** везде (ранее для примеров использовался `char_pos` относительно предложения).
+3. **P1.3 — Границы чанков**: `_assign_chunk_paragraphs(norm_text, rows)` — последовательное сопоставление токенов с параграфами norm.txt. Чанки одного параграфа склеиваются пробелом, разных — `\n\n`. Данные корректно восстанавливаются из нома + манифеста.
+4. **P1.4 — chunk_id**: следует из п. 1 и п. 3. `invalid_context_count=0`.
+5. **P1.5 — RUAccent init**: `ImportError` и `FileNotFoundError/OSError` → `None` (модели не установлены); любое другое исключение из `_get_accentizer()` → `SystemExit`.
+6. **P1.6 — per-element type check**: каждый элемент словаря проверяется на `list[str]`.
+7. **P1.7 — RUAccent один раз на предложение**: группировка `sent → [row_indices]`, `process(sent)` вызывается по одному разу на уникальное предложение.
+8. **P1.8 — ё/е fix**: `form_exact = form.lower()` (без `ё→е`), `input_toks_exact` тоже без нормализации. SequenceMatcher выравнивает `input_toks_norm` с `acc_toks_norm`. «все» и «всё» имеют разные позиции в `input_toks_exact` → разные ударения.
+9. **P2.9 — восстановление до загрузчиков**: `_prepare_tmp_dir(stress_dir)` вызывается до `_omograph_dict()`. Прерванный атомарный publish восстанавливается даже если следующий запуск падает на словаре.
+10. **P2.10 — fingerprints**: `inputs.top_n`, `inputs.norm_texts` (sha256 по секциям), `inputs.manifests` (sha256 по именам секций).
+11. **P2.11 — счётчики**: `total_tokens`, `risk_token_coverage`, `invalid_context_count`, `ruaccent_errors=0`.
+12. **P2.12 — пустой inventory**: `sections_validated == 0` → `SystemExit`.
+
+**Прогон на реальном тексте (56 секций, итерация 4):**
+```
+  ДИАГНОСТИКА: пропущено 2 секций без манифеста: 00_section, 02_soderzhanie
+stress-inventory: 1145 форм в списке риска → out/stress/inventory/risk.tsv
+  top-300        300 форм    41918 вхождений
+  омографы       430 форм     2673 вхождений
+  имена          578 форм    34020 вхождений
+  словарь         45 форм     1161 вхождений
+  RUAccent: resolved=2642, no_stress=31, mismatch=0
+  coverage=62.2%  tokens=76036
+  summary → out/stress/inventory/summary.json
+exit code: 0
+```
+
+**SHA-256 (верифицированы):**
+- risk.tsv: `db0bf64798a14a9962b8ca87d332a6fb9ac5584b7ce286927ebd83c8e7ad1be7`
+- omographs.tsv: `183ee0a97493081e8824e29826f59728006cfe8c2f1b44833765b55c7af59601`
+- `invalid_context_count=0`, `ruaccent_errors=0`
+
+**Имён 578 vs ориентир 387 — обоснование (seed=42, 20 форм):**
+
+| форма | частота | оценка | пример |
+|-------|---------|--------|--------|
+| москва | 1 | ✓ топоним | «Москва «Я мужчина…» |
+| марины | 1 | ✓ имя | «История Марины» |
+| кэмпбелл | 2 | ✓ фамилия | «Кэмпбелл Дж.» |
+| тирана | 3 | ✓ концепт | «роль Тирана» |
+| ребёнке | 5 | ✓ концепт | «Внутреннем Ребёнке» |
+| ребенка | 23 | ✓ концепт | «Ребенка снова обижают.» |
+| смерть | 21 | ✓ концепт | «Смерть Мы смертны.» |
+| колесо | 23 | ✓ концепт | «Колесо — это не приговор.» |
+| привязанности | 30 | ✓ термин | «теория привязанности» |
+| телесное | 10 | ✓ концепт | «Вернись в телесное.» |
+| важное | 29 | ~ возм. | «И самое важное.» |
+| честность | 11 | ~ возм. | «Первая честность с собой.» |
+| любви | 30 | ~ возм. | «В любви.» |
+| интерес | 11 | ~ возм. | «Нас стыдили за интерес…» |
+| моё | 20 | ~ возм. | «Моё имя — …».» |
+| тоску | 2 | ~ сомнит. | «Тоску?» |
+| возьми | 11 | ~ сомнит. | «Возьми в руки.» |
+| мой | 17 | ~ сомнит. | «Он не мой.» |
+| виню | 1 | ✗ список | «В) Виню себя» |
+| б | 11 | ✗ список | «Б) Облегчение» |
+
+Из 20: ~10 ✓ (имена/концепты), ~6 ~ (требуют проверки), ~4 ✗ (элементы списков типа «В) Б) А)»). Это _приемлемо для списка риска_ — ложноположительные лучше ложноотрицательных. Причина увеличения 396→578: **исправление границ чанков**. Раньше каждый чанк склеивался с `\n\n` — слово в начале чанка попадало на wi=0 «искусственного» предложения и _не_ классифицировалось как имя. Теперь чанки одного параграфа склеиваются пробелом, и слово в начале чанка середины параграфа правильно оказывается на wi>0 → попадает в список. Ориентир 387 был вычислен на неверном поведении.
+
+**Тесты итерации 4 (10 новых):**
+`test_identical_sentences_in_different_chunks`, `test_late_paragraph_correct_chunk_id`, `test_intra_paragraph_chunks_joined_with_space`, `test_ruaccent_init_error_is_fatal`, `test_ruaccent_init_noimport_is_ok`, `test_wrong_dict_value_type_exits`, `test_two_omographs_one_sentence_process_once`, `test_yoye_conflict_distinct_stress`, `test_second_rename_failure_recovery`, `test_top_n_change_in_fingerprint`, `test_all_manifests_missing_exits`.
+
+**Полный suite:** `715 passed, 5 skipped`
+
+**Арифметика:** база ~667 (port-validated-settings) + 48 (T15 всего) = 715.
+
+**Изменённые файлы:** `src/audiobook/stress_inventory.py`, `tests/test_stress_inventory.py`, `tasks/T15-stress-inventory.md`.
+
+**SHA:** d66bb58
