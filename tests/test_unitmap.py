@@ -1,4 +1,4 @@
-"""Tests for unitmap.annotate_units() — T15-6C1."""
+"""Tests for unitmap.annotate_units() — T15-6C1 / T15-6C1b."""
 import pytest
 
 from audiobook.unitmap import AnnotationError, annotate_units
@@ -252,3 +252,230 @@ def test_units_with_no_cyrillic_and_empty_manifest_ok():
     units = [_unit("paragraph", "--- 123 ---")]
     result = annotate_units([], units)
     assert result == []
+
+
+# ── I2′: zero-Cyrillic-token chunks ──────────────────────────────────────────
+# Scenario 1: standalone unit — zero-token chunk is the entire text of one unit.
+
+def test_i2_prime_standalone_unit():
+    units = [
+        _unit("paragraph", "Текст до"),
+        _unit("paragraph", "http://example.com"),
+        _unit("paragraph", "Текст после"),
+    ]
+    chunks = [
+        _chunk("Текст до", id_="0001"),
+        _chunk("http://example.com", id_="0002"),
+        _chunk("Текст после", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[1]["kind"] == "text"
+
+
+# Scenario 2: tail of a text unit — zero-token text follows Cyrillic text in
+# the same unit; the split is between Cyrillic and non-Cyrillic parts.
+
+def test_i2_prime_tail_of_text_unit():
+    units = [
+        _unit("paragraph", "Смотри здесь: http://example.com"),
+        _unit("paragraph", "Следующий"),
+    ]
+    chunks = [
+        _chunk("Смотри здесь:", id_="0001"),
+        _chunk("http://example.com", id_="0002"),
+        _chunk("Следующий", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0  # same unit as chunk 0001
+    assert result[1]["kind"] == "text"
+
+
+# Scenario 3: added trailing period — chunk has a trailing "." the unit
+# does not; normalization strips it and the match still succeeds.
+
+def test_i2_prime_trailing_period_stripped():
+    units = [
+        _unit("paragraph", "Контакт: user@example.com"),
+        _unit("paragraph", "Следующий текст"),
+    ]
+    chunks = [
+        _chunk("Контакт:", id_="0001"),
+        _chunk("user@example.com.", id_="0002"),   # trailing period
+        _chunk("Следующий текст", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 0
+    assert result[1]["kind"] == "text"
+
+
+# Scenario 4: duplicate occurrence — key appears twice in the unit → error.
+
+def test_i2_prime_duplicate_occurrence_raises():
+    units = [
+        _unit("paragraph", "Текст"),
+        _unit("paragraph", "abc abc"),    # duplicate non-Cyrillic substring
+        _unit("paragraph", "Финал"),
+    ]
+    chunks = [
+        _chunk("Текст", id_="0001"),
+        _chunk("abc", id_="0002"),
+        _chunk("Финал", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "duplicate" in exc_info.value.reason
+
+
+# Scenario 5: missing occurrence — key not found in any unit in the anchor
+# range → error.
+
+def test_i2_prime_missing_occurrence_raises():
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "Нет совпадения"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("http://nothere.com", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "no occurrence" in exc_info.value.reason
+
+
+# Scenario 6: match only before lower anchor — key exists in a unit whose
+# index is below the lower anchor → not found in search range → error.
+
+def test_i2_prime_match_before_lower_anchor_raises():
+    # unit[0] contains the key; chunk A covers unit[1]; zero-token chunk
+    # follows chunk A, so lower_uid = 1 and unit[0] is out of range.
+    units = [
+        _unit("paragraph", "http://target.com"),   # unit 0: contains key
+        _unit("paragraph", "Опора"),               # unit 1: Cyrillic anchor
+        _unit("paragraph", "Финал"),
+    ]
+    chunks = [
+        _chunk("Опора", id_="0001"),              # first chunk covers unit 1
+        _chunk("http://target.com", id_="0002"),  # zero-token; prev anchor is unit 1
+        _chunk("Финал", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "no occurrence" in exc_info.value.reason
+
+
+# Scenario 7: whitespace-only chunk → error.
+
+def test_i2_prime_whitespace_only_raises():
+    units = [_unit("paragraph", "Текст"), _unit("paragraph", "Финал")]
+    chunks = [
+        _chunk("Текст", id_="0001"),
+        _chunk("   ", id_="0002"),
+        _chunk("Финал", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "whitespace" in exc_info.value.reason.lower() or "empty" in exc_info.value.reason.lower()
+
+
+# Scenario 8: cross-unit occurrence — key appears in two different units
+# within the anchor range → error.
+
+def test_i2_prime_cross_unit_occurrence_raises():
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "shared-key"),
+        _unit("paragraph", "shared-key"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("shared-key", id_="0002"),  # matches units 1 AND 2
+        _chunk("Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "spans units" in exc_info.value.reason
+
+
+# Scenario 9a: first chunk is zero-token (no prev Cyrillic anchor).
+
+def test_i2_prime_first_chunk_zero_token():
+    units = [
+        _unit("paragraph", "http://intro.com"),
+        _unit("paragraph", "Основной текст"),
+    ]
+    chunks = [
+        _chunk("http://intro.com", id_="0001"),
+        _chunk("Основной текст", id_="0002"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[0]["unit_id"] == 0
+    assert result[0]["kind"] == "text"
+
+
+# Scenario 9b: last chunk is zero-token (no next Cyrillic anchor).
+
+def test_i2_prime_last_chunk_zero_token():
+    units = [
+        _unit("paragraph", "Основной текст"),
+        _unit("paragraph", "http://end.com"),
+    ]
+    chunks = [
+        _chunk("Основной текст", id_="0001"),
+        _chunk("http://end.com", id_="0002"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[1]["kind"] == "text"
+
+
+# Scenario 10a: consecutive zero-token chunks in correct source order succeed.
+
+def test_i2_prime_consecutive_zero_token_in_order():
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "first-url second-url"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("first-url", id_="0002"),
+        _chunk("second-url", id_="0003"),
+        _chunk("Конец", id_="0004"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[1]["unit_id"] == 1
+    assert result[2]["unit_id"] == 1
+
+
+# Scenario 10b: consecutive zero-token chunks in reversed order → error
+# (second chunk's key appears before first chunk's match end).
+
+def test_i2_prime_consecutive_zero_token_reversed_order_raises():
+    # In the unit text, "second" comes BEFORE "first".
+    # Z1 matches "first" (at pos 7), Z2 must match "second" at pos >= 7+5=12.
+    # But "second" is at pos 0 → no valid occurrence for Z2 → error.
+    units = [
+        _unit("paragraph", "Начало"),
+        _unit("paragraph", "second first"),
+        _unit("paragraph", "Конец"),
+    ]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("first", id_="0002"),    # matches at pos 7 in "second first"
+        _chunk("second", id_="0003"),   # would need pos >= 12, but "second" is at 0
+        _chunk("Конец", id_="0004"),
+    ]
+    with pytest.raises(AnnotationError) as exc_info:
+        annotate_units(chunks, units)
+    assert "I2′" in str(exc_info.value)
+    assert "no occurrence" in exc_info.value.reason
