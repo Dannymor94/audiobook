@@ -1,7 +1,7 @@
 """Tests for unitmap.annotate_units() — T15-6C1 / T15-6C1b."""
 import pytest
 
-from audiobook.unitmap import AnnotationError, annotate_units
+from audiobook.unitmap import AnnotationError, annotate_units, find_exact_in_unit
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -603,3 +603,99 @@ def test_i2_prime_global_order_same_unit_overlap_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2′" in str(exc_info.value)
+
+
+# ── T15-6C5c1a: find_exact_in_unit helper ────────────────────────────────────
+
+
+def test_exact_simple_word():
+    result = find_exact_in_unit("Начало", "Начало Конец")
+    assert result == [(0, 6)]
+
+
+def test_exact_with_terminal_punctuation():
+    # Preserves punctuation — does NOT strip it.
+    result = find_exact_in_unit("Начало.", "Начало. Конец.")
+    assert result == [(0, 7)]
+
+
+def test_exact_punctuation_only():
+    # Punctuation-only key (e.g. "...")
+    result = find_exact_in_unit("...", "Текст ... ещё.")
+    assert result == [(6, 9)]
+
+
+def test_exact_repeated_occurrences_returns_all():
+    result = find_exact_in_unit("abc", "abc xyz abc")
+    assert result == [(0, 3), (8, 11)]
+
+
+def test_exact_nbsp_treated_as_whitespace():
+    # NBSP between tokens in source should match regular space in key.
+    text = "a b c"  # NBSP between 'a' and 'b'
+    result = find_exact_in_unit("a b", text)
+    # Match spans from 'a' (orig 0) to end of 'b' (orig 3, exclusive)
+    assert result == [(0, 3)]
+
+
+def test_exact_repeated_whitespace_collapsed():
+    # Three spaces in source collapsed to one; key with single space matches.
+    text = "a   b"
+    result = find_exact_in_unit("a b", text)
+    # Match covers orig 0..5 (the whole string including the 3 spaces)
+    assert result == [(0, 5)]
+
+
+def test_exact_decomposed_unicode_matches_precomposed():
+    # Source has decomposed 'e' + combining acute (2 orig chars → 1 NFC char).
+    # Key has precomposed 'é'.
+    text = "é fin"  # decomposed é at orig 0..2
+    result = find_exact_in_unit("é", text)  # precomposed é
+    assert result == [(0, 2)]
+
+
+def test_exact_anchor_lb_filters_earlier_match():
+    # Two occurrences; lb cuts out the first one.
+    text = "abc xyz abc"
+    result = find_exact_in_unit("abc", text, orig_lb=4)
+    assert result == [(8, 11)]
+
+
+def test_exact_anchor_ub_filters_later_match():
+    # Two occurrences; ub cuts out the second one.
+    text = "abc xyz abc"
+    result = find_exact_in_unit("abc", text, orig_ub=5)
+    assert result == [(0, 3)]
+
+
+def test_exact_no_match_returns_empty():
+    result = find_exact_in_unit("xyz", "Начало Конец")
+    assert result == []
+
+
+def test_exact_empty_key_returns_empty():
+    result = find_exact_in_unit("", "Начало Конец")
+    assert result == []
+
+
+def test_exact_original_offsets_are_precise():
+    # Verify byte-precise positions including surrounding text.
+    text = "pre Начало post"
+    result = find_exact_in_unit("Начало", text)
+    assert len(result) == 1
+    orig_s, orig_e = result[0]
+    assert text[orig_s:orig_e] == "Начало"
+
+
+def test_exact_ub_boundary_inclusive():
+    # Match end exactly at orig_ub → included (ub is exclusive upper bound on orig_end).
+    text = "abc xyz"
+    result = find_exact_in_unit("abc", text, orig_ub=3)
+    assert result == [(0, 3)]
+
+
+def test_exact_ub_boundary_exclusive():
+    # orig_ub less than match end → excluded.
+    text = "abc xyz"
+    result = find_exact_in_unit("abc", text, orig_ub=2)
+    assert result == []

@@ -2,11 +2,13 @@
 
 Public API:
   annotate_units(manifest_chunks, units, *, section="") -> list[dict]
+  find_exact_in_unit(key, unit_text, *, orig_lb, orig_ub) -> list[tuple[int, int]]
   AnnotationError
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 
 _CYR = re.compile(r"[а-яёА-ЯЁ]+")
 _WS = re.compile(r"\s+")
@@ -33,6 +35,115 @@ def _norm_ws(text: str) -> str:
 def _match_key(text: str) -> str:
     """Normalize whitespace and strip trailing sentence-terminal punctuation."""
     return _TRAILING_TERM.sub("", _norm_ws(text))
+
+
+def _build_offset_map(text: str) -> tuple[str, list[int], list[int]]:
+    """NFC-normalize text and collapse whitespace, tracking original char offsets.
+
+    Returns (norm, orig_start_map, orig_end_map):
+      norm             — NFC text with str.split()-collapsed whitespace
+      orig_start_map[i] — start index in original text for norm[i]; -1 for sep spaces
+      orig_end_map[i]   — exclusive end index in original text for norm[i]; -1 for seps
+
+    Uses str.split() whitespace semantics (handles NBSP, tabs, repeated whitespace).
+    Handles decomposed Unicode by scanning forward until NFC(prefix) starts with
+    the target NFC codepoint, so multi-original-char → single-NFC-char sequences
+    report the full original span.
+    """
+    nfc = unicodedata.normalize("NFC", text)
+
+    # Build nfc_to_orig: (orig_start, orig_end) in original text for each NFC codepoint.
+    nfc_to_orig: list[tuple[int, int]] = []
+    orig_i = 0
+    for nfc_ch in nfc:
+        orig_start = orig_i
+        while orig_i < len(text):
+            orig_i += 1
+            if unicodedata.normalize("NFC", text[orig_start:orig_i]).startswith(nfc_ch):
+                break
+        nfc_to_orig.append((orig_start, orig_i))
+
+    # Collapse whitespace using isspace() (matches str.split() semantics: NBSP etc.).
+    tokens: list[tuple[int, int]] = []  # (nfc_start, nfc_end) per non-ws token
+    i, n = 0, len(nfc)
+    while i < n:
+        if nfc[i].isspace():
+            i += 1
+            continue
+        j = i + 1
+        while j < n and not nfc[j].isspace():
+            j += 1
+        tokens.append((i, j))
+        i = j
+
+    if not tokens:
+        return "", [], []
+
+    norm_chars: list[str] = []
+    orig_start_map: list[int] = []
+    orig_end_map: list[int] = []
+    for k, (ts, te) in enumerate(tokens):
+        for ci in range(ts, te):
+            norm_chars.append(nfc[ci])
+            os, oe = nfc_to_orig[ci]
+            orig_start_map.append(os)
+            orig_end_map.append(oe)
+        if k < len(tokens) - 1:
+            norm_chars.append(" ")
+            orig_start_map.append(-1)
+            orig_end_map.append(-1)
+
+    return "".join(norm_chars), orig_start_map, orig_end_map
+
+
+def find_exact_in_unit(
+    key: str,
+    unit_text: str,
+    *,
+    orig_lb: int = 0,
+    orig_ub: int | None = None,
+) -> list[tuple[int, int]]:
+    """Find all NFC, whitespace-collapsed exact occurrences of key in unit_text.
+
+    Returns list of (orig_start, orig_end) in original unit_text coordinates
+    (orig_end is exclusive).  Uses str.split() whitespace semantics (handles NBSP,
+    repeated whitespace) and Unicode NFC (handles decomposed input).
+
+    orig_lb: minimum acceptable orig_start (inclusive).
+    orig_ub: maximum acceptable orig_end (exclusive); None = len(unit_text).
+
+    Caller ensures single-unit scope; this function never crosses unit boundaries.
+    """
+    if orig_ub is None:
+        orig_ub = len(unit_text)
+
+    norm_key, _, _ = _build_offset_map(key)
+    if not norm_key:
+        return []
+
+    norm_src, src_start_map, src_end_map = _build_offset_map(unit_text)
+    if not norm_src:
+        return []
+
+    results: list[tuple[int, int]] = []
+    pos = 0
+    while True:
+        idx = norm_src.find(norm_key, pos)
+        if idx == -1:
+            break
+        end_idx = idx + len(norm_key) - 1  # inclusive last char index in norm
+
+        orig_s = src_start_map[idx]
+        orig_e = src_end_map[end_idx]
+
+        # Skip separator-space endpoints (key doesn't start/end with space after ws-collapse,
+        # so this guards against pathological edge cases only).
+        if orig_s != -1 and orig_e != -1 and orig_s >= orig_lb and orig_e <= orig_ub:
+            results.append((orig_s, orig_e))
+
+        pos = idx + 1
+
+    return results
 
 
 class AnnotationError(Exception):
