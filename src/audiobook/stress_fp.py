@@ -18,16 +18,17 @@ INVENTORY_ALGO_VERSION: int = 2
 
 
 def stress_params(cfg: dict) -> dict:
-    """Extract stress analysis parameters from full config dict.
+    """Return full stress config subtree plus derived pauses parameters.
 
-    Returns {"top_n": int, "paragraph_ms": int}.
+    All keys under cfg['stress'] are included automatically; new nested keys
+    are picked up without code changes.  paragraph_ms is always derived from
+    cfg['pauses_ms']['paragraph'], not from the stress subtree.
     """
-    s = (cfg or {}).get("stress") or {}
+    s = dict((cfg or {}).get("stress") or {})
     pauses = (cfg or {}).get("pauses_ms") or {}
-    return {
-        "top_n": int(s.get("top_n", 300)),
-        "paragraph_ms": int(pauses.get("paragraph", 900)),
-    }
+    s.setdefault("top_n", 300)
+    s["paragraph_ms"] = int(pauses.get("paragraph", 900))
+    return s
 
 
 def load_current(stress_dir: Path) -> dict | None:
