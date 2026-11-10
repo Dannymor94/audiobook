@@ -1,7 +1,7 @@
 """Layer-1 tests for stress_inventory — no models, no network, tmp_path only.
 
 Base from port-validated-settings + 14 (second review) = 33 tests now,
-iteration-3 rewrites/additions bring the total to 42.
+iteration-3 additions = 42, iteration-4 additions bring the total to 52.
 """
 from __future__ import annotations
 
@@ -701,7 +701,8 @@ def test_example_prefers_short_sentence(tmp_path):
     """When a short sentence exists, it is preferred over context snippet."""
     short_sent = "Замок закрыт."
     long_sent = "а" * 40 + " замок " + "б" * 40
-    text = long_sent + "\n" + short_sent
+    # \n\n — different paragraphs, so the short sentence is its own sentence unit
+    text = long_sent + "\n\n" + short_sent
     _, risk, _ = _run(tmp_path, {"01_ch.norm.txt": text})
     rows = {r.split("\t")[0]: r.split("\t")[3] for r in risk[1:]}
     assert rows.get("замок") == "Замок закрыт.", f"Short sentence not preferred: {rows.get('замок')!r}"
@@ -725,3 +726,287 @@ def test_omograph_occurrence_detail_header(tmp_path):
     _, _, occ = _run(tmp_path, {"01_ch.norm.txt": "замок стоит."})
     header = occ[0].split("\t")
     assert header[-1] == "ruaccent_status", f"Last column: {header[-1]!r}"
+
+
+# ── iteration-4 regression tests ──────────────────────────────────────────────
+
+def test_identical_sentences_in_different_chunks(tmp_path):
+    """Same sentence text in two different chunks → distinct chunk_ids (not both 0001)."""
+    _, _, occ = _run(tmp_path, {
+        "01_ch.norm.txt": "замок стоит.\n\nзамок стоит.",
+    }, manifests={
+        "01_ch": [
+            {"id": "0001", "n": 1, "text": "замок стоит.", "hash": "a",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+            {"id": "0002", "n": 2, "text": "замок стоит.", "hash": "b",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+        ],
+    })
+    rows = [r.split("\t") for r in occ[1:] if r.split("\t")[0] == "замок"]
+    assert len(rows) == 2, f"Expected 2 замок rows, got {len(rows)}"
+    assert rows[0][2] == "0001", f"First: expected 0001, got {rows[0][2]!r}"
+    assert rows[1][2] == "0002", f"Second: expected 0002, got {rows[1][2]!r}"
+
+
+def test_late_paragraph_correct_chunk_id(tmp_path):
+    """Form in a late paragraph (after long first paragraph) gets correct chunk_id."""
+    first = "текст без омографов. " * 10  # ~210 chars
+    second = "старый замок стоит."
+    text = first.rstrip() + "\n\n" + second
+    _, _, occ = _run(tmp_path, {"01_ch.norm.txt": text}, manifests={
+        "01_ch": [
+            {"id": "0001", "n": 1, "text": first.rstrip(), "hash": "a",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+            {"id": "0002", "n": 2, "text": second, "hash": "b",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+        ],
+    })
+    rows = [r.split("\t") for r in occ[1:] if r.split("\t")[0] == "замок"]
+    assert rows, "No замок rows"
+    assert rows[0][2] == "0002", f"Expected 0002, got {rows[0][2]!r}"
+    assert "замок" in rows[0][3].lower(), f"Context missing form: {rows[0][3]!r}"
+
+
+def test_intra_paragraph_chunks_joined_with_space(tmp_path):
+    """Two chunks from the same paragraph are joined with space, not \\n\\n."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {
+        "01_ch.norm.txt": "замок стоял. мука рассыпалась.",
+    }, manifests={
+        "01_ch": [
+            {"id": "0001", "n": 1, "text": "замок стоял.", "hash": "a",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+            {"id": "0002", "n": 2, "text": "мука рассыпалась.", "hash": "b",
+             "seed": 1, "pause_after_ms": 900, "status": "done", "locked": False, "duration_ms": None},
+        ],
+    })
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        from audiobook.stress_inventory import _build_section_data
+        full_text, starts, chunk_ids = _build_section_data("01_ch")
+        assert "\n\n" not in full_text, f"Found \\n\\n in same-paragraph chunks: {full_text!r}"
+        assert " " in full_text, f"No space between same-paragraph chunks: {full_text!r}"
+        assert len(starts) == 2
+        # Second chunk starts right after the space
+        assert starts[1] == len("замок стоял.") + 1
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_ruaccent_init_error_is_fatal():
+    """_try_accentizer: RuntimeError from _get_accentizer() → SystemExit."""
+    import sys
+    from types import ModuleType
+
+    fake_accent = ModuleType("audiobook.accent")
+
+    def bad_get_accentizer():
+        raise RuntimeError("model corrupt")
+
+    fake_accent._get_accentizer = bad_get_accentizer
+
+    orig = sys.modules.get("audiobook.accent")
+    sys.modules["audiobook.accent"] = fake_accent
+    try:
+        from audiobook.stress_inventory import _try_accentizer
+        with pytest.raises(SystemExit):
+            _try_accentizer()
+    finally:
+        if orig is None:
+            sys.modules.pop("audiobook.accent", None)
+        else:
+            sys.modules["audiobook.accent"] = orig
+
+
+def test_ruaccent_init_noimport_is_ok():
+    """_try_accentizer: ImportError from accent module → returns None gracefully."""
+    import sys
+    orig = sys.modules.get("audiobook.accent", "MISSING")
+    sys.modules["audiobook.accent"] = None  # causes ImportError on import
+    try:
+        from audiobook.stress_inventory import _try_accentizer
+        result = _try_accentizer()
+    finally:
+        if orig == "MISSING":
+            sys.modules.pop("audiobook.accent", None)
+        else:
+            sys.modules["audiobook.accent"] = orig
+    assert result is None
+
+
+def test_wrong_dict_value_type_exits(tmp_path):
+    """Dict entry where value is a string (not list[str]) raises SystemExit."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок."},
+                             with_omograph_dict=False)
+    with gzip.open(root / "models" / "dictionary" / "omographs.json.gz",
+                   "wt", encoding="utf-8") as f:
+        json.dump({"замок": "not_a_list"}, f)
+
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        with pytest.raises(SystemExit):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_two_omographs_one_sentence_process_once(tmp_path):
+    """Two different omographs in one sentence → process() called exactly once."""
+    from unittest.mock import patch
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок и мука здесь."},
+                             omographs={"замок": ["з+амок", "замо+к"],
+                                        "мука": ["м+ука", "мук+а"]})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    call_log: list[str] = []
+
+    def counting_process(sent):
+        call_log.append(sent)
+        return "зам+ок и мук+а здесь."
+
+    try:
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=counting_process):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    assert len(call_log) == 1, f"process() called {len(call_log)} times, expected 1"
+
+
+def test_yoye_conflict_distinct_stress(tmp_path):
+    """'все' and 'всё' get different stress marks — no ё/е position confusion."""
+    from unittest.mock import patch
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "знает все всё."},
+                             omographs={"все": ["вс+е", "в+сё"],
+                                        "всё": ["вс+ё", "в+сё"]})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    def mock_process(sent):
+        return "зна+ет вс+е вс+ё."
+
+    try:
+        with patch("audiobook.stress_inventory._try_accentizer", return_value=mock_process):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    rows = [(r.split("\t")[0], r.split("\t")[5])
+            for r in (root / "out" / "stress" / "inventory" / "omographs.tsv")
+            .read_text(encoding="utf-8").splitlines()[1:]]
+    vse = [stress for form, stress in rows if form == "все"]
+    vsyo = [stress for form, stress in rows if form == "всё"]
+    assert vse, "No rows for 'все'"
+    assert vsyo, "No rows for 'всё'"
+    assert vse[0] != vsyo[0], f"'все' and 'всё' got same stress: {vse[0]!r}"
+
+
+def test_second_rename_failure_recovery(tmp_path):
+    """After interrupted atomic publish (inventory/ missing, .old/ present), next run recovers."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    try:
+        from audiobook.stress_inventory import run
+
+        # First successful run
+        run(config)
+        inv = root / "out" / "stress" / "inventory"
+        good = (inv / "risk.tsv").read_text(encoding="utf-8")
+
+        # Simulate interrupted atomic: inventory/ renamed to .old/, second rename failed
+        inv.rename(inv.parent / "inventory.old")
+        assert not inv.exists()
+        assert (inv.parent / "inventory.old").exists()
+
+        # Next run must recover .old/ and produce a valid report
+        run(config)
+
+        assert inv.exists(), "inventory/ not restored"
+        assert (inv / "risk.tsv").exists()
+        assert not (inv.parent / "inventory.old").exists(), ".old/ not cleaned up"
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+
+def test_top_n_change_in_fingerprint(tmp_path):
+    """Different top_n values are recorded in summary.json inputs."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, _ = _make_env(tmp_path, {"01_ch.norm.txt": "замок стоит."})
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+
+    top_n_values = []
+    try:
+        from audiobook.stress_inventory import run
+        for n in (5, 10):
+            run({"stress": {"top_n": n}})
+            s = json.loads((root / "out" / "stress" / "inventory" / "summary.json")
+                           .read_text(encoding="utf-8"))
+            top_n_values.append(s["inputs"]["top_n"])
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
+
+    assert top_n_values[0] == 5
+    assert top_n_values[1] == 10
+
+
+def test_all_manifests_missing_exits(tmp_path):
+    """If no section has a manifest, run raises SystemExit."""
+    import audiobook.paths as apaths
+    orig_text, orig_models, orig_out = apaths.TEXT, apaths.MODELS, apaths.OUT
+
+    root, config = _make_env(tmp_path, {"01_ch.norm.txt": "замок стоит."},
+                             manifests={})  # explicitly no manifests
+    apaths.TEXT = root / "text"
+    apaths.MODELS = root / "models"
+    apaths.OUT = root / "out"
+    try:
+        with pytest.raises(SystemExit):
+            from audiobook.stress_inventory import run
+            run(config)
+    finally:
+        apaths.TEXT = orig_text
+        apaths.MODELS = orig_models
+        apaths.OUT = orig_out
