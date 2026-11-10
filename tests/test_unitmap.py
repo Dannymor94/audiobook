@@ -1185,3 +1185,78 @@ def test_6c7d_suffix_and_prefix_both_active_overlap_raises():
     with pytest.raises(AnnotationError) as exc_info:
         annotate_units(chunks, units)
     assert "I2" in str(exc_info.value)
+
+
+# ── T15-6C9a: anchor-bound suffix alignment ────────────────────────────────────
+
+
+def test_6c9a_sol_p1_non_adjacent_suffix_raises():
+    """Sol P1 repro: suffix bound to a later same-text occurrence must raise.
+
+    'suf' in chunk 'Начало suf' is separated from 'Начало' by 'Середина' in the
+    unit; the match must not cross the intervening Cyrillic content.
+    """
+    units = [_unit("paragraph", "Начало Середина suf zero Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),
+        _chunk("Середина", id_="0002"),
+        _chunk("suf", id_="0003"),
+        _chunk("zero", id_="0004"),
+        _chunk("Конец", id_="0005"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9a_nbsp_non_adjacent_suffix_raises():
+    """NBSP variant of Sol P1: NBSP in chunk suffix does not rescue a non-adjacent match."""
+    units = [_unit("paragraph", "Начало Середина suf zero Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),  # NBSP before suf in chunk
+        _chunk("Середина", id_="0002"),
+        _chunk("suf", id_="0003"),
+        _chunk("zero", id_="0004"),
+        _chunk("Конец", id_="0005"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9a_double_space_non_adjacent_suffix_raises():
+    """Double-space variant: double space in suffix does not rescue a non-adjacent match."""
+    units = [_unit("paragraph", "Начало Середина suf zero Конец")]
+    chunks = [
+        _chunk("Начало  suf", id_="0001"),  # double space before suf in chunk
+        _chunk("Середина", id_="0002"),
+        _chunk("suf", id_="0003"),
+        _chunk("zero", id_="0004"),
+        _chunk("Конец", id_="0005"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9a_valid_adjacent_suffix_passes():
+    """Adjacent suffix (immediately after Cyrillic anchor in unit) is accepted."""
+    units = [_unit("paragraph", "Начало suf Середина Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),
+        _chunk("Середина", id_="0002"),
+        _chunk("Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[0]["unit_id"] == 0
+    assert result[1]["unit_id"] == 0
+
+
+def test_6c9a_later_duplicate_does_not_substitute_for_missing_adjacent():
+    """A later occurrence of the suffix must not fill in for a missing adjacent one."""
+    units = [_unit("paragraph", "Начало Середина suf suf Конец")]
+    chunks = [
+        _chunk("Начало suf", id_="0001"),
+        _chunk("Середина", id_="0002"),
+        _chunk("suf", id_="0003"),
+        _chunk("Конец", id_="0004"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
