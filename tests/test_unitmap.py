@@ -1260,3 +1260,90 @@ def test_6c9a_later_duplicate_does_not_substitute_for_missing_adjacent():
     ]
     with pytest.raises(AnnotationError):
         annotate_units(chunks, units)
+
+
+# ── T15-6C9b: anchor-bound prefix alignment ────────────────────────────────────
+
+
+def test_6c9b_sol_p1_non_adjacent_prefix_raises():
+    """Sol P1: prefix not adjacent to its Cyrillic anchor must raise.
+
+    'pre' in chunk 'pre Конец' is at position 12; 'Конец' starts at 20.
+    'xyz' in between — prefix is not contiguous with the anchor.
+    """
+    units = [_unit("paragraph", "Начало zero pre xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9b_nbsp_non_adjacent_prefix_raises():
+    """NBSP variant: NBSP in chunk prefix does not rescue a non-adjacent match."""
+    units = [_unit("paragraph", "Начало zero pre xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre Конец", id_="0003"),  # NBSP between prefix and anchor in chunk
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9b_double_space_non_adjacent_prefix_raises():
+    """Double-space variant: double space in prefix does not rescue a non-adjacent match."""
+    units = [_unit("paragraph", "Начало zero pre xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre  Конец", id_="0003"),  # double space in chunk prefix
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9b_decomposed_non_adjacent_prefix_raises():
+    """Decomposed Unicode in chunk prefix does not rescue a non-adjacent match."""
+    # Unit: "Начало zero pré xyz Конец" with precomposed é (U+00E9)
+    # Chunk prefix has decomposed e + combining acute — after NFC same as é,
+    # but 'pré Конец' is still non-adjacent.
+    units = [_unit("paragraph", "Начало zero pré xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pré Конец", id_="0003"),  # decomposed é in prefix
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)
+
+
+def test_6c9b_valid_contiguous_prefix_passes():
+    """Prefix immediately before its Cyrillic anchor in the unit is accepted."""
+    units = [_unit("paragraph", "Начало zero pre Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre Конец", id_="0003"),
+    ]
+    result = annotate_units(chunks, units)
+    assert result[2]["unit_id"] == 0
+    assert result[2]["kind"] == "text"
+
+
+def test_6c9b_later_duplicate_prefix_does_not_substitute():
+    """Two occurrences of the prefix, neither adjacent to the anchor — must raise.
+
+    unit = 'Начало pre zero pre xyz Конец': 'pre' at pos 7 and 16, 'Конец' at 24.
+    Both 'pre' instances are separated from 'Конец' by other text; neither is adjacent.
+    """
+    units = [_unit("paragraph", "Начало pre zero pre xyz Конец")]
+    chunks = [
+        _chunk("Начало", id_="0001"),
+        _chunk("zero", id_="0002"),
+        _chunk("pre Конец", id_="0003"),
+    ]
+    with pytest.raises(AnnotationError):
+        annotate_units(chunks, units)

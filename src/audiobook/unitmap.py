@@ -426,6 +426,28 @@ def annotate_units(
             # abs_pos is NOT advanced — zero-token chunks consume no token positions
             continue
 
+        chunk_raw = chunk.get("text", "")
+        cyr_in_chunk = list(_CYR.finditer(chunk_raw))
+
+        # Prefix contiguity check (6C9b): prefix must be immediately before its anchor.
+        # Search prefix+anchor as one key; the match must end at the anchor's char_end.
+        if cyr_in_chunk:
+            prefix = chunk_raw[:cyr_in_chunk[0].start()]
+            norm_prefix, _, _ = _build_offset_map(prefix)
+            if norm_prefix:
+                _, _first_uid, _, _first_cs, first_char_end = unit_stream[abs_pos]
+                unit_text_p = units[_first_uid].get("text", "")
+                p_matches = find_exact_in_unit(
+                    prefix + cyr_in_chunk[0].group(), unit_text_p, orig_ub=first_char_end
+                )
+                if not p_matches or p_matches[-1][1] != first_char_end:
+                    raise AnnotationError(
+                        "chunk non-Cyrillic prefix not found contiguously before its "
+                        "Cyrillic anchor; cannot establish alignment",
+                        section=section,
+                        chunk_id=chunk_id,
+                    )
+
         seen_units: set[int] = set()
         seen_kinds: set[str] = set()
 
@@ -471,8 +493,7 @@ def annotate_units(
         # of the same suffix text (separated by other Cyrillic content) is never
         # mistaken for the adjacent one.
         _, uid_last, _, char_start_last, char_end_last = unit_stream[abs_pos - 1]
-        chunk_raw = chunk.get("text", "")
-        last_cyr = list(_CYR.finditer(chunk_raw))
+        last_cyr = cyr_in_chunk  # reuse — already computed above
         suffix = chunk_raw[last_cyr[-1].end():] if last_cyr else ""
         if suffix:
             unit_text = units[uid_last].get("text", "")
