@@ -18,7 +18,7 @@ from dataclasses import dataclass
 _CYR = re.compile(r"[а-яёА-ЯЁ]+")
 _WS = re.compile(r"\s+")
 _TRAILING_TERM = re.compile(r"[.!?…]+$")
-_INNER_PARA = re.compile(r"\n[ \t]*\n")
+_INNER_PARA = re.compile(r"\r?\n[^\S\n\r]*\r?\n")
 # M2 tolerant matching: T = {".", "…"} — only characters text_prep can append.
 _M2_TERMINAL: frozenset[str] = frozenset((".", "…"))
 # Characters that, when following an M2 match, disqualify it.

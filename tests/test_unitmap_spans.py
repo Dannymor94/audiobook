@@ -960,3 +960,61 @@ def test_3c_valid_unit_with_extra_metadata():
     units = [{"text": "а", "type": "heading", "speaker": "narrator"}]
     errors = validate_gates([], units)
     assert not any(e.code in ("NOT_NFC", "UNIT_INNER_PARA") for e in errors)
+
+
+# ── 6C11-3d: CRLF and Unicode whitespace blank-line detection ─────────────────
+
+def _inner_para_errors(unit_text: str) -> list[AnnotationError]:
+    units = [{"text": unit_text}]
+    return [e for e in validate_gates([], units) if e.code == "UNIT_INNER_PARA"]
+
+
+def test_3d_sol_crlf_blank_line():
+    """Reproduction: a\r\n\r\nb must trigger UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\r\n\r\nb")
+
+
+def test_3d_sol_nbsp_blank_line():
+    """Reproduction: a\n \nb must trigger UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\n \nb")
+
+
+def test_3d_lf_ascii_space_blank():
+    """Blank line with ASCII space triggers UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\n \nb")
+
+
+def test_3d_lf_ascii_tab_blank():
+    """Blank line with ASCII tab triggers UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\n\t\nb")
+
+
+def test_3d_lf_mixed_space_tab_blank():
+    """Blank line with mixed spaces and tabs triggers UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\n \t  \nb")
+
+
+def test_3d_crlf_with_spaces_blank():
+    """CRLF with spaces on blank line triggers UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\r\n   \r\nb")
+
+
+def test_3d_unicode_thin_space_blank():
+    """Thin space (U+2009) on blank line triggers UNIT_INNER_PARA."""
+    assert _inner_para_errors("a\n \nb")
+
+
+def test_3d_single_lf_no_trigger():
+    """Single LF between nonempty lines must NOT trigger UNIT_INNER_PARA."""
+    assert not _inner_para_errors("первая\nвторая")
+
+
+def test_3d_single_crlf_no_trigger():
+    """Single CRLF between nonempty lines must NOT trigger UNIT_INNER_PARA."""
+    assert not _inner_para_errors("первая\r\nвторая")
+
+
+def test_3d_multiple_nonempty_lines_no_trigger():
+    """Several nonempty lines separated by single LF/CRLF must PASS."""
+    assert not _inner_para_errors("а\nб\nв")
+    assert not _inner_para_errors("а\r\nб\r\nв")
