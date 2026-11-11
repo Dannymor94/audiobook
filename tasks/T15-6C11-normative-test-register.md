@@ -88,7 +88,7 @@ Functions in this section are a subset of the 88 pre-numbered tests above
 | **#17** | Reconstruction from spans reproduces atom text | 2 | 2 | VERIFIED |
 | **#18** | Skipped atoms / gaps → `ATOM_MISMATCH` | 1 | 1 | VERIFIED |
 | **#19–24** | **No definitions found in any commit, task file or sync report** | 0 | 0 | **SOURCE_NOT_FOUND** |
-| **#25** | Empty chunk gate | 5 | 5 | VERIFIED (pre-numbered) |
+| **#25** | Empty chunk gate | 6 | 6 | VERIFIED (pre-numbered) |
 | **#26** | **No definition found in any commit, task file or sync report** | 0 | 0 | **SOURCE_NOT_FOUND** |
 
 ---
