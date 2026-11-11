@@ -807,3 +807,156 @@ def test_3b_valid_ids_still_appear_in_diagnostics():
     assert any(e.chunk_id == "0001" for e in nfc_errs), (
         "valid ID must appear in NOT_NFC diagnostics"
     )
+
+
+# ── 6C11-3c: strict input schema validation ───────────────────────────────────
+
+def _raises_annotation(fn):
+    """Assert fn raises AnnotationError, not TypeError/AttributeError/etc."""
+    try:
+        fn()
+        raise AssertionError("expected AnnotationError, got no exception")
+    except AnnotationError:
+        pass  # correct
+    except (TypeError, AttributeError, IndexError, KeyError, ValueError) as e:
+        raise AssertionError(f"unexpected {type(e).__name__}: {e}") from e
+
+
+# --- Sol P2 reproduction: map_chunks with malformed chunk records ---
+
+def test_3c_sol_chunk_text_none():
+    """Reproduction: chunk text=None must raise AnnotationError, not TypeError."""
+    _raises_annotation(lambda: map_chunks(
+        [{"text": "a"}],
+        [{"id": "0001", "n": 1, "text": None}],
+    ))
+
+
+def test_3c_sol_chunk_record_none():
+    """Reproduction: chunk=None in list must raise AnnotationError, not AttributeError."""
+    _raises_annotation(lambda: map_chunks(
+        [{"text": "a"}],
+        [None],
+    ))
+
+
+# --- Chunk structural errors ---
+
+def test_3c_chunk_none_raises_manifest_order():
+    errors = validate_gates([None], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_chunk_int_raises_manifest_order():
+    errors = validate_gates([42], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_chunk_list_raises_manifest_order():
+    errors = validate_gates([["id", "0001"]], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_chunk_text_none_raises_manifest_order():
+    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_chunk_text_int_raises_manifest_order():
+    errors = validate_gates([{"id": "0001", "n": 1, "text": 123}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_chunk_text_missing_raises_manifest_order():
+    errors = validate_gates([{"id": "0001", "n": 1}], [])
+    # text defaults to None → structural error
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+# --- n type validation: reject bool and float ---
+
+def test_3c_n_true_rejected():
+    """n=True must not be accepted as n=1."""
+    errors = validate_gates([{"id": "0001", "n": True, "text": "а"}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_n_false_rejected():
+    """n=False must not be accepted."""
+    errors = validate_gates([{"id": "0001", "n": False, "text": "а"}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_n_float_rejected():
+    """n=1.0 must not be accepted as n=1."""
+    errors = validate_gates([{"id": "0001", "n": 1.0, "text": "а"}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_n_none_rejected():
+    errors = validate_gates([{"id": "0001", "n": None, "text": "а"}], [])
+    assert any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+def test_3c_n_valid_int_accepted():
+    """Valid int n=1 must pass."""
+    errors = validate_gates([{"id": "0001", "n": 1, "text": "а"}], [])
+    assert not any(e.code == "MANIFEST_ORDER" for e in errors)
+
+
+# --- Unit structural errors ---
+
+def test_3c_unit_none_raises_not_nfc():
+    errors = validate_gates([], [None])
+    assert any(e.code == "NOT_NFC" for e in errors)
+
+
+def test_3c_unit_int_raises_not_nfc():
+    errors = validate_gates([], [42])
+    assert any(e.code == "NOT_NFC" for e in errors)
+
+
+def test_3c_unit_text_none_raises_not_nfc():
+    errors = validate_gates([], [{"text": None}])
+    assert any(e.code == "NOT_NFC" for e in errors)
+
+
+def test_3c_unit_text_int_raises_not_nfc():
+    errors = validate_gates([], [{"text": 0}])
+    assert any(e.code == "NOT_NFC" for e in errors)
+
+
+def test_3c_unit_text_missing_raises_not_nfc():
+    errors = validate_gates([], [{}])
+    assert any(e.code == "NOT_NFC" for e in errors)
+
+
+# --- No raw secret in structural errors ---
+
+def test_3c_chunk_none_no_disclosure():
+    """None chunk must not disclose repr(None) in diagnostics."""
+    errors = validate_gates([None], [])
+    for e in errors:
+        assert "None" not in e.chunk_id
+
+
+def test_3c_chunk_text_none_no_disclosure():
+    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [])
+    for e in errors:
+        assert "None" not in str(e) or e.chunk_id in ("", "0001")
+
+
+# --- Valid metadata preserved (extra fields must pass through) ---
+
+def test_3c_valid_chunk_with_extra_metadata():
+    """Extra fields on valid chunks must not cause errors."""
+    chunks = [{"id": "0001", "n": 1, "text": "а", "meta": "ok", "extra": 42}]
+    units = [{"text": "а", "type": "text"}]
+    errors = validate_gates(chunks, units)
+    assert errors == []
+
+
+def test_3c_valid_unit_with_extra_metadata():
+    units = [{"text": "а", "type": "heading", "speaker": "narrator"}]
+    errors = validate_gates([], units)
+    assert not any(e.code in ("NOT_NFC", "UNIT_INNER_PARA") for e in errors)

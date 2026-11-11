@@ -118,32 +118,52 @@ def validate_gates(
     """
     errors: list[AnnotationError] = []
 
+    # --- Unit structural + content validation ---
     for uid, unit in enumerate(units):
-        text = unit.get("text", "")
+        pos = str(uid)
+        if not isinstance(unit, dict):
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=pos))
+            continue
+        text = unit.get("text")
+        if not isinstance(text, str):
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=pos))
+            continue
         if unicodedata.normalize("NFC", text) != text:
-            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=str(uid)))
-            continue  # inner-para check on non-NFC text is unreliable
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=pos))
+            continue
         if _INNER_PARA.search(text):
-            errors.append(AnnotationError("UNIT_INNER_PARA", section=section, chunk_id=str(uid)))
+            errors.append(AnnotationError("UNIT_INNER_PARA", section=section, chunk_id=pos))
 
+    # --- Chunk MANIFEST_ORDER (structural + ordering, type(n) rejects bool/float) ---
     seen_ids: set[str] = set()
     valid_ids: set[str] = set()  # IDs that passed all MANIFEST_ORDER checks
     for i, chunk in enumerate(manifest_chunks):
-        chunk_id = str(chunk.get("id", ""))
+        pos = f"@{i}"
+        if not isinstance(chunk, dict):
+            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=pos))
+            continue
         n = chunk.get("n")
+        chunk_id = str(chunk.get("id", ""))
         expected_n = i + 1
-        if n != expected_n or chunk_id != f"{expected_n:04d}" or chunk_id in seen_ids:
+        # type(n) is not int rejects bool (subclass) and float
+        if type(n) is not int or n != expected_n or chunk_id != f"{expected_n:04d}" or chunk_id in seen_ids:
             # Use position only — raw chunk_id is unvalidated and must not be disclosed
-            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=f"@{i}"))
+            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=pos))
         else:
             valid_ids.add(chunk_id)
         seen_ids.add(chunk_id)
 
-    for chunk in manifest_chunks:
+    # --- Chunk text validation (structural type, NFC, empty) ---
+    for i, chunk in enumerate(manifest_chunks):
+        if not isinstance(chunk, dict):
+            continue  # structural error already reported above
         chunk_id = str(chunk.get("id", ""))
-        # Disclose ID only after format validation; fall back to empty for invalid IDs
         safe_id = chunk_id if chunk_id in valid_ids else ""
-        text = chunk.get("text", "")
+        text = chunk.get("text")
+        if not isinstance(text, str):
+            # Non-str text is a structural error; disclose safe_id if ID was validated
+            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=safe_id))
+            continue
         if unicodedata.normalize("NFC", text) != text:
             errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=safe_id))
             continue
