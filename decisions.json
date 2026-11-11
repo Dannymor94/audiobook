@@ -1,0 +1,11 @@
+{
+ "version": 1,
+ "temperature": "1.0",
+ "pron": {
+  "сознание": "сознАние",
+  "Найди": "НайДи"
+ },
+ "takes": "on",
+ "by_end": "longer",
+ "context": "previous"
+}
