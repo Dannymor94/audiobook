@@ -2033,7 +2033,7 @@ def test_41_sol_injection_atom_end_plus_one():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2051,7 +2051,7 @@ def test_41_sol_injection_empty_spans():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2070,7 +2070,7 @@ def test_41_sol_injection_extra_span():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2082,7 +2082,7 @@ def test_41_bad_atom_start_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, -1, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2092,7 +2092,7 @@ def test_41_reversed_range_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_end, cs.atom_start, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2102,7 +2102,7 @@ def test_41_gap_between_chunks_raises():
     cs = sm.spans[1]
     # Second chunk normally starts at spans[0].atom_end, present expected_start as 0 (gap)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(cs, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(cs, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2112,7 +2112,7 @@ def test_41_overlapping_range_raises():
     cs = sm.spans[-1]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, len(stream) + 5, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_start, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_start, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2122,7 +2122,7 @@ def test_41_wrong_unit_ids_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, frozenset({99}), cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2132,7 +2132,7 @@ def test_41_wrong_kind_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, "heading", None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2143,7 +2143,7 @@ def test_41_wrong_offsets_raises():
     corrupted = ((999, 999),) + cs.spans[1:]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, corrupted, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2153,7 +2153,7 @@ def test_41_nonzero_end_modes_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, frozenset({"open_end"}))
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2163,7 +2163,7 @@ def test_41_no_indexerror_on_oob():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, 0, len(stream) + 100, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2269,7 +2269,7 @@ def test_42_sol_incomplete_range_coherent_corruption():
     )
     # expected_end is independently derived from manifest (2 atoms)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2291,12 +2291,12 @@ def test_42_sol_gap_ranges():
     cs1 = sm.spans[0]
     cs2 = sm.spans[1]
     # First chunk validated correctly (atom_start=0, atom_end=2)
-    _validate_chunk_span(cs1, stream, unit_kinds, 0, cs1.atom_end, "01_test")
+    _validate_chunk_span(cs1, stream, unit_kinds, 0, cs1.atom_end, cs1.chunk_id, "01_test")
     # Second chunk: inject a gap — tell validator expected_start=1 but cs2.atom_start=2
     # (or use bad cs with atom_start=3 to simulate (0,1),(3,4) gap)
     bad2 = ChunkSpan(cs2.chunk_id, 3, cs2.atom_end, cs2.spans[1:], cs2.unit_ids, cs2.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, "01_test")
+        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, cs2.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2309,7 +2309,7 @@ def test_42_sol_overlapping_ranges():
     # expected_start (from cursor after cs1) = cs1.atom_end = 2
     bad2 = ChunkSpan(cs2.chunk_id, 1, cs2.atom_end, (cs1.spans[1],) + cs2.spans, cs2.unit_ids, cs2.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, "01_test")
+        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, cs2.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2319,7 +2319,7 @@ def test_42_shortened_range_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, 0, 1, cs.spans[:1], cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2329,7 +2329,7 @@ def test_42_extended_range_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, 0, len(sm.stream), cs.spans + cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, cs.chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2369,9 +2369,9 @@ def _valid_cs_and_ctx():
     return cs, sm.stream, ["text"], 0, cs.atom_end
 
 
-def _assert_mismatch(bad_cs, stream, unit_kinds, exp_start, exp_end):
+def _assert_mismatch(bad_cs, stream, unit_kinds, exp_start, exp_end, exp_chunk_id="0001"):
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad_cs, stream, unit_kinds, exp_start, exp_end, "01_test")
+        _validate_chunk_span(bad_cs, stream, unit_kinds, exp_start, exp_end, exp_chunk_id, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2506,4 +2506,139 @@ def test_43_end_modes_frozenset_raises():
 def test_43_valid_metadata_accepted():
     """Valid ChunkSpan metadata passes all type checks."""
     cs, stream, uk, es, ee = _valid_cs_and_ctx()
-    _validate_chunk_span(cs, stream, uk, es, ee, "01_test")  # must not raise
+    _validate_chunk_span(cs, stream, uk, es, ee, cs.chunk_id, "01_test")  # must not raise
+
+
+# ── #44: corrupted ChunkSpan chunk_id diagnostics (T15-6C11-3g3) ─────────────
+
+import traceback
+import logging as _log
+
+
+def _sm_one_chunk():
+    """Return SectionMap with one chunk '0001'."""
+    return map_section([{"text": "слово"}], [{"id": "0001", "n": 1, "text": "слово"}], section="01_test")
+
+
+def test_44_sol_repro_secret_id_empty_spans(monkeypatch):
+    """Sol P2 repro: secret chunk_id + empty spans — secret must not appear in exception."""
+    secret = "SYNTHETIC_SECRET_METADATA"
+
+    def corrupt(cs):
+        return ChunkSpan(secret, cs.atom_start, cs.atom_end, (), cs.unit_ids, cs.kind, None)
+
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    with pytest.raises(AnnotationError) as exc:
+        map_section([{"text": "слово"}], [{"id": "0001", "n": 1, "text": "слово"}], section="01_test")
+
+    e = exc.value
+    assert e.code == "SPAN_STREAM_MISMATCH"
+    assert secret not in str(e)
+    assert secret not in repr(e)
+    assert all(secret not in str(a) for a in e.args)
+    for v in vars(e).values():
+        if v is not None:
+            assert secret not in str(v)
+
+
+def test_44_valid_meta_secret_id_rejected(monkeypatch):
+    """Injected secret chunk_id with otherwise valid metadata must be rejected."""
+    secret = "VALID_META_SECRET_ID"
+
+    def corrupt(cs):
+        return ChunkSpan(secret, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
+
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    with pytest.raises(AnnotationError) as exc:
+        map_section([{"text": "слово"}], [{"id": "0001", "n": 1, "text": "слово"}], section="01_test")
+
+    e = exc.value
+    assert e.code == "SPAN_STREAM_MISMATCH"
+    assert secret not in str(e)
+    assert secret not in repr(e)
+
+
+def test_44_hostile_chunk_id_no_dunder_calls():
+    """Hostile chunk_id whose dunders raise must not cause exception."""
+    class _Hostile:
+        def __eq__(self, other): raise RuntimeError("hostile __eq__")
+        def __str__(self): raise RuntimeError("hostile __str__")
+        def __repr__(self): raise RuntimeError("hostile __repr__")
+        def __bool__(self): raise RuntimeError("hostile __bool__")
+        def __hash__(self): return 0
+
+    sm = _sm_one_chunk()
+    cs = sm.spans[0]
+    bad = ChunkSpan(_Hostile(), cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "0001", "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_44_malformed_id_types_rejected():
+    """None, int, bool chunk_id raise SPAN_STREAM_MISMATCH."""
+    sm = _sm_one_chunk()
+    cs = sm.spans[0]
+    for bad_id in (None, 1, True, b"0001"):
+        bad = ChunkSpan(bad_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+        with pytest.raises(AnnotationError) as exc:
+            _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "0001", "01_test")
+        assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_44_string_subclass_rejected():
+    """str subclass chunk_id must be rejected (type(x) is str → False)."""
+    class _StrSub(str):
+        pass
+
+    sm = _sm_one_chunk()
+    cs = sm.spans[0]
+    bad = ChunkSpan(_StrSub("0001"), cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "0001", "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_44_no_secret_in_traceback():
+    """Secret in chunk_id must not appear in traceback.format_exception output."""
+    secret = "TRACEBACK_LEAK_SECRET"
+    sm = _sm_one_chunk()
+    cs = sm.spans[0]
+    bad = ChunkSpan(secret, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
+
+    try:
+        raise ValueError(secret)
+    except ValueError:
+        with pytest.raises(AnnotationError) as exc:
+            _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "0001", "01_test")
+
+    e = exc.value
+    assert e.__cause__ is None
+    assert e.__suppress_context__ is True
+    tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    assert secret not in tb
+
+
+def test_44_no_secret_in_logging(caplog):
+    """Logging SPAN_STREAM_MISMATCH must not expose the corrupted chunk_id."""
+    secret = "LOG_CHUNK_ID_SECRET"
+    sm = _sm_one_chunk()
+    cs = sm.spans[0]
+    bad = ChunkSpan(secret, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
+
+    try:
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "0001", "01_test")
+    except AnnotationError as e:
+        with caplog.at_level(_log.ERROR):
+            _log.error("caught: %s", e, exc_info=True)
+
+    assert secret not in caplog.text
+
+
+def test_44_valid_id_mapping_preserved():
+    """Valid chunk_id preserves exact atom mapping and stored Atom identity."""
+    sm = _sm_one_chunk()
+    result = chunk_atoms(sm, "0001")
+    assert len(result) == 1
+    assert result[0].text == "слово"
+    assert result is sm.stream[0:1]

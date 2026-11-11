@@ -263,20 +263,27 @@ def _validate_chunk_span(
     unit_kinds: list[str],
     expected_start: int,
     expected_end: int,
+    expected_chunk_id: str,
     section: str,
 ) -> None:
     """Raise SPAN_STREAM_MISMATCH if cs is inconsistent with stream and unit_kinds.
 
-    All bounds checks run before any stream indexing.  Values are derived
-    independently from stream/unit_kinds/manifest, never from cs fields.
-    expected_start and expected_end are computed from the manifest atom count.
+    All bounds checks run before any comparison, len(), or iteration.
+    Values derived from stream/unit_kinds/manifest only — never from cs fields.
+    expected_start, expected_end and expected_chunk_id are manifest-derived.
+    Diagnostics never expose cs.chunk_id; context is always suppressed.
     """
     def _fail() -> None:
-        raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=cs.chunk_id)
+        raise AnnotationError("SPAN_STREAM_MISMATCH", section=section) from None
 
     # 0. Strict type checks before any comparison, len(), or iteration.
     #    type(x) is int excludes bool (type(True) is int → False).
     if type(cs.atom_start) is not int or type(cs.atom_end) is not int:
+        _fail()
+    # chunk_id: type then exact string equality (safe after type check).
+    if type(cs.chunk_id) is not str:
+        _fail()
+    if cs.chunk_id != expected_chunk_id:
         _fail()
     if type(cs.spans) is not tuple:
         _fail()
@@ -397,7 +404,7 @@ def map_section(
         )
 
         # Independently validate ChunkSpan against stream before accepting it.
-        _validate_chunk_span(cs, stream, unit_kinds, cursor, cursor + n, section)
+        _validate_chunk_span(cs, stream, unit_kinds, cursor, cursor + n, chunk_id, section)
 
         result.append(cs)
         cursor += n
