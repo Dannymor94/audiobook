@@ -1,8 +1,8 @@
-"""Tests for Atom, ChunkSpan, AnnotationError and pre-mapping gates — T15-6C11-1."""
+"""Tests for Atom, ChunkSpan, AnnotationError and pre-mapping gates — T15-6C11-1b."""
 import unicodedata
 import pytest
 
-from audiobook.unitmap import Atom, ChunkSpan, AnnotationError, atoms, validate_gates
+from audiobook.unitmap import Atom, ChunkSpan, AnnotationError, atoms, validate_gates, check_gates
 
 
 # ── Atom ──────────────────────────────────────────────────────────────────────
@@ -47,25 +47,84 @@ def test_atoms_offsets():
 
 # ── ChunkSpan ─────────────────────────────────────────────────────────────────
 
-def test_chunkspan_fields():
-    cs = ChunkSpan(chunk_id="0001", n=1, text="текст")
+def _make_chunkspan(**kw) -> ChunkSpan:
+    defaults = dict(
+        chunk_id="0001",
+        atom_start=0,
+        atom_end=2,
+        spans=((0, 5), (6, 11)),
+        unit_ids=frozenset({0}),
+        kind="text",
+        end_modes=None,
+    )
+    defaults.update(kw)
+    return ChunkSpan(**defaults)
+
+
+def test_chunkspan_exact_fields():
+    cs = _make_chunkspan()
     assert cs.chunk_id == "0001"
-    assert cs.n == 1
-    assert cs.text == "текст"
-    assert cs.kind is None
-    assert cs.unit_id is None
+    assert cs.atom_start == 0
+    assert cs.atom_end == 2
+    assert cs.spans == ((0, 5), (6, 11))
+    assert cs.unit_ids == frozenset({0})
+    assert cs.kind == "text"
+    assert cs.end_modes is None
+
+
+def test_chunkspan_no_extra_fields():
+    # contractual field names only — n, text, unit_id must NOT exist
+    cs = _make_chunkspan()
+    assert not hasattr(cs, "n")
+    assert not hasattr(cs, "text")
+    assert not hasattr(cs, "unit_id")
 
 
 def test_chunkspan_frozen():
-    cs = ChunkSpan(chunk_id="0001", n=1, text="текст")
+    cs = _make_chunkspan()
     with pytest.raises((AttributeError, TypeError)):
-        cs.n = 2  # type: ignore[misc]
+        cs.atom_start = 1  # type: ignore[misc]
 
 
-def test_chunkspan_with_optional_fields():
-    cs = ChunkSpan(chunk_id="0002", n=2, text="слово", kind="heading", unit_id=0)
+def test_chunkspan_spans_structural():
+    # spans is a tuple of (int, int) pairs
+    spans = ((0, 3), (4, 7), (8, 12))
+    cs = _make_chunkspan(atom_start=0, atom_end=3, spans=spans)
+    assert isinstance(cs.spans, tuple)
+    assert all(isinstance(s, tuple) and len(s) == 2 for s in cs.spans)
+    assert cs.atom_end - cs.atom_start == len(cs.spans)
+
+
+def test_chunkspan_unit_ids_frozenset():
+    cs = _make_chunkspan(unit_ids=frozenset({0, 1}))
+    assert isinstance(cs.unit_ids, frozenset)
+    assert 0 in cs.unit_ids and 1 in cs.unit_ids
+
+
+def test_chunkspan_end_modes_frozenset():
+    cs = _make_chunkspan(end_modes=frozenset({"open_end"}))
+    assert isinstance(cs.end_modes, frozenset)
+    assert "open_end" in cs.end_modes
+
+
+def test_chunkspan_zero_atom_range():
+    # atom_end == atom_start → zero-atom chunk; spans must be empty tuple
+    cs = _make_chunkspan(atom_start=3, atom_end=3, spans=())
+    assert cs.atom_end == cs.atom_start
+    assert cs.spans == ()
+
+
+def test_chunkspan_heading_kind():
+    cs = _make_chunkspan(kind="heading")
     assert cs.kind == "heading"
-    assert cs.unit_id == 0
+
+
+def test_chunkspan_hashable():
+    # frozen dataclass with hashable fields must be hashable
+    cs = _make_chunkspan()
+    assert hash(cs) is not None
+    s = {cs}
+    assert cs in s
 
 
 # ── AnnotationError ───────────────────────────────────────────────────────────
@@ -276,3 +335,49 @@ def test_gate_empty_chunk_ok_punctuation_only():
     chunks = [{"id": "0001", "n": 1, "text": "..."}]
     empty_errors = [e for e in validate_gates(chunks, []) if e.code == "EMPTY_CHUNK"]
     assert empty_errors == []
+
+
+# ── check_gates: fail-closed raising path ────────────────────────────────────
+
+def test_check_gates_raises_on_nfc_violation():
+    nfd = unicodedata.normalize("NFD", "ё")
+    units = [{"text": nfd}]
+    chunks = [{"id": "0001", "n": 1, "text": "x"}]
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(chunks, units, section="ch01")
+    assert exc.value.code == "NOT_NFC"
+
+
+def test_check_gates_raises_on_inner_para():
+    units = [{"text": "а\n\nб"}]
+    chunks = [{"id": "0001", "n": 1, "text": "а"}]
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(chunks, units)
+    assert exc.value.code == "UNIT_INNER_PARA"
+
+
+def test_check_gates_raises_on_manifest_order():
+    chunks = [{"id": "0002", "n": 2, "text": "а"}]
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(chunks, [])
+    assert exc.value.code == "MANIFEST_ORDER"
+
+
+def test_check_gates_raises_on_empty_chunk():
+    chunks = [{"id": "0001", "n": 1, "text": "   "}]
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(chunks, [])
+    assert exc.value.code == "EMPTY_CHUNK"
+
+
+def test_check_gates_passes_on_valid_input():
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    check_gates(chunks, units)  # must not raise
+
+
+def test_check_gates_raises_annotation_error_subclass():
+    # check_gates must raise AnnotationError specifically (not generic Exception)
+    chunks = [{"id": "0001", "n": 1, "text": ""}]
+    with pytest.raises(AnnotationError):
+        check_gates(chunks, [])

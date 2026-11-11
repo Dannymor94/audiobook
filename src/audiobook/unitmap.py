@@ -4,6 +4,7 @@ Public API:
   Atom, ChunkSpan                                      — data structures
   atoms(unit_text, unit_id) -> list[Atom]              — non-whitespace atom extractor
   validate_gates(chunks, units, *, section) -> list[AnnotationError]
+  check_gates(chunks, units, *, section) -> None       — raises on first gate error
   annotate_units(manifest_chunks, units, *, section="") -> list[dict]
   find_exact_in_unit(key, unit_text, *, orig_lb, orig_ub) -> list[tuple[int, int]]
   AnnotationError
@@ -35,12 +36,24 @@ class Atom:
 
 @dataclass(frozen=True)
 class ChunkSpan:
-    """Typed, gate-validated view of a manifest chunk before cursor/mapping phases."""
+    """Architect-approved view of a mapped chunk; populated by map_chunks() (future).
+
+    Fields:
+      chunk_id   — manifest chunk id string (e.g. "0001")
+      atom_start — index of first atom in the section-level atom list (inclusive)
+      atom_end   — index past last atom (exclusive); atom_end == atom_start → zero-atom chunk
+      spans      — per-atom (start, end) offsets in the source unit text, in order
+      unit_ids   — set of source unit indices this chunk spans
+      kind       — chunk kind string ("text", "heading", "stack", …)
+      end_modes  — set of active end-mode flags (e.g. {"open_end"}), or None
+    """
     chunk_id: str
-    n: int
-    text: str
-    kind: str | None = None
-    unit_id: int | None = None
+    atom_start: int
+    atom_end: int
+    spans: tuple[tuple[int, int], ...]
+    unit_ids: frozenset[int]
+    kind: str
+    end_modes: frozenset[str] | None
 
 
 class AnnotationError(Exception):
@@ -132,6 +145,21 @@ def validate_gates(
             errors.append(AnnotationError("EMPTY_CHUNK", section=section, chunk_id=chunk_id))
 
     return errors
+
+
+def check_gates(
+    manifest_chunks: list[dict],
+    units: list[dict],
+    *,
+    section: str = "",
+) -> None:
+    """Run pre-mapping gates and raise AnnotationError on the first failure.
+
+    Guarantees that cursor processing never starts on invalid input.
+    """
+    errors = validate_gates(manifest_chunks, units, section=section)
+    if errors:
+        raise errors[0]
 
 
 def _tokens(text: str) -> list[str]:
