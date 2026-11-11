@@ -1278,10 +1278,16 @@ def test_30_ast_no_dataclasses_replace_in_unitmap_importers():
 
         tc_lines = _tc_import_linenos(tree)
         imports_unitmap = any(
-            isinstance(n, ast.ImportFrom)
-            and n.lineno not in tc_lines
-            and n.module is not None
-            and "unitmap" in n.module
+            (
+                isinstance(n, ast.ImportFrom)
+                and n.module is not None
+                and "unitmap" in n.module
+                and n.lineno not in tc_lines
+            ) or (
+                isinstance(n, ast.Import)
+                and n.lineno not in tc_lines
+                and any("unitmap" in a.name for a in n.names)
+            )
             for n in ast.walk(tree)
         )
         if not imports_unitmap:
@@ -1465,6 +1471,86 @@ def test_45_chunkspan_alias_bypass_in_src_detected(tmp_path):
         and node.func.id in forbidden
     ]
     assert calls, "alias CS() was not detected"
+
+
+def test_45_module_alias_unitmap_import_detected(tmp_path):
+    """'import audiobook.unitmap as um' is recognised as a unitmap importer."""
+    src = tmp_path / "module_alias.py"
+    src.write_text(
+        "import audiobook.unitmap as um\n"
+        "import dataclasses as dc\n"
+        "dc.replace(None)\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    # Old check (ImportFrom only) would miss this
+    old_check = any(
+        isinstance(n, ast.ImportFrom)
+        and n.module is not None
+        and "unitmap" in n.module
+        and n.lineno not in tc_lines
+        for n in ast.walk(tree)
+    )
+    assert not old_check, "precondition: old check must miss ast.Import"
+    # New check includes ast.Import
+    new_check = any(
+        isinstance(n, ast.Import)
+        and n.lineno not in tc_lines
+        and any("unitmap" in a.name for a in n.names)
+        for n in ast.walk(tree)
+    )
+    assert new_check, "'import audiobook.unitmap as um' not detected by fixed check"
+    # Guard should also find dc alias
+    dc_mods, _ = _dc_replace_aliases(tree, tc_lines)
+    assert "dc" in dc_mods, "aliased dataclasses module not detected alongside module-alias import"
+
+
+def test_45_unrelated_module_import_not_flagged(tmp_path):
+    """'import other.module as x' does not trigger unitmap importer detection."""
+    src = tmp_path / "unrelated.py"
+    src.write_text(
+        "import other.module as x\n"
+        "import dataclasses as dc\n"
+        "dc.replace(None)\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    imports_um = any(
+        (
+            isinstance(n, ast.ImportFrom)
+            and n.module is not None
+            and "unitmap" in n.module
+            and n.lineno not in tc_lines
+        ) or (
+            isinstance(n, ast.Import)
+            and n.lineno not in tc_lines
+            and any("unitmap" in a.name for a in n.names)
+        )
+        for n in ast.walk(tree)
+    )
+    assert not imports_um, "unrelated module import incorrectly detected as unitmap"
+
+
+def test_45_module_alias_type_checking_not_flagged(tmp_path):
+    """'if TYPE_CHECKING: import audiobook.unitmap as um' is excluded from importer detection."""
+    src = tmp_path / "tc_module_alias.py"
+    src.write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import audiobook.unitmap as um\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    imports_um = any(
+        isinstance(n, ast.Import)
+        and n.lineno not in tc_lines
+        and any("unitmap" in a.name for a in n.names)
+        for n in ast.walk(tree)
+    )
+    assert not imports_um, "TYPE_CHECKING module-alias import was incorrectly tracked"
 
 
 # ── #31: map_chunks(, section="01_test") == list(map_section(..., section="01_test").spans) ────────────────────────
