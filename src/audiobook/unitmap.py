@@ -361,7 +361,7 @@ def chunk_atoms(section_map: SectionMap, chunk_id: str) -> tuple[Atom, ...]:
     for cs in section_map.spans:
         if cs.chunk_id == chunk_id:
             return section_map.stream[cs.atom_start:cs.atom_end]
-    raise AnnotationError("UNKNOWN_CHUNK", section=section_map.section)
+    raise AnnotationError("UNKNOWN_CHUNK", section=section_map.section) from None
 
 
 def _tokens(text: str) -> list[str]:

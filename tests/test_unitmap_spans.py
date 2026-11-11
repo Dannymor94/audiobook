@@ -1942,3 +1942,58 @@ def test_39_valid_id_returns_atoms():
     result = chunk_atoms(sm, "0001")
     assert len(result) == 1
     assert result[0].text == "слово"
+
+
+# ── #40: chunk_atoms() suppresses exception context for unknown string IDs ────
+
+import traceback
+
+
+def test_40_unknown_string_id_suppresses_context():
+    """Unknown string ID inside active except block must not leak the secret."""
+    secret = "SYNTHETIC_SECRET_UNKNOWN_ID"
+    sm = _single_chunk_sm()
+
+    try:
+        raise ValueError(secret)
+    except ValueError:
+        with pytest.raises(AnnotationError) as exc:
+            chunk_atoms(sm, secret)
+
+    e = exc.value
+    assert e.code == "UNKNOWN_CHUNK"
+    assert e.__cause__ is None
+    assert e.__suppress_context__ is True
+
+    tb_text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    assert secret not in tb_text
+
+    assert e.chunk_id != secret
+    assert all(secret not in str(a) for a in e.args)
+    assert secret not in str(e)
+
+
+def test_40_unknown_string_no_logging_leak(caplog):
+    """Logging an UNKNOWN_CHUNK from inside an except block must not expose secret."""
+    import logging as _logging
+    secret = "LOG_CONTEXT_LEAK_SECRET"
+    sm = _single_chunk_sm()
+
+    try:
+        raise ValueError(secret)
+    except ValueError:
+        try:
+            chunk_atoms(sm, secret)
+        except AnnotationError as e:
+            with caplog.at_level(_logging.ERROR):
+                _logging.error("caught: %s", e)
+
+    assert secret not in caplog.text
+
+
+def test_40_known_id_still_works_after_fix():
+    """Valid chunk_id still returns exact atom slice after context-suppression fix."""
+    sm = _single_chunk_sm()
+    result = chunk_atoms(sm, "0001")
+    assert len(result) == 1
+    assert result[0].text == "слово"
