@@ -1351,3 +1351,90 @@ def test_source_atoms_matches_map_section_stream():
     chunks = [{"id": "0001", "n": 1, "text": "один два три"}]
     sm = map_section(units, chunks)
     assert sm.stream == source_atoms(units)
+
+
+# ── #32: UNKNOWN_CHUNK diagnostic privacy; section validation (BLOCKED) ───────
+
+def _mk_sm_one(unit_text: str, chunk_text: str, section: str = "") -> "SectionMap":
+    units = [{"text": unit_text}]
+    chunks = [{"id": "0001", "n": 1, "text": chunk_text}]
+    return map_section(units, chunks, section=section)
+
+
+def test_32_unknown_chunk_no_disclosure():
+    """Sol P1 repro: UNKNOWN_CHUNK must not contain the caller-supplied unknown ID."""
+    sm = _mk_sm_one("а", "а")
+    secret = "SYNTHETIC_SECRET"
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, secret)
+    assert exc.value.code == "UNKNOWN_CHUNK"
+    assert secret not in str(exc.value)
+    assert secret not in exc.value.chunk_id
+    assert secret not in exc.value.detail
+
+
+def test_32_unknown_chunk_latin_cyrillic_markers():
+    """Unknown ID with Latin and Cyrillic secret markers must not appear in diagnostics."""
+    sm = _mk_sm_one("слово", "слово")
+    secret = "СЕКРЕТ_secret_42"
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, secret)
+    assert exc.value.code == "UNKNOWN_CHUNK"
+    assert secret not in str(exc.value)
+    assert secret not in exc.value.chunk_id
+
+
+def test_32_unknown_chunk_check_attrs():
+    """AnnotationError attributes must not carry the unknown chunk ID."""
+    sm = _mk_sm_one("б", "б")
+    unknown = "UNKNOWN_ID_DO_NOT_LEAK"
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, unknown)
+    err = exc.value
+    assert err.chunk_id == ""
+    assert err.detail == ""
+    assert unknown not in str(err)
+
+
+def test_32_unknown_chunk_non_str_id_no_disclosure():
+    """Non-str chunk_id: comparison fails silently, UNKNOWN_CHUNK raised without disclosure."""
+    sm = _mk_sm_one("в", "в")
+    non_str_id = object()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, non_str_id)  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+    assert exc.value.chunk_id == ""
+
+
+def test_32_unknown_chunk_known_id_still_works():
+    """chunk_atoms() must still return the correct slice for known chunk IDs."""
+    sm = _mk_sm_one("раз два", "раз два")
+    result = chunk_atoms(sm, "0001")
+    assert len(result) == 2
+    assert result[0].text == "раз"
+    assert result[1].text == "два"
+
+
+# BLOCKED: no approved AnnotationError code for invalid section type.
+# The section parameter of map_section() / validate_gates() / check_gates() currently
+# accepts non-string values without raising AnnotationError. The requirement is to reject
+# them with a structured error, but the approved code set has no code for invalid section
+# metadata. These tests document the REQUIRED final behaviour; they are marked xfail
+# until an architect assigns a code and the validation is implemented.
+
+@pytest.mark.xfail(reason="BLOCKED: no approved code for invalid section type", strict=False)
+def test_32_section_dict_rejected():
+    """Non-string section (dict) must raise AnnotationError — BLOCKED."""
+    units = [{"text": "а"}]
+    chunks = [{"id": "0001", "n": 1, "text": "а"}]
+    with pytest.raises(AnnotationError):
+        map_section(units, chunks, section={"key": "value"})  # type: ignore[arg-type]
+
+
+@pytest.mark.xfail(reason="BLOCKED: no approved code for invalid section type", strict=False)
+def test_32_section_none_rejected():
+    """Non-string section (None) must raise AnnotationError — BLOCKED."""
+    units = [{"text": "а"}]
+    chunks = [{"id": "0001", "n": 1, "text": "а"}]
+    with pytest.raises(AnnotationError):
+        map_section(units, chunks, section=None)  # type: ignore[arg-type]
