@@ -2358,3 +2358,152 @@ def test_42_chunk_atoms_provenance_correct():
     result = chunk_atoms(sm, "0001")
     # Must be the slice from sm.stream, not re-tokenized
     assert result is sm.stream[sm.spans[0].atom_start:sm.spans[0].atom_end]
+
+
+# ── #43: ChunkSpan metadata type validation (T15-6C11-3g2) ───────────────────
+
+def _valid_cs_and_ctx():
+    """Return (cs, stream, unit_kinds, expected_start, expected_end) for one valid chunk."""
+    sm = _two_atom_sm()
+    cs = sm.spans[0]
+    return cs, sm.stream, ["text"], 0, cs.atom_end
+
+
+def _assert_mismatch(bad_cs, stream, unit_kinds, exp_start, exp_end):
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad_cs, stream, unit_kinds, exp_start, exp_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+# ── atom_start / atom_end type injections ────────────────────────────────────
+
+def test_43_atom_start_none_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, None, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_atom_start_float_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, 0.0, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_atom_start_bool_raises():
+    """bool is a subclass of int but must be rejected (type(True) is int → False)."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, False, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_atom_start_hostile_raises():
+    """Hostile atom_start whose __eq__ raises must still raise SPAN_STREAM_MISMATCH."""
+    class _H:
+        def __eq__(self, other): raise RuntimeError("hostile __eq__")
+        def __ne__(self, other): raise RuntimeError("hostile __ne__")
+
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, _H(), cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_atom_end_bool_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, True, cs.spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+# ── spans type injections ─────────────────────────────────────────────────────
+
+def test_43_spans_none_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, None, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_spans_list_raises():
+    """list spans must be rejected (not a tuple)."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, list(cs.spans), cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_spans_malformed_pair_raises():
+    """Span element that is not a 2-tuple of ints must be rejected."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad_spans = (("a", "b"),) + cs.spans[1:]  # type: ignore
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, bad_spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_spans_pair_bool_offset_raises():
+    """Span with bool offset (subclass of int) must be rejected."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad_spans = ((True, 2),) + cs.spans[1:]  # type: ignore
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, bad_spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_spans_hostile_element_raises():
+    """Hostile span element that raises on comparison must raise SPAN_STREAM_MISMATCH."""
+    class _H:
+        def __eq__(self, other): raise RuntimeError("hostile")
+        def __len__(self): raise RuntimeError("hostile len")
+
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad_spans = (_H(),) + cs.spans[1:]  # type: ignore
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, bad_spans, cs.unit_ids, cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+# ── unit_ids type injections ──────────────────────────────────────────────────
+
+def test_43_unit_ids_set_raises():
+    """Mutable set must be rejected (not frozenset)."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, set(cs.unit_ids), cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_unit_ids_bool_element_raises():
+    """frozenset containing bool must be rejected."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, frozenset({False}), cs.kind, None)
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_unit_ids_str_element_raises():
+    """frozenset containing str must be rejected."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, frozenset({"0"}), cs.kind, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+# ── kind type injections ──────────────────────────────────────────────────────
+
+def test_43_kind_none_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, None, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+def test_43_kind_int_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, 42, None)  # type: ignore
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+# ── end_modes injections ──────────────────────────────────────────────────────
+
+def test_43_end_modes_frozenset_raises():
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, frozenset())
+    _assert_mismatch(bad, stream, uk, es, ee)
+
+
+# ── Valid metadata still accepted ─────────────────────────────────────────────
+
+def test_43_valid_metadata_accepted():
+    """Valid ChunkSpan metadata passes all type checks."""
+    cs, stream, uk, es, ee = _valid_cs_and_ctx()
+    _validate_chunk_span(cs, stream, uk, es, ee, "01_test")  # must not raise

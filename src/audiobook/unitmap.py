@@ -274,6 +274,25 @@ def _validate_chunk_span(
     def _fail() -> None:
         raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=cs.chunk_id)
 
+    # 0. Strict type checks before any comparison, len(), or iteration.
+    #    type(x) is int excludes bool (type(True) is int → False).
+    if type(cs.atom_start) is not int or type(cs.atom_end) is not int:
+        _fail()
+    if type(cs.spans) is not tuple:
+        _fail()
+    for _sp in cs.spans:
+        if type(_sp) is not tuple or len(_sp) != 2:
+            _fail()
+        if type(_sp[0]) is not int or type(_sp[1]) is not int:
+            _fail()
+    if type(cs.unit_ids) is not frozenset:
+        _fail()
+    for _uid in cs.unit_ids:
+        if type(_uid) is not int:
+            _fail()
+    if type(cs.kind) is not str:
+        _fail()
+
     # n is the manifest-derived expected atom count — independent of cs.
     n = expected_end - expected_start
 
