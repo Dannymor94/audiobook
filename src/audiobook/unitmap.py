@@ -198,14 +198,13 @@ def map_chunks(
         chunk_atoms = atoms(chunk.get("text", ""), -1)
         n = len(chunk_atoms)
 
-        if cursor + n > len(source_atoms):
-            raise AnnotationError("STREAM_EXHAUSTED", section=section, chunk_id=chunk_id)
-
         seen_unit_ids: set[int] = set()
         seen_kinds: set[str] = set()
         spans_list: list[tuple[int, int]] = []
 
         for j in range(n):
+            if cursor + j >= len(source_atoms):
+                raise AnnotationError("STREAM_EXHAUSTED", section=section, chunk_id=chunk_id)
             src = source_atoms[cursor + j]
             if src.text != chunk_atoms[j].text:
                 raise AnnotationError("ATOM_MISMATCH", section=section, chunk_id=chunk_id)

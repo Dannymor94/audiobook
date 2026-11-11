@@ -584,13 +584,31 @@ def test_map_repeated_atoms_sequential():
 
 
 def test_map_reused_atom_stops():
-    # chunk 2 "abc Конец" tries to claim "abc" already consumed → must STOP
-    # (STREAM_EXHAUSTED fires when remaining=1 atom but chunk needs 2)
+    # architect test #1: chunk 2 "abc Конец" tries to claim "abc" already consumed.
+    # source[2]="Конец" ≠ "abc" → ATOM_MISMATCH (mismatch takes precedence over exhaustion)
     units = _mk_units(_para("Начало abc Конец"))
     chunks = _mk_chunks("Начало abc", "abc Конец")
     with pytest.raises(AnnotationError) as exc:
         map_chunks(units, chunks)
-    assert exc.value.code in ("ATOM_MISMATCH", "STREAM_EXHAUSTED", "TRAILING_SOURCE")
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_mismatch_before_exhaustion():
+    # source has atoms at the requested position but they differ → ATOM_MISMATCH, not STREAM_EXHAUSTED
+    units = _mk_units(_para("кот пёс"))
+    chunks = _mk_chunks("кот рыба")  # "рыба" ≠ "пёс" at position 1
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_genuine_exhaustion():
+    # source runs dry mid-chunk (no atom at all at that position) → STREAM_EXHAUSTED
+    units = _mk_units(_para("кот"))  # 1 atom
+    chunks = _mk_chunks("кот пёс")   # 2 atoms needed
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "STREAM_EXHAUSTED"
 
 
 # ── #11: cross-kind chunk ────────────────────────────────────────────────────
