@@ -53,7 +53,7 @@ Added in `d5c15cf` and `f43a1a2`. No group number in name.
 | Gate #2 NFC (unit_pass, unit_violation, chunk_violation, nfc_bad_no_empty_chunk) | 4 | 4 | VERIFIED |
 | Gate #12 inner-paragraph newline (double_newline, with_spaces, with_tabs, single_ok) | 4 | 4 | VERIFIED |
 | Gate #14 manifest ordering (ok, n_gap, dup_id, format_mismatch, format_too_long, n_starts_at_two, n_starts_at_zero) | 7 | 7 | VERIFIED |
-| Gate #25 empty chunk (whitespace_only, empty_string, tabs_newlines, ok_punctuation_only, ok_single_char) | 5 | 5 | VERIFIED |
+| Gate #25 empty chunk (whitespace_only, empty_string, tabs_newlines, ok_punctuation_only, ok_single_char, empty_unit_allowed) | 6 | 6 | VERIFIED |
 | Gate single-newline multiple units (gate_single_newline_multiple_units) | 1 | 1 | VERIFIED |
 | check_gates (passes_valid, raises_subclass, empty_chunk, inner_para, manifest_order, nfc) | 6 | 6 | VERIFIED |
 | source_atoms (single_implementation, matches_map_section_stream) | 2 | 2 | VERIFIED |
@@ -130,7 +130,7 @@ Added during T15-6C11-3b through TD-12-FIX. Not part of the original 1–26 cont
 
 | Category | Functions | Collected cases |
 |----------|-----------|----------------|
-| Pre-numbered (Atom × 7, ChunkSpan × 9, AnnotationError × 5, Gate #2 × 4, Gate #12 × 4, Gate #14 × 7, Gate #25 × 5, single-newline × 1, check_gates × 6, source_atoms × 2, SectionMap structure × 4, map_* numbered × 33) | 88 | 88 |
+| Pre-numbered (Atom × 7, ChunkSpan × 9, AnnotationError × 5, Gate #2 × 4, Gate #12 × 4, Gate #14 × 7, Gate #25 × 6, single-newline × 1, check_gates × 6, source_atoms × 2, SectionMap structure × 4, map_* numbered × 33) | 88 | 88 |
 | Groups #3b / #3c / #3d (manifest-ID disclosure, input schema, CRLF) | 40 | 40 |
 | Groups #27–#31 (provenance, AST, map_chunks equality) | 17 | 17 |
 | Groups #32–#40 (diagnostic privacy, section validation, chunk_atoms) | 48 | 122 |
