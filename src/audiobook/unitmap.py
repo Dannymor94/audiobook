@@ -257,6 +257,62 @@ def check_gates(
         raise errors[0]
 
 
+def _validate_chunk_span(
+    cs: ChunkSpan,
+    stream: tuple[Atom, ...],
+    unit_kinds: list[str],
+    expected_start: int,
+    section: str,
+) -> None:
+    """Raise SPAN_STREAM_MISMATCH if cs is inconsistent with stream and unit_kinds.
+
+    All bounds checks run before any stream indexing.  Values are derived
+    independently from stream/unit_kinds, never from cs fields.
+    """
+    def _fail() -> None:
+        raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=cs.chunk_id)
+
+    # 1. Atom range must be within stream bounds.
+    if not (0 <= cs.atom_start <= cs.atom_end <= len(stream)):
+        _fail()
+
+    # 2. Must be contiguous with the previous chunk (or start at 0).
+    if cs.atom_start != expected_start:
+        _fail()
+
+    n = cs.atom_end - cs.atom_start
+
+    # 3. Span count must equal the atom range.
+    if len(cs.spans) != n:
+        _fail()
+
+    # 4. end_modes must be None for exact atom mapping.
+    if cs.end_modes is not None:
+        _fail()
+
+    if n == 0:
+        if cs.unit_ids:
+            _fail()
+        return
+
+    # 5. Derive expected spans and unit_ids from stream independently.
+    expected_unit_ids: set[int] = set()
+    for j in range(n):
+        atom = stream[cs.atom_start + j]
+        if cs.spans[j] != (atom.start, atom.end):
+            _fail()
+        expected_unit_ids.add(atom.unit_id)
+
+    # 6. unit_ids must match the actual source units in the slice.
+    if cs.unit_ids != frozenset(expected_unit_ids):
+        _fail()
+
+    # 7. kind must agree with source units (all same kind after KIND_AMBIGUOUS gate).
+    expected_kinds = {unit_kinds[uid] for uid in expected_unit_ids}
+    if len(expected_kinds) != 1 or cs.kind != next(iter(expected_kinds)):
+        _fail()
+
+
 def map_section(
     units: list[dict],
     chunks: list[dict],
@@ -318,11 +374,8 @@ def map_section(
             end_modes=None,
         )
 
-        # Defensive invariant: built spans must match stream slice.
-        for j, (s, e) in enumerate(cs.spans):
-            atom = stream[cs.atom_start + j]
-            if atom.start != s or atom.end != e:
-                raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=chunk_id)
+        # Independently validate ChunkSpan against stream before accepting it.
+        _validate_chunk_span(cs, stream, unit_kinds, cursor, section)
 
         result.append(cs)
         cursor += n

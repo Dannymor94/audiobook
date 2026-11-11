@@ -6,7 +6,7 @@ from audiobook.unitmap import (
     Atom, ChunkSpan, SectionMap, AnnotationError,
     atoms, source_atoms, validate_gates, check_gates,
     map_section, map_chunks, chunk_atoms,
-    validate_section, _section_violation,
+    validate_section, _section_violation, _validate_chunk_span,
 )
 
 
@@ -1997,3 +1997,246 @@ def test_40_known_id_still_works_after_fix():
     result = chunk_atoms(sm, "0001")
     assert len(result) == 1
     assert result[0].text == "слово"
+
+
+# ── #41: _validate_chunk_span integrity checks (T15-6C11-3g) ─────────────────
+
+import audiobook.unitmap as _unitmap
+from unittest.mock import patch
+
+
+def _base_sm_and_meta():
+    """Return (sm, stream, unit_kinds) for a 2-unit, 2-chunk section."""
+    units = [{"text": "слово раз"}, {"text": "слово два"}]
+    chunks = [
+        {"id": "0001", "n": 1, "text": "слово раз"},
+        {"id": "0002", "n": 2, "text": "слово два"},
+    ]
+    sm = map_section(units, chunks, section="01_test")
+    unit_kinds = ["text", "text"]
+    return sm, sm.stream, unit_kinds
+
+
+# ── Sol P2 mandatory reproductions ───────────────────────────────────────────
+
+def test_41_sol_injection_atom_end_plus_one():
+    """Sol P2: atom_end + 1 raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(
+        chunk_id=cs.chunk_id,
+        atom_start=cs.atom_start,
+        atom_end=cs.atom_end + 1,  # out-of-bounds / overlap
+        spans=cs.spans,
+        unit_ids=cs.unit_ids,
+        kind=cs.kind,
+        end_modes=None,
+    )
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_sol_injection_empty_spans():
+    """Sol P2: spans=() raises SPAN_STREAM_MISMATCH (not silently accepted)."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(
+        chunk_id=cs.chunk_id,
+        atom_start=cs.atom_start,
+        atom_end=cs.atom_end,
+        spans=(),  # missing source intervals
+        unit_ids=cs.unit_ids,
+        kind=cs.kind,
+        end_modes=None,
+    )
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_sol_injection_extra_span():
+    """Sol P2: extra span raises SPAN_STREAM_MISMATCH (not IndexError)."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    extra = cs.spans + ((0, 0),)
+    bad = ChunkSpan(
+        chunk_id=cs.chunk_id,
+        atom_start=cs.atom_start,
+        atom_end=cs.atom_end,
+        spans=extra,  # extra interval
+        unit_ids=cs.unit_ids,
+        kind=cs.kind,
+        end_modes=None,
+    )
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+# ── Additional injections ─────────────────────────────────────────────────────
+
+def test_41_bad_atom_start_raises():
+    """atom_start < 0 raises SPAN_STREAM_MISMATCH before any indexing."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, -1, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, -1, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_reversed_range_raises():
+    """atom_start > atom_end raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_end, cs.atom_start, cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_gap_between_chunks_raises():
+    """atom_start != expected_start raises SPAN_STREAM_MISMATCH (gap)."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[1]
+    # Second chunk normally starts at spans[0].atom_end, present expected_start as 0 (gap)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(cs, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_overlapping_range_raises():
+    """atom_end beyond stream length raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[-1]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, len(stream) + 5, cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_start, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_wrong_unit_ids_raises():
+    """Incorrect unit_ids raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, frozenset({99}), cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_wrong_kind_raises():
+    """Incorrect kind raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, "heading", None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_wrong_offsets_raises():
+    """Corrupted span offsets raise SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    corrupted = ((999, 999),) + cs.spans[1:]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, corrupted, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_nonzero_end_modes_raises():
+    """Non-None end_modes raises SPAN_STREAM_MISMATCH."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, frozenset({"open_end"}))
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_no_indexerror_on_oob():
+    """Out-of-bounds atom_end raises SPAN_STREAM_MISMATCH, never IndexError."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, 0, len(stream) + 100, cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+# ── Integration: injected corruption through map_section via monkeypatch ──────
+
+def _make_bad_cs_factory(corrupt_fn):
+    """Return a ChunkSpan factory that applies corrupt_fn to the produced span."""
+    original = _unitmap.ChunkSpan
+    call_count = [0]
+
+    def patched(**kwargs):
+        cs = original(**kwargs)
+        call_count[0] += 1
+        if call_count[0] == 1:
+            cs = corrupt_fn(cs)
+        return cs
+
+    return patched
+
+
+def test_41_integration_atom_end_plus_one(monkeypatch):
+    """map_section with injected atom_end+1 raises SPAN_STREAM_MISMATCH."""
+    def corrupt(cs):
+        return ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end + 1, cs.spans, cs.unit_ids, cs.kind, None)
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section="01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_integration_empty_spans(monkeypatch):
+    """map_section with injected spans=() raises SPAN_STREAM_MISMATCH."""
+    def corrupt(cs):
+        return ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, (), cs.unit_ids, cs.kind, None)
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section="01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_41_integration_extra_span(monkeypatch):
+    """map_section with injected extra span raises SPAN_STREAM_MISMATCH, not IndexError."""
+    def corrupt(cs):
+        return ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans + ((0, 0),), cs.unit_ids, cs.kind, None)
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section="01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+# ── Valid mappings remain accepted ────────────────────────────────────────────
+
+def test_41_valid_multi_unit_accepted():
+    """Valid multi-unit span passes _validate_chunk_span."""
+    units = [{"text": "слово"}, {"text": "раз"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово раз"}]
+    sm = map_section(units, chunks, section="01_test")
+    assert len(sm.spans) == 1
+    assert len(sm.spans[0].unit_ids) == 2
+
+
+def test_41_valid_zero_cyrillic_accepted():
+    """Valid zero-Cyrillic (punctuation) chunk passes validation."""
+    units = [{"text": "слово,"}, {"text": "раз"}]
+    chunks = [
+        {"id": "0001", "n": 1, "text": "слово,"},
+        {"id": "0002", "n": 2, "text": "раз"},
+    ]
+    sm = map_section(units, chunks, section="01_test")
+    assert len(sm.spans) == 2
