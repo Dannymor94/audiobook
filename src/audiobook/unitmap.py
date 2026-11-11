@@ -162,6 +162,77 @@ def check_gates(
         raise errors[0]
 
 
+def map_chunks(
+    units: list[dict],
+    chunks: list[dict],
+    *,
+    section: str = "",
+) -> list[ChunkSpan]:
+    """Map manifest chunks to source atoms, returning one ChunkSpan per chunk.
+
+    Algorithm: build an ordered atom stream from all units, then advance a
+    single global cursor by each chunk's atom count.  Comparison is exact
+    codepoint equality — no normalization, no Cyrillic filtering.
+
+    Raises AnnotationError with codes:
+      ATOM_MISMATCH    — chunk atom text ≠ source atom text at cursor position
+      STREAM_EXHAUSTED — chunk needs atoms past the end of the source stream
+      TRAILING_SOURCE  — source atoms remain after all chunks are consumed
+      KIND_AMBIGUOUS   — chunk spans atoms from units with different kinds
+      (gate codes via check_gates before cursor processing)
+    """
+    check_gates(chunks, units, section=section)
+
+    # Build ordered source atom stream from all units.
+    source_atoms: list[Atom] = []
+    for uid, unit in enumerate(units):
+        source_atoms.extend(atoms(unit.get("text", ""), uid))
+
+    unit_kinds = [_unit_kind(u) for u in units]
+
+    result: list[ChunkSpan] = []
+    cursor = 0
+
+    for chunk in chunks:
+        chunk_id = str(chunk.get("id", ""))
+        chunk_atoms = atoms(chunk.get("text", ""), -1)
+        n = len(chunk_atoms)
+
+        if cursor + n > len(source_atoms):
+            raise AnnotationError("STREAM_EXHAUSTED", section=section, chunk_id=chunk_id)
+
+        seen_unit_ids: set[int] = set()
+        seen_kinds: set[str] = set()
+        spans_list: list[tuple[int, int]] = []
+
+        for j in range(n):
+            src = source_atoms[cursor + j]
+            if src.text != chunk_atoms[j].text:
+                raise AnnotationError("ATOM_MISMATCH", section=section, chunk_id=chunk_id)
+            seen_unit_ids.add(src.unit_id)
+            seen_kinds.add(unit_kinds[src.unit_id])
+            spans_list.append((src.start, src.end))
+
+        if len(seen_kinds) > 1:
+            raise AnnotationError("KIND_AMBIGUOUS", section=section, chunk_id=chunk_id)
+
+        result.append(ChunkSpan(
+            chunk_id=chunk_id,
+            atom_start=cursor,
+            atom_end=cursor + n,
+            spans=tuple(spans_list),
+            unit_ids=frozenset(seen_unit_ids),
+            kind=next(iter(seen_kinds)),
+            end_modes=None,
+        ))
+        cursor += n
+
+    if cursor < len(source_atoms):
+        raise AnnotationError("TRAILING_SOURCE", section=section)
+
+    return result
+
+
 def _tokens(text: str) -> list[str]:
     return [w.lower().replace("ё", "е") for w in _CYR.findall(text)]
 

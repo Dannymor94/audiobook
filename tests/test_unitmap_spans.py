@@ -381,3 +381,316 @@ def test_check_gates_raises_annotation_error_subclass():
     chunks = [{"id": "0001", "n": 1, "text": ""}]
     with pytest.raises(AnnotationError):
         check_gates(chunks, [])
+
+
+# ── map_chunks helpers ────────────────────────────────────────────────────────
+
+from audiobook.unitmap import map_chunks
+
+
+def _mk_chunks(*texts: str) -> list[dict]:
+    return [{"text": t, "id": f"{i+1:04d}", "n": i+1} for i, t in enumerate(texts)]
+
+
+def _mk_units(*pairs: tuple[str, str]) -> list[dict]:
+    return [{"type": tp, "text": tx} for tp, tx in pairs]
+
+
+def _para(text: str) -> tuple[str, str]:
+    return ("paragraph", text)
+
+
+def _head(text: str) -> tuple[str, str]:
+    return ("heading", text)
+
+
+# ── #1: basic success ─────────────────────────────────────────────────────────
+
+def test_map_basic_single_chunk():
+    units = _mk_units(_para("слово раз"))
+    chunks = _mk_chunks("слово раз")
+    spans = map_chunks(units, chunks)
+    assert len(spans) == 1
+    cs = spans[0]
+    assert cs.chunk_id == "0001"
+    assert cs.atom_start == 0
+    assert cs.atom_end == 2
+    assert cs.unit_ids == frozenset({0})
+    assert cs.kind == "text"
+    assert cs.end_modes is None
+
+
+def test_map_multiple_chunks_same_unit():
+    units = _mk_units(_para("а б в г"))
+    chunks = _mk_chunks("а б", "в г")
+    spans = map_chunks(units, chunks)
+    assert [cs.atom_start for cs in spans] == [0, 2]
+    assert [cs.atom_end for cs in spans] == [2, 4]
+
+
+def test_map_chunks_across_units():
+    units = _mk_units(_para("а б"), _para("в г"))
+    chunks = _mk_chunks("а б", "в г")
+    spans = map_chunks(units, chunks)
+    assert spans[0].unit_ids == frozenset({0})
+    assert spans[1].unit_ids == frozenset({1})
+
+
+# ── #3: extra chunk / stream exhausted ───────────────────────────────────────
+
+def test_map_stream_exhausted_extra_chunk():
+    units = _mk_units(_para("слово"))
+    chunks = _mk_chunks("слово", "лишнее")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "STREAM_EXHAUSTED"
+
+
+def test_map_stream_exhausted_empty_source():
+    units = _mk_units(_para(""))
+    chunks = _mk_chunks("слово")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "STREAM_EXHAUSTED"
+
+
+# ── #4: trailing atoms ────────────────────────────────────────────────────────
+
+def test_map_trailing_source_atoms():
+    units = _mk_units(_para("слово раз"))
+    chunks = _mk_chunks("слово")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "TRAILING_SOURCE"
+
+
+def test_map_trailing_source_multiple_units():
+    units = _mk_units(_para("а б"), _para("в"))
+    chunks = _mk_chunks("а б")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "TRAILING_SOURCE"
+
+
+# ── #5–7: atom mismatch (case, ё, punctuation) ───────────────────────────────
+
+def test_map_atom_mismatch_case():
+    units = _mk_units(_para("Слово"))
+    chunks = _mk_chunks("слово")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_uppercase():
+    units = _mk_units(_para("слово"))
+    chunks = _mk_chunks("СЛОВО")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_yo_e():
+    units = _mk_units(_para("ёлка"))
+    chunks = _mk_chunks("елка")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_e_yo():
+    units = _mk_units(_para("елка"))
+    chunks = _mk_chunks("ёлка")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_trailing_punct():
+    units = _mk_units(_para("слово."))
+    chunks = _mk_chunks("слово")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_added_punct():
+    units = _mk_units(_para("слово"))
+    chunks = _mk_chunks("слово.")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+def test_map_atom_mismatch_different_word():
+    units = _mk_units(_para("кот"))
+    chunks = _mk_chunks("кит")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "ATOM_MISMATCH"
+
+
+# ── #8: NBSP and double spaces succeed ───────────────────────────────────────
+
+def test_map_nbsp_in_source():
+    # NBSP treated as whitespace by \S+: atoms still split correctly
+    units = _mk_units(_para("слово\xa0раз"))
+    chunks = _mk_chunks("слово раз")
+    spans = map_chunks(units, chunks)
+    assert spans[0].atom_end - spans[0].atom_start == 2
+
+
+def test_map_double_space_in_source():
+    units = _mk_units(_para("слово  раз"))
+    chunks = _mk_chunks("слово раз")
+    spans = map_chunks(units, chunks)
+    assert spans[0].atom_end - spans[0].atom_start == 2
+
+
+def test_map_double_space_in_chunk():
+    units = _mk_units(_para("слово раз"))
+    chunks = _mk_chunks("слово  раз")
+    spans = map_chunks(units, chunks)
+    assert spans[0].atom_end - spans[0].atom_start == 2
+
+
+# ── #9: single newlines succeed ──────────────────────────────────────────────
+
+def test_map_newline_in_source():
+    units = _mk_units(_para("слово\nраз"))
+    chunks = _mk_chunks("слово раз")
+    spans = map_chunks(units, chunks)
+    assert spans[0].atom_end - spans[0].atom_start == 2
+
+
+def test_map_newline_between_chunks():
+    units = _mk_units(_para("а\nб"))
+    chunks = _mk_chunks("а", "б")
+    spans = map_chunks(units, chunks)
+    assert len(spans) == 2
+
+
+# ── #10: repeated identical atoms ────────────────────────────────────────────
+
+def test_map_repeated_atoms_sequential():
+    units = _mk_units(_para("abc abc abc"))
+    chunks = _mk_chunks("abc", "abc", "abc")
+    spans = map_chunks(units, chunks)
+    assert [cs.atom_start for cs in spans] == [0, 1, 2]
+    assert [cs.atom_end for cs in spans] == [1, 2, 3]
+    # each span points to a different source position
+    assert spans[0].spans[0] != spans[1].spans[0]
+    assert spans[1].spans[0] != spans[2].spans[0]
+
+
+def test_map_reused_atom_stops():
+    # chunk 2 "abc Конец" tries to claim "abc" already consumed → must STOP
+    # (STREAM_EXHAUSTED fires when remaining=1 atom but chunk needs 2)
+    units = _mk_units(_para("Начало abc Конец"))
+    chunks = _mk_chunks("Начало abc", "abc Конец")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code in ("ATOM_MISMATCH", "STREAM_EXHAUSTED", "TRAILING_SOURCE")
+
+
+# ── #11: cross-kind chunk ────────────────────────────────────────────────────
+
+def test_map_kind_ambiguous():
+    units = _mk_units(_head("Глава"), _para("текст"))
+    chunks = _mk_chunks("Глава текст")
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code == "KIND_AMBIGUOUS"
+
+
+def test_map_same_kind_two_units_ok():
+    units = _mk_units(_para("а"), _para("б"))
+    chunks = _mk_chunks("а б")
+    spans = map_chunks(units, chunks)
+    assert spans[0].unit_ids == frozenset({0, 1})
+    assert spans[0].kind == "text"
+
+
+# ── #15: zero-Cyrillic chunk as separate manifest chunk ──────────────────────
+
+def test_map_zero_cyrillic_chunk_punct():
+    # "—" has no Cyrillic but one atom; must map through cursor correctly
+    units = _mk_units(_para("—"))
+    chunks = _mk_chunks("—")
+    spans = map_chunks(units, chunks)
+    assert spans[0].spans == ((0, 1),)
+    assert spans[0].kind == "text"
+
+
+def test_map_zero_cyrillic_between_cyr_chunks():
+    units = _mk_units(_para("слово — конец"))
+    chunks = _mk_chunks("слово", "—", "конец")
+    spans = map_chunks(units, chunks)
+    assert len(spans) == 3
+    assert spans[1].spans == ((6, 7),)
+
+
+# ── #16: zero-Cyrillic chunk as unit tail ────────────────────────────────────
+
+def test_map_zero_cyrillic_tail_of_unit():
+    units = _mk_units(_para("слово..."))
+    chunks = _mk_chunks("слово...")
+    spans = map_chunks(units, chunks)
+    # "слово..." is one atom
+    assert len(spans[0].spans) == 1
+    assert spans[0].spans[0] == (0, 8)
+
+
+def test_map_zero_cyrillic_separate_tail_atom():
+    units = _mk_units(_para("слово ..."))
+    chunks = _mk_chunks("слово", "...")
+    spans = map_chunks(units, chunks)
+    assert spans[0].spans == ((0, 5),)
+    assert spans[1].spans == ((6, 9),)
+
+
+# ── #17: reconstruction from spans reproduces atom text ──────────────────────
+
+def test_map_reconstruction_from_spans():
+    units = _mk_units(_para("первый второй третий"))
+    chunks = _mk_chunks("первый второй", "третий")
+    spans = map_chunks(units, chunks)
+    unit_texts = [u["text"] for u in units]
+
+    for cs in spans:
+        for uid in cs.unit_ids:
+            src_text = unit_texts[uid]
+        reconstructed = [src_text[s:e] for s, e in cs.spans]
+        chunk_atom_texts = [a.text for a in atoms(chunks[int(cs.chunk_id) - 1]["text"], 0)]
+        assert reconstructed == chunk_atom_texts
+
+
+def test_map_reconstruction_multi_unit():
+    units = _mk_units(_para("первый"), _para("второй"))
+    chunks = _mk_chunks("первый", "второй")
+    spans = map_chunks(units, chunks)
+
+    for cs in spans:
+        unit_id = next(iter(cs.unit_ids))
+        src_text = units[unit_id]["text"]
+        reconstructed = [src_text[s:e] for s, e in cs.spans]
+        chunk_atom_texts = [a.text for a in atoms(chunks[int(cs.chunk_id) - 1]["text"], 0)]
+        assert reconstructed == chunk_atom_texts
+
+
+# ── #18: skipped atoms / gaps ────────────────────────────────────────────────
+
+def test_map_skipped_atom_mismatch():
+    # source: "а б в"; chunk skips "б" → "а в" → "в" at cursor pos 1 hits "б" → ATOM_MISMATCH
+    units = _mk_units(_para("а б в"))
+    chunks = _mk_chunks("а в")  # would need "а" then "в" but source[1]="б"
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(units, chunks)
+    assert exc.value.code in ("ATOM_MISMATCH", "TRAILING_SOURCE")
+
+
+def test_map_heading_kind():
+    units = _mk_units(_head("Введение"))
+    chunks = _mk_chunks("Введение")
+    spans = map_chunks(units, chunks)
+    assert spans[0].kind == "heading"
