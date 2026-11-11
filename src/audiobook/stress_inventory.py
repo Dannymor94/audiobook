@@ -9,10 +9,8 @@ Outputs (out/stress/inventory/):
 Generation archive (out/stress/gen/<gen_id>/):
   same three files, immutable once written.
 
-Paragraph boundaries are determined by pause_after_ms from manifest rows:
-  pause_after_ms < paragraph_ms  → space separator (same paragraph)
-  pause_after_ms >= paragraph_ms → \\n\\n separator (paragraph boundary)
-This matches the boundary logic in joins.py exactly.
+Paragraph boundaries use exact source atom provenance and joins.is_within_para().
+Source mapping never prepares synthesis text or tolerates changed atoms.
 
 Fatal conditions (SystemExit, non-zero):
   • models/dictionary/omographs.json.gz absent, corrupt, or wrong structure/types
@@ -44,6 +42,10 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from audiobook.unitmap import SectionMap
 
 from audiobook import paths
 from audiobook.stress_fp import INVENTORY_ALGO_VERSION, stress_params
@@ -198,8 +200,26 @@ def _text_classes(text: str) -> list[str]:
     return sorted(classes)
 
 
-def _build_section_data(
-    section: str, paragraph_ms: int
+def _load_mapped_section(section: str) -> tuple[list[dict], list[dict], SectionMap]:
+    """Read existing source units and manifest, then map without text preparation."""
+    from audiobook.chunker import _read_manifest, load_units
+    from audiobook.unitmap import AnnotationError, map_section, validate_section
+
+    validate_section(section)
+    manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
+    try:
+        rows = _read_manifest(manifest_path)
+    except (OSError, ValueError):
+        raise AnnotationError("MANIFEST_READ_ERROR", section=section) from None
+    try:
+        units = load_units(*section.split("_", 1))
+    except (OSError, ValueError, KeyError, IndexError, TypeError, SystemExit):
+        raise AnnotationError("SOURCE_READ_ERROR", section=section) from None
+    return units, rows, map_section(units, rows, section=section)
+
+
+def _section_data_from_map(
+    rows: list[dict], section_map: SectionMap, paragraph_ms: int
 ) -> tuple[str, list[int], list[str], list[dict]]:
     """Concatenate manifest chunk texts into one string; build bisect intervals.
 
@@ -211,57 +231,29 @@ def _build_section_data(
       - starts[i] is the character offset of chunk chunk_ids[i] inside full_text
       - zero_token_diags is a list of diagnostic dicts for zero-Cyrillic-token chunks
 
-    Also validates _cyrillic_tokens(full_text) == _cyrillic_tokens(norm.txt).
-    Raises SystemExit on annotation failure or token mismatch.
+    For multi-unit chunks, paragraph joins use the adjoining source atoms.
+    Diagnostic unit_id is the first source unit of the chunk; full provenance
+    remains in SectionMap. Zero-Cyrillic diagnostics always have match='exact'.
     """
-    manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
-    if not manifest_path.exists():
-        raise SystemExit(
-            f"stress-inventory: манифест отсутствует: {manifest_path}\nСтатус: blocked."
-        )
-
-    try:
-        from audiobook.chunker import _read_manifest, load_units
-        rows = _read_manifest(manifest_path)
-    except Exception as exc:
-        raise SystemExit(
-            f"stress-inventory: не удалось прочитать манифест {manifest_path}: {exc}\n"
-            "Статус: blocked."
-        ) from None
-
-    nn, slug = section.split("_", 1)
-    units = load_units(nn, slug)
-
-    from audiobook.unitmap import annotate_units, AnnotationError
     from audiobook.joins import is_within_para
-    try:
-        annotated = annotate_units(rows, units, section=section)
-    except AnnotationError as exc:
-        raise SystemExit(
-            f"stress-inventory: не удалось аннотировать секцию '{section}':\n"
-            f"  {exc}\nСтатус: blocked."
-        ) from None
-
-    norm_path = paths.TEXT / f"{section}.norm.txt"
-    norm_text = norm_path.read_text(encoding="utf-8") if norm_path.exists() else None
-
     full_parts: list[str] = []
     starts: list[int] = []
     chunk_ids: list[str] = []
     zero_token_diags: list[dict] = []
     pos = 0
 
-    for i, (row, ann) in enumerate(zip(rows, annotated)):
-        text = row.get("text") or ""
-        cid = row.get("id", "?")
+    for i, (row, span) in enumerate(zip(rows, section_map.spans, strict=True)):
+        text = row["text"]
+        cid = span.chunk_id
 
         if pos == 0:
             sep = ""
         else:
-            prev_ann = annotated[i - 1]
+            prev_span = section_map.spans[i - 1]
             sep = " " if is_within_para(
-                prev_ann["unit_id"], ann["unit_id"],
-                prev_ann["kind"], ann["kind"],
+                section_map.stream[prev_span.atom_end - 1].unit_id,
+                section_map.stream[span.atom_start].unit_id,
+                prev_span.kind, span.kind,
                 rows[i - 1].get("pause_after_ms", paragraph_ms),
                 paragraph_ms,
             ) else "\n\n"
@@ -271,36 +263,45 @@ def _build_section_data(
         full_parts.append(sep + text)
         pos += len(sep) + len(text)
 
-        if "match" in ann:  # zero-Cyrillic-token chunk annotated by I2′
+        if not _WORD.search(text):
             zero_token_diags.append({
-                "section": section,
-                "chunk_id": str(cid),
-                "unit_id": ann["unit_id"],
-                "kind": ann["kind"],
-                "match": ann["match"],
+                "section": section_map.section,
+                "chunk_id": cid,
+                "unit_id": section_map.stream[span.atom_start].unit_id,
+                "kind": span.kind,
+                "match": "exact",
                 "text_classes": _text_classes(text),
             })
 
-    full_text = "".join(full_parts)
+    return "".join(full_parts), starts, chunk_ids, zero_token_diags
 
-    if norm_text is not None:
-        m_toks = _cyrillic_tokens(full_text)
-        n_toks = _cyrillic_tokens(norm_text)
-        if m_toks != n_toks:
-            first_diff: tuple
-            for i, (a, b) in enumerate(zip(m_toks, n_toks)):
-                if a != b:
-                    first_diff = (i, a, b)
-                    break
-            else:
-                first_diff = ("length", len(m_toks), len(n_toks))
-            raise SystemExit(
-                f"stress-inventory: несовпадение токенов в секции '{section}':\n"
-                f"  manifest={len(m_toks)}, norm.txt={len(n_toks)} токенов\n"
-                f"  первое различие: pos={first_diff[0]}, "
-                f"manifest={first_diff[1]!r}, norm.txt={first_diff[2]!r}\n"
-                "Статус: blocked."
-            )
+
+def _build_section_data(
+    section: str, paragraph_ms: int
+) -> tuple[str, list[int], list[str], list[dict]]:
+    """Build the unchanged inventory text/offset contract from an exact SectionMap."""
+    from audiobook.unitmap import AnnotationError
+
+    try:
+        _, rows, section_map = _load_mapped_section(section)
+    except AnnotationError as exc:
+        raise SystemExit(f"stress-inventory: {exc}\nСтатус: blocked.") from None
+    full_text, starts, chunk_ids, zero_token_diags = _section_data_from_map(
+        rows, section_map, paragraph_ms,
+    )
+    norm_path = paths.TEXT / f"{section}.norm.txt"
+    norm_text = norm_path.read_text(encoding="utf-8")
+
+    m_toks = _cyrillic_tokens(full_text)
+    n_toks = _cyrillic_tokens(norm_text)
+    if m_toks != n_toks:
+        first_diff = next((i for i, (a, b) in enumerate(zip(m_toks, n_toks)) if a != b), "length")
+        raise SystemExit(
+            f"stress-inventory: несовпадение токенов в секции '{section}':\n"
+            f"  manifest={len(m_toks)}, norm.txt={len(n_toks)} токенов\n"
+            f"  первое различие: pos={first_diff}\n"
+            "Статус: blocked."
+        )
 
     return full_text, starts, chunk_ids, zero_token_diags
 

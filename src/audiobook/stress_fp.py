@@ -14,7 +14,8 @@ from pathlib import Path
 # Bump when: paragraph separator logic changes, scoring changes, new risk
 # categories added, TSV columns added/removed, summary.json schema changes.
 # See CLAUDE.md → "INVENTORY_ALGO_VERSION bump rules".
-INVENTORY_ALGO_VERSION: int = 3
+# v4: exact atom provenance; multi-unit joins use adjoining source atoms.
+INVENTORY_ALGO_VERSION: int = 4
 
 
 def stress_params(cfg: dict) -> dict:

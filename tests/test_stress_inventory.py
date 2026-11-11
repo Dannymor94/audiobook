@@ -1188,13 +1188,13 @@ def test_fingerprint_has_algo_version(tmp_path):
     assert summary["algo_version"] == INVENTORY_ALGO_VERSION
 
 
-def test_algo_version_is_3():
-    """INVENTORY_ALGO_VERSION must be exactly 3 (T15 unit-boundary + I2' matching).
+def test_algo_version_is_4():
+    """Version 4 uses exact atom provenance and adjoining multi-unit boundaries.
 
     Bump this test when the version is intentionally raised again.
     """
     from audiobook.stress_fp import INVENTORY_ALGO_VERSION
-    assert INVENTORY_ALGO_VERSION == 3
+    assert INVENTORY_ALGO_VERSION == 4
 
 
 def test_gen_dir_created_with_current_json(tmp_path):
@@ -1664,8 +1664,8 @@ def test_6c5c1c_exact_match_diagnostic(tmp_path):
         assert "example" not in str(v), "raw text leaked into diagnostic"
 
 
-def test_6c5c1c_tolerant_match_diagnostic(tmp_path):
-    """Zero-token chunk with M2 tolerant match reports correct match field."""
+def test_6c11_prepared_text_is_not_source_mapping(tmp_path):
+    """Synthesis punctuation must not be accepted as a source atom fallback."""
     units = [
         {"type": "paragraph", "text": "Начало http://example.com Конец"},
     ]
@@ -1674,10 +1674,8 @@ def test_6c5c1c_tolerant_match_diagnostic(tmp_path):
         _zrow(2, "http://example.com.", pause=400),  # trailing dot → M2 tolerant
         _row(3, "Конец"),
     ]
-    _, _, _, zt = _build_section(tmp_path, units, rows)
-    assert len(zt) == 1
-    assert zt[0]["match"].startswith("tolerant:")
-    assert zt[0]["match"] == "tolerant:46"  # '.' == 46
+    with pytest.raises(SystemExit, match="ATOM_MISMATCH"):
+        _build_section(tmp_path, units, rows)
 
 
 def test_6c5c1c_text_classes_no_raw_text(tmp_path):
@@ -1710,3 +1708,73 @@ def test_6c5c1c_failed_mapping_raises(tmp_path):
     ]
     with pytest.raises(SystemExit):
         _build_section(tmp_path, units, rows)
+
+
+def test_atom_inventory_never_uses_legacy_alignment(tmp_path, monkeypatch):
+    """Repeated atoms keep their chunk offsets without legacy anchors or preparation."""
+    import audiobook.unitmap as unitmap
+    import audiobook.voicecfg as voicecfg
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("legacy alignment or synthesis preparation called")
+
+    monkeypatch.setattr(unitmap, "annotate_units", forbidden)
+    monkeypatch.setattr(unitmap, "find_exact_in_unit", forbidden)
+    monkeypatch.setattr(voicecfg, "prepare_text", forbidden)
+    text, starts, ids, diagnostics = _build_section(
+        tmp_path, [{"type": "paragraph", "text": "а а а"}],
+        [_row(1, "а", 400), _row(2, "а", 400), _row(3, "а")],
+    )
+    assert (text, starts, ids, diagnostics) == (
+        "а а а", [0, 2, 4], ["0001", "0002", "0003"], [],
+    )
+
+
+def test_atom_inventory_multi_unit_adjoining_provenance(tmp_path):
+    """Multi-unit chunks join using their adjoining source units, not one guessed ID."""
+    text, starts, ids, _ = _build_section(
+        tmp_path,
+        [{"type": "paragraph", "text": "а б"}, {"type": "paragraph", "text": "в г"}],
+        [_row(1, "а", 400), _row(2, "б в", 400), _row(3, "г")],
+    )
+    assert text == "а б в г"
+    assert [text[start:start + len(value)] for start, value in zip(starts, ["а", "б в", "г"])] == ["а", "б в", "г"]
+    assert ids == ["0001", "0002", "0003"]
+
+
+def test_atom_inventory_multi_unit_zero_cyrillic_diagnostic(tmp_path):
+    """The legacy scalar diagnostic locates the first unit; mapping retains all units."""
+    _, _, _, diagnostics = _build_section(
+        tmp_path, [{"type": "paragraph", "text": "123"}, {"type": "paragraph", "text": "ABC"}],
+        [_row(1, "123 ABC")],
+    )
+    assert diagnostics == [{
+        "section": "01_test", "chunk_id": "0001", "unit_id": 0,
+        "kind": "text", "match": "exact", "text_classes": ["digit", "letter", "space"],
+    }]
+
+
+@pytest.mark.parametrize("source,chunk", [("а", "А"), ("ё", "е"), ("ABC", "ABC.")])
+def test_atom_inventory_exact_matching_fails_closed(tmp_path, source, chunk):
+    with pytest.raises(SystemExit, match="ATOM_MISMATCH"):
+        _build_section(tmp_path, [{"type": "paragraph", "text": source}], [_row(1, chunk)])
+
+
+def test_atom_inventory_failure_has_no_chunk_text(tmp_path):
+    secret = "SYNTHETIC_SECRET_TEXT"
+    with pytest.raises(SystemExit) as exc:
+        _build_section(tmp_path, [{"type": "paragraph", "text": "а"}], [_row(1, secret)])
+    assert secret not in str(exc.value)
+    assert "ATOM_MISMATCH" in str(exc.value) and "0001" in str(exc.value)
+
+
+def test_atom_inventory_rejects_corrupted_metadata(tmp_path, monkeypatch):
+    import audiobook.unitmap as unitmap
+    original = unitmap.ChunkSpan
+
+    def corrupt(**kwargs):
+        return original(**{**kwargs, "atom_end": 1, "spans": ((0, 1),)})
+
+    monkeypatch.setattr(unitmap, "ChunkSpan", corrupt)
+    with pytest.raises(SystemExit, match="SPAN_STREAM_MISMATCH"):
+        _build_section(tmp_path, [{"type": "paragraph", "text": "а б"}], [_row(1, "а б")])

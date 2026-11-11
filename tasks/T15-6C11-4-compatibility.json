@@ -1,0 +1,13 @@
+{
+  "baseline_sha": "2297c8ff764a141d45d5bd7e2e4252b26c1dfe39",
+  "sections_compared": 56,
+  "chunk_offsets_compared": 5127,
+  "zero_cyrillic_diagnostics_compared": 1,
+  "different_sections": [],
+  "section_data_contract_identical": true,
+  "original_172_inputs_unchanged": true,
+  "schema_version_before": 1,
+  "schema_version_after": 1,
+  "algo_version_before": 3,
+  "algo_version_after": 4
+}
