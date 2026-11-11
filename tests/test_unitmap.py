@@ -175,9 +175,9 @@ def test_zero_token_chunk_raises_I2():
     units = [_unit("paragraph", "Текст")]
     chunks = [_chunk("--- 123 ---")]  # no Cyrillic tokens
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units, section="test_sec")
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
-    assert exc_info.value.section == "test_sec"
+    assert exc_info.value.section == "01_test"
 
 
 def test_empty_string_chunk_raises_I2():

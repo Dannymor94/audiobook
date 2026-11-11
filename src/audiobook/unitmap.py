@@ -28,6 +28,10 @@ _M2_TERMINAL: frozenset[str] = frozenset((".", "…"))
 # Characters that, when following an M2 match, disqualify it.
 _PUNCT_AFTER_M2: frozenset[str] = frozenset((".", "!", "?", "…"))
 
+_SECTION_MAX = 64
+# Architect-approved format: NN_slug[_slug...][_]  (trailing _ = historical truncation)
+_SECTION_RE = re.compile(r"[0-9]{2}_[a-z0-9]+(?:_[a-z0-9]+)*_?", re.ASCII)
+
 
 @dataclass(frozen=True)
 class Atom:
@@ -95,8 +99,8 @@ class AnnotationError(Exception):
         self,
         code: str,
         *,
-        section: str = "",
-        chunk_id: str = "",
+        section: str | None = "",
+        chunk_id: str | None = "",
         detail: str = "",
         mismatch_idx: int = -1,
     ) -> None:
@@ -117,6 +121,33 @@ class AnnotationError(Exception):
             parts.append(f"detail={detail!r}")
         ctx = f" ({', '.join(parts)})" if parts else ""
         super().__init__(f"unitmap: {code}{ctx}")
+
+
+def _section_violation(value) -> str | None:
+    """Return violation code if value is not a valid section identifier, else None.
+
+    Order: not_str → empty → too_long → bad_format.
+    Never calls str(), repr(), or __eq__ on untrusted objects.
+    """
+    if type(value) is not str:
+        return "not_str"
+    if value == "":
+        return "empty"
+    if len(value) > _SECTION_MAX:
+        return "too_long"
+    if not _SECTION_RE.fullmatch(value):
+        return "bad_format"
+    return None
+
+
+def validate_section(value) -> None:
+    """Raise AnnotationError('INVALID_SECTION') if value is not a valid section identifier.
+
+    section=None and chunk_id=None in the raised error: the invalid value is never retained.
+    """
+    v = _section_violation(value)
+    if v is not None:
+        raise AnnotationError("INVALID_SECTION", section=None, chunk_id=None, detail=v) from None
 
 
 def atoms(unit_text: str, unit_id: int) -> list[Atom]:
@@ -150,6 +181,8 @@ def validate_gates(
       MANIFEST_ORDER  — n not sequential from 1, id != f"{n:04d}", or duplicate id
       EMPTY_CHUNK     — chunk has no non-whitespace atoms
     """
+    if type(section) is not str or section:
+        validate_section(section)
     errors: list[AnnotationError] = []
 
     # --- Unit structural + content validation ---
@@ -217,6 +250,8 @@ def check_gates(
 
     Guarantees that cursor processing never starts on invalid input.
     """
+    if type(section) is not str or section:
+        validate_section(section)
     errors = validate_gates(manifest_chunks, units, section=section)
     if errors:
         raise errors[0]
@@ -242,6 +277,8 @@ def map_section(
       SPAN_STREAM_MISMATCH — internal invariant: built spans don't match stream slice
       (gate codes via check_gates before cursor processing)
     """
+    if type(section) is not str or section:
+        validate_section(section)
     check_gates(chunks, units, section=section)
 
     stream = source_atoms(units)
@@ -308,6 +345,8 @@ def map_chunks(
     Delegates to map_section(); preserves all existing cursor semantics, gates,
     error precedence and diagnostic privacy.
     """
+    if type(section) is not str or section:
+        validate_section(section)
     return list(map_section(units, chunks, section=section).spans)
 
 
@@ -697,6 +736,8 @@ def annotate_units(
       I2′ — zero-token chunk that is empty, unresolvable, duplicate, or cross-unit
       I3  — chunk spans multiple source units or units with conflicting kinds
     """
+    if type(section) is not str or section:
+        validate_section(section)
     # Build flat unit token stream with char spans: (token, unit_id, kind, char_start, char_end).
     unit_stream: list[tuple[str, int, str, int, int]] = []
     for uid, unit in enumerate(units):

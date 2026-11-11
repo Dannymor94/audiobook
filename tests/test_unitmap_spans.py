@@ -6,6 +6,7 @@ from audiobook.unitmap import (
     Atom, ChunkSpan, SectionMap, AnnotationError,
     atoms, source_atoms, validate_gates, check_gates,
     map_section, map_chunks, chunk_atoms,
+    validate_section, _section_violation,
 )
 
 
@@ -175,7 +176,7 @@ def test_gate_nfc_unit_violation():
     assert unicodedata.normalize("NFC", nfd) != nfd  # sanity: actually non-NFC
     units = [{"text": nfd}]
     chunks = [{"id": "0001", "n": 1, "text": "x"}]
-    errors = validate_gates(chunks, units, section="ch01")
+    errors = validate_gates(chunks, units, section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
@@ -348,7 +349,7 @@ def test_check_gates_raises_on_nfc_violation():
     units = [{"text": nfd}]
     chunks = [{"id": "0001", "n": 1, "text": "x"}]
     with pytest.raises(AnnotationError) as exc:
-        check_gates(chunks, units, section="ch01")
+        check_gates(chunks, units, section="01_test")
     assert exc.value.code == "NOT_NFC"
 
 
@@ -1298,8 +1299,8 @@ def test_31_map_chunks_equals_map_section_spans():
         {"id": "0002", "n": 2, "text": "в г"},
         {"id": "0003", "n": 3, "text": "д е"},
     ]
-    result_map_chunks = map_chunks(units, chunks, section="ch01")
-    sm = map_section(units, chunks, section="ch01")
+    result_map_chunks = map_chunks(units, chunks, section="01_test")
+    sm = map_section(units, chunks, section="01_test")
     assert result_map_chunks == list(sm.spans)
 
 
@@ -1319,8 +1320,8 @@ def test_sectionmap_is_frozen():
 
 
 def test_sectionmap_section_field():
-    sm = _mk_sm(["а"], ["а"], section="ch03")
-    assert sm.section == "ch03"
+    sm = _mk_sm(["а"], ["а"], section="03_test")
+    assert sm.section == "03_test"
 
 
 def test_sectionmap_stream_contains_all_atoms():
@@ -1415,26 +1416,342 @@ def test_32_unknown_chunk_known_id_still_works():
     assert result[1].text == "два"
 
 
-# BLOCKED: no approved AnnotationError code for invalid section type.
-# The section parameter of map_section() / validate_gates() / check_gates() currently
-# accepts non-string values without raising AnnotationError. The requirement is to reject
-# them with a structured error, but the approved code set has no code for invalid section
-# metadata. These tests document the REQUIRED final behaviour; they are marked xfail
-# until an architect assigns a code and the validation is implemented.
-
-@pytest.mark.xfail(reason="BLOCKED: no approved code for invalid section type", strict=False)
 def test_32_section_dict_rejected():
-    """Non-string section (dict) must raise AnnotationError — BLOCKED."""
+    """Non-string section (dict) raises AnnotationError('INVALID_SECTION')."""
     units = [{"text": "а"}]
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
-    with pytest.raises(AnnotationError):
+    with pytest.raises(AnnotationError) as exc:
         map_section(units, chunks, section={"key": "value"})  # type: ignore[arg-type]
+    assert exc.value.code == "INVALID_SECTION"
 
 
-@pytest.mark.xfail(reason="BLOCKED: no approved code for invalid section type", strict=False)
 def test_32_section_none_rejected():
-    """Non-string section (None) must raise AnnotationError — BLOCKED."""
+    """Non-string section (None) raises AnnotationError('INVALID_SECTION')."""
     units = [{"text": "а"}]
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
-    with pytest.raises(AnnotationError):
+    with pytest.raises(AnnotationError) as exc:
         map_section(units, chunks, section=None)  # type: ignore[arg-type]
+    assert exc.value.code == "INVALID_SECTION"
+
+
+# ── #33: INVALID_SECTION diagnostic privacy ───────────────────────────────────
+
+class _Explosive:
+    """An object whose __str__, __repr__, __eq__, and __hash__ all raise.
+
+    Used to verify no untrusted dunder is called on invalid section values.
+    """
+    def __str__(self):
+        raise RuntimeError("__str__ invoked on untrusted value")
+
+    def __repr__(self):
+        raise RuntimeError("__repr__ invoked on untrusted value")
+
+    def __eq__(self, other):
+        raise RuntimeError("__eq__ invoked on untrusted value")
+
+    def __hash__(self):
+        raise RuntimeError("__hash__ invoked on untrusted value")
+
+
+def test_33_validate_section_empty_raises():
+    """validate_section('') raises INVALID_SECTION with detail='empty'."""
+    with pytest.raises(AnnotationError) as exc:
+        validate_section("")
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.detail == "empty"
+    assert e.section is None
+    assert e.chunk_id is None
+
+
+def test_33_validate_section_none_raises():
+    """validate_section(None) raises INVALID_SECTION; detail='not_str'; section field is None."""
+    none_val = None
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(none_val)
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.detail == "not_str"
+    assert e.section is None
+    assert e.chunk_id is None
+
+
+def test_33_validate_section_dict_raises():
+    """validate_section with dict raises INVALID_SECTION; dict is not retained."""
+    bad = {"key": "value"}
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(bad)
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.detail == "not_str"
+    assert e.section is not bad
+    assert e.chunk_id is not bad
+
+
+def test_33_explosive_object_no_dunder_calls():
+    """Objects with raising __str__/__repr__/__eq__ must not trigger them in validate_section."""
+    explosive = _Explosive()
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(explosive)
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.detail == "not_str"
+    assert e.section is not explosive
+    assert e.chunk_id is not explosive
+
+
+def test_33_explosive_object_via_map_section():
+    """Explosive section object passed to map_section: no dunder invoked."""
+    units = [{"text": "а"}]
+    chunks = [{"id": "0001", "n": 1, "text": "а"}]
+    explosive = _Explosive()
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section=explosive)  # type: ignore[arg-type]
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.section is not explosive
+    assert e.chunk_id is not explosive
+
+
+def test_33_invalid_str_no_secret_in_diagnostic():
+    """An invalid non-empty string must not appear in exception diagnostics."""
+    secret = "SECRET_MARKER_MUST_NOT_APPEAR"
+    bad_section = f"INVALID_{secret}_BAD!"
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(bad_section)
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert secret not in str(e)
+    assert secret not in repr(e)
+    assert not any(secret in str(a) for a in e.args)
+    for v in vars(e).values():
+        if isinstance(v, str):
+            assert secret not in v
+
+
+def test_33_too_long_section_no_disclosure():
+    """A too-long section string's content must not appear in diagnostics."""
+    secret = "SECRETMARKER"
+    bad = "01_" + secret + "_" + "x" * 60  # > 64 chars
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(bad)
+    e = exc.value
+    assert e.detail == "too_long"
+    assert secret not in str(e)
+    assert secret not in repr(e)
+    for v in vars(e).values():
+        if isinstance(v, str):
+            assert secret not in v
+
+
+def test_33_exception_chaining_no_cause():
+    """Inside active except block: __cause__ is None, __suppress_context__ is True."""
+    try:
+        raise RuntimeError("outer exception — must not leak")
+    except RuntimeError:
+        with pytest.raises(AnnotationError) as exc:
+            validate_section({"bad": "section"})
+    e = exc.value
+    assert e.__cause__ is None
+    assert e.__suppress_context__ is True
+    # e.__context__ is the RuntimeError — that is acceptable; we do not require it to be None
+
+
+def test_33_invalid_section_message_no_section_field():
+    """str(AnnotationError) for INVALID_SECTION must not contain 'section=' or 'chunk='."""
+    with pytest.raises(AnnotationError) as exc:
+        validate_section("bad-format!")
+    e = exc.value
+    msg = str(e)
+    assert "section=" not in msg
+    assert "chunk=" not in msg
+    assert "bad_format" in msg   # detail IS included — it is a safe constant
+
+
+# ── #34: INVALID_SECTION precedence over malformed secondary inputs ────────────
+
+def test_34_invalid_section_before_malformed_validate_gates():
+    """validate_gates: section validated before inspecting units/chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        validate_gates([{"BAD": True}], [{"BROKEN": True}], section={"bad": "dict"})
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_34_invalid_section_before_malformed_check_gates():
+    """check_gates: section validated before inspecting units/chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        check_gates([{"BAD": True}], [{"BROKEN": True}], section=42)
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_34_invalid_section_before_malformed_map_section():
+    """map_section: section validated before cursor processing."""
+    with pytest.raises(AnnotationError) as exc:
+        map_section([{"BROKEN": True}], [{"BAD": True}], section=None)  # type: ignore[arg-type]
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_34_invalid_section_before_malformed_map_chunks():
+    """map_chunks: section validated before cursor processing."""
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks([{"BROKEN": True}], [{"BAD": True}], section="bad-format!")
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_34_invalid_section_before_malformed_annotate_units():
+    """annotate_units: section validated before any processing."""
+    from audiobook.unitmap import annotate_units
+    with pytest.raises(AnnotationError) as exc:
+        annotate_units([{"BROKEN": True}], [{"BAD": True}], section={"x": 1})
+    assert exc.value.code == "INVALID_SECTION"
+
+
+# ── #35: 58 production section identifiers ────────────────────────────────────
+
+_PRODUCTION_SECTIONS = [
+    "00_section", "01_ty_ne_poloman", "02_soderzhanie", "03_otzyvy",
+    "04_dlya_kogo_eta_kniga", "05_kak_chitat_etu_knigu",
+    "06_kak_obrashchatsya_s_etoj_knigoj_chtoby_n",
+    "07_vvedenie_tvoya_zhizn_eto_lift_kuda_ty_ed",
+    "08_glava_1_zver_vnutri_nas_instinkty_eto_ne",
+    "09_glava_2_roditelskie_golosa_ili_otkuda_be",
+    "10_glava_3_maski_kotorye_my_nosim_shest_spo",
+    "11_glava_4_bolevoe_telo_vulkan_kotoryj_drem",
+    "12_glava_5_drevo_boli_karta_tvoikh_glubin",
+    "13_glava_6_vnutrennij_rebenok_tot_kto_do_si",
+    "14_glava_7_vnutrennij_podrostok_stroitel_ma",
+    "15_glava_8_vnutrennij_vzroslyj_tot_kto_mozh",
+    "16_glava_9_vnutrennij_mudrets_tikhij_golos_",
+    "17_glava_10_nejrobiologiya_travmy_pochemu_t",
+    "18_glava_11_pochemu_my_teryaem_sebya_dissot",
+    "19_glava_12_pervyj_navyk_zamechat_volnu",
+    "20_glava_13_bazovyj_navyk_ya_tebya_chuvstvu",
+    "21_glava_14_pyat_klyuchej_kak_otkryt_zakryt",
+    "22_glava_15_somaticheskaya_rabota_istseleni",
+    "23_glava_16_rabota_s_bolevym_telom_kak_lish",
+    "24_glava_17_vozvrashchenie_v_telo_istseleni",
+    "25_glava_18_koleso_balansa_rentgen_tvoej_du",
+    "26_glava_19_dnevnik_myslej_pojmat_podrostka",
+    "27_glava_20_povedencheskij_eksperiment_prov",
+    "28_glava_21_vstrecha_s_tenyu_pochemu_nas_be",
+    "29_glava_22_zavisimosti_kak_my_pytaemsya_za",
+    "30_glava_23_karta_istseleniya_poshagovaya_i",
+    "31_glava_24_snyatie_maski_vstrecha_s_tem_kt",
+    "32_glava_25_teoriya_privyazannosti_kak_nas_",
+    "33_glava_26_vstrecha_dvukh_vselennykh_kak_n",
+    "34_glava_27_kak_byt_s_maskoj_partnyora_stra",
+    "35_glava_28_tri_istorii_istseleniya_alena_l",
+    "36_glava_29_kak_ponyat_chto_vzroslyj_prosnu",
+    "37_glava_30_prednaznachenie_kak_tvoj_dar_na",
+    "38_glava_31_ekzistentsialnyj_sloj_chto_nelz",
+    "39_glava_32_put_geroya_tvoya_zhizn_kak_mif",
+    "40_glava_33_glubokaya_tekhnika_integratsii_",
+    "41_glava_34_ezhednevnye_praktiki_i_ritualy_",
+    "42_glava_35_glavnoe_chto_nuzhno_pomnit",
+    "43_finalnaya_integratsiya",
+    "44_vmesto_poslesloviya_pismo_tebe",
+    "45_pismo_sebe_praktika",
+    "46_ob_avtore",
+    "47_bonusnye_materialy_k_knige_ty_ne_poloman",
+    "48_prilozhenie_1_karta_geroya_bystraya_samo",
+    "49_prilozhenie_2_polnaya_karta_emotsij_chuv",
+    "50_prilozhenie_3_kratkaya_karta_masok",
+    "51_kak_tantsuyut_maski_polnaya_kartina",
+    "52_lichnost_za_2_minuty",
+    "53_glossarij",
+    "54_blagodarnosti",
+    "55_spisok_literatury_i_istochnikov",
+    "56_chem_eta_sistema_otlichaetsya",
+    "57_kniga_prodolzhaetsya",
+]
+
+
+@pytest.mark.parametrize("section_id", _PRODUCTION_SECTIONS)
+def test_35_production_section_id_valid(section_id):
+    """All 58 production section identifiers pass _section_violation (return None)."""
+    assert _section_violation(section_id) is None
+
+
+# ── #36: validate_section public API — valid and invalid inputs ───────────────
+
+@pytest.mark.parametrize("valid", [
+    "01_test",
+    "00_section",
+    "57_kniga_prodolzhaetsya",
+    "16_glava_9_vnutrennij_mudrets_tikhij_golos_",  # trailing underscore (historical)
+    "32_glava_25_teoriya_privyazannosti_kak_nas_",
+    "99_z",
+    "01_a0",
+    "01_" + "a" * 61,  # len == 64, within limit
+])
+def test_36_validate_section_valid(valid):
+    """validate_section does not raise for valid section identifiers."""
+    validate_section(valid)  # must not raise
+
+
+@pytest.mark.parametrize("invalid,expected_violation", [
+    ("", "empty"),
+    (None, "not_str"),
+    (42, "not_str"),
+    ({}, "not_str"),
+    ([], "not_str"),
+    ("bad section!", "bad_format"),    # space and !
+    ("no_digit_prefix", "bad_format"), # no NN_ prefix
+    ("1_one_digit", "bad_format"),     # only 1 digit
+    ("AB_uppercase", "bad_format"),    # uppercase
+    ("01_has__double", "bad_format"),  # consecutive underscores
+    ("01_" + "a" * 62, "too_long"),   # len == 65
+])
+def test_36_validate_section_invalid(invalid, expected_violation):
+    """validate_section raises INVALID_SECTION with the correct violation code."""
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(invalid)
+    assert exc.value.code == "INVALID_SECTION"
+    assert exc.value.detail == expected_violation
+
+
+# ── #37: INVALID_SECTION exception structure ──────────────────────────────────
+
+def test_37_invalid_section_error_attributes():
+    """INVALID_SECTION: code, section=None, chunk_id=None, detail is violation code."""
+    with pytest.raises(AnnotationError) as exc:
+        validate_section("bad!")
+    e = exc.value
+    assert e.code == "INVALID_SECTION"
+    assert e.reason == "INVALID_SECTION"
+    assert e.section is None
+    assert e.chunk_id is None
+    assert e.mismatch_idx == -1
+    assert e.detail in ("not_str", "empty", "too_long", "bad_format")
+
+
+def test_37_invalid_section_args_no_untrusted():
+    """e.args[0] for INVALID_SECTION must be a plain string with no untrusted data."""
+    secret = "ARGTEST_SECRET"
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(f"bad_{secret}!")  # bad_format; secret not stored
+    e = exc.value
+    assert len(e.args) == 1
+    assert isinstance(e.args[0], str)
+    assert secret not in e.args[0]
+    assert "INVALID_SECTION" in e.args[0]
+
+
+def test_37_invalid_section_vars_safe():
+    """vars(e) for INVALID_SECTION must not contain the invalid value."""
+    bad_val = object()
+    with pytest.raises(AnnotationError) as exc:
+        validate_section(bad_val)
+    e = exc.value
+    for field_val in vars(e).values():
+        assert field_val is not bad_val
+
+
+def test_37_valid_section_stored_in_subsequent_errors():
+    """After validate_section passes, section is stored in subsequent AnnotationError."""
+    units = [{"text": "а"}]
+    chunks = [{"id": "0001", "n": 1, "text": "MISMATCH"}]
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section="01_test")
+    assert exc.value.section == "01_test"
