@@ -127,22 +127,28 @@ def validate_gates(
             errors.append(AnnotationError("UNIT_INNER_PARA", section=section, chunk_id=str(uid)))
 
     seen_ids: set[str] = set()
+    valid_ids: set[str] = set()  # IDs that passed all MANIFEST_ORDER checks
     for i, chunk in enumerate(manifest_chunks):
         chunk_id = str(chunk.get("id", ""))
         n = chunk.get("n")
         expected_n = i + 1
         if n != expected_n or chunk_id != f"{expected_n:04d}" or chunk_id in seen_ids:
-            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=chunk_id))
+            # Use position only — raw chunk_id is unvalidated and must not be disclosed
+            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=f"@{i}"))
+        else:
+            valid_ids.add(chunk_id)
         seen_ids.add(chunk_id)
 
     for chunk in manifest_chunks:
         chunk_id = str(chunk.get("id", ""))
+        # Disclose ID only after format validation; fall back to empty for invalid IDs
+        safe_id = chunk_id if chunk_id in valid_ids else ""
         text = chunk.get("text", "")
         if unicodedata.normalize("NFC", text) != text:
-            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=chunk_id))
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=safe_id))
             continue
         if not atoms(text, 0):
-            errors.append(AnnotationError("EMPTY_CHUNK", section=section, chunk_id=chunk_id))
+            errors.append(AnnotationError("EMPTY_CHUNK", section=section, chunk_id=safe_id))
 
     return errors
 

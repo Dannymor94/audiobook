@@ -712,3 +712,98 @@ def test_map_heading_kind():
     chunks = _mk_chunks("Введение")
     spans = map_chunks(units, chunks)
     assert spans[0].kind == "heading"
+
+
+# ── 6C11-3b: unvalidated manifest ID must not appear in diagnostics ───────────
+
+_SECRET = "SYNTHETIC_SECRET"
+_CYR_MARKER = "КИРИЛЛИЦА_Latin"
+
+
+def _no_disclosure(exc: AnnotationError, marker: str) -> None:
+    """Assert that neither the exception message nor chunk_id disclose marker."""
+    assert marker not in str(exc)
+    assert marker not in exc.chunk_id
+
+
+def test_3b_invalid_id_secret_not_in_manifest_order():
+    """MANIFEST_ORDER error must not expose the raw invalid ID."""
+    chunks = [{"id": _SECRET, "n": 1, "text": "а"}]
+    errors = validate_gates(chunks, [])
+    order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
+    assert order_errs, "expected MANIFEST_ORDER error"
+    _no_disclosure(order_errs[0], _SECRET)
+
+
+def test_3b_invalid_id_cyrillic_latin_not_disclosed():
+    """Cyrillic+Latin marker in ID must not appear in diagnostics."""
+    chunks = [{"id": _CYR_MARKER, "n": 1, "text": "а"}]
+    errors = validate_gates(chunks, [])
+    order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
+    assert order_errs
+    _no_disclosure(order_errs[0], _CYR_MARKER)
+
+
+def test_3b_wrong_format_id_not_disclosed():
+    """Wrong-format ID (single digit) must not appear in diagnostics."""
+    chunks = [{"id": "1", "n": 1, "text": "а"}]
+    errors = validate_gates(chunks, [])
+    order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
+    assert order_errs
+    assert "1" not in order_errs[0].chunk_id or order_errs[0].chunk_id.startswith("@")
+
+
+def test_3b_duplicate_id_not_disclosed():
+    """Duplicate ID must not appear in the second MANIFEST_ORDER error."""
+    marker = "0001"  # valid format but duplicated
+    chunks = [
+        {"id": "0001", "n": 1, "text": "а"},
+        {"id": "0001", "n": 2, "text": "б"},
+    ]
+    errors = validate_gates(chunks, [])
+    order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
+    assert order_errs
+    # Second error (the duplicate) must not carry the raw ID
+    dup_err = order_errs[-1]
+    assert dup_err.chunk_id != marker or dup_err.chunk_id.startswith("@")
+
+
+def test_3b_unexpected_id_type_not_disclosed():
+    """Non-string ID value must not appear in diagnostics."""
+    secret_val = 99999
+    chunks = [{"id": secret_val, "n": 1, "text": "а"}]
+    errors = validate_gates(chunks, [])
+    order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
+    assert order_errs
+    assert str(secret_val) not in order_errs[0].chunk_id or order_errs[0].chunk_id.startswith("@")
+
+
+def test_3b_invalid_id_not_in_nfc_error():
+    """NOT_NFC error for chunk with invalid ID must not expose the raw ID."""
+    nfd_text = unicodedata.normalize("NFD", "ё")  # non-NFC
+    chunks = [{"id": _SECRET, "n": 1, "text": nfd_text}]
+    errors = validate_gates(chunks, [])
+    nfc_errs = [e for e in errors if e.code == "NOT_NFC" and e.chunk_id != "0"]
+    # May or may not raise NOT_NFC (MANIFEST_ORDER may mask it), but if it does, no disclosure
+    for e in nfc_errs:
+        _no_disclosure(e, _SECRET)
+
+
+def test_3b_invalid_id_not_in_empty_chunk_error():
+    """EMPTY_CHUNK error for chunk with invalid ID must not expose the raw ID."""
+    chunks = [{"id": _SECRET, "n": 1, "text": "   "}]
+    errors = validate_gates(chunks, [])
+    empty_errs = [e for e in errors if e.code == "EMPTY_CHUNK"]
+    for e in empty_errs:
+        _no_disclosure(e, _SECRET)
+
+
+def test_3b_valid_ids_still_appear_in_diagnostics():
+    """Valid IDs (passed MANIFEST_ORDER) must still appear in permitted diagnostics."""
+    nfd_text = unicodedata.normalize("NFD", "ё")
+    chunks = [{"id": "0001", "n": 1, "text": nfd_text}]
+    errors = validate_gates(chunks, [])
+    nfc_errs = [e for e in errors if e.code == "NOT_NFC" and e.chunk_id]
+    assert any(e.chunk_id == "0001" for e in nfc_errs), (
+        "valid ID must appear in NOT_NFC diagnostics"
+    )
