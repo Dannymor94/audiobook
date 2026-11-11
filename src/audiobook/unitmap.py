@@ -181,8 +181,7 @@ def validate_gates(
       MANIFEST_ORDER  — n not sequential from 1, id != f"{n:04d}", or duplicate id
       EMPTY_CHUNK     — chunk has no non-whitespace atoms
     """
-    if type(section) is not str or section:
-        validate_section(section)
+    validate_section(section)
     errors: list[AnnotationError] = []
 
     # --- Unit structural + content validation ---
@@ -250,8 +249,7 @@ def check_gates(
 
     Guarantees that cursor processing never starts on invalid input.
     """
-    if type(section) is not str or section:
-        validate_section(section)
+    validate_section(section)
     errors = validate_gates(manifest_chunks, units, section=section)
     if errors:
         raise errors[0]
@@ -277,8 +275,7 @@ def map_section(
       SPAN_STREAM_MISMATCH — internal invariant: built spans don't match stream slice
       (gate codes via check_gates before cursor processing)
     """
-    if type(section) is not str or section:
-        validate_section(section)
+    validate_section(section)
     check_gates(chunks, units, section=section)
 
     stream = source_atoms(units)
@@ -345,8 +342,7 @@ def map_chunks(
     Delegates to map_section(); preserves all existing cursor semantics, gates,
     error precedence and diagnostic privacy.
     """
-    if type(section) is not str or section:
-        validate_section(section)
+    validate_section(section)
     return list(map_section(units, chunks, section=section).spans)
 
 
@@ -736,8 +732,7 @@ def annotate_units(
       I2′ — zero-token chunk that is empty, unresolvable, duplicate, or cross-unit
       I3  — chunk spans multiple source units or units with conflicting kinds
     """
-    if type(section) is not str or section:
-        validate_section(section)
+    validate_section(section)
     # Build flat unit token stream with char spans: (token, unit_id, kind, char_start, char_end).
     unit_stream: list[tuple[str, int, str, int, int]] = []
     for uid, unit in enumerate(units):

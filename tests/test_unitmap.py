@@ -1,4 +1,4 @@
-"""Tests for unitmap.annotate_units() — T15-6C1 / T15-6C1b."""
+"""Tests for unitmap.annotate_units(, section="01_test") — T15-6C1 / T15-6C1b."""
 import pytest
 
 from audiobook.unitmap import AnnotationError, annotate_units, find_exact_in_unit
@@ -19,7 +19,7 @@ def _chunk(text: str, pause: int = 900, id_: str = "0001") -> dict:
 def test_single_unit_heading():
     units = [_unit("heading", "Глава первая")]
     chunks = [_chunk("Глава первая", pause=1500)]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[0]["kind"] == "heading"
 
@@ -27,7 +27,7 @@ def test_single_unit_heading():
 def test_single_unit_paragraph():
     units = [_unit("paragraph", "Привет мир")]
     chunks = [_chunk("Привет мир")]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[0]["kind"] == "text"
 
@@ -35,7 +35,7 @@ def test_single_unit_paragraph():
 def test_single_unit_stack():
     units = [_unit("stack", "Пункт один", last_in_stack=True)]
     chunks = [_chunk("Пункт один")]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[0]["kind"] == "stack"
 
@@ -43,7 +43,7 @@ def test_single_unit_stack():
 def test_original_chunk_fields_preserved():
     units = [_unit("paragraph", "Привет мир")]
     chunks = [{"text": "Привет мир", "pause_after_ms": 350, "id": "0042", "extra": "val"}]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["pause_after_ms"] == 350
     assert result[0]["id"] == "0042"
     assert result[0]["extra"] == "val"
@@ -58,7 +58,7 @@ def test_unit_split_across_two_chunks():
         _chunk("Первое предложение здесь.", pause=350, id_="0001"),
         _chunk("Второе предложение там.", pause=900, id_="0002"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[1]["unit_id"] == 0
     assert result[0]["kind"] == "text"
@@ -72,7 +72,7 @@ def test_unit_split_three_chunks():
         _chunk("пять шесть семь", id_="0002"),
         _chunk("восемь девять десять", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert all(r["unit_id"] == 0 for r in result)
     assert all(r["kind"] == "text" for r in result)
 
@@ -88,7 +88,7 @@ def test_heading_then_paragraph():
         _chunk("Заголовок", pause=1500, id_="0001"),
         _chunk("Текст параграфа", pause=900, id_="0002"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[0]["kind"] == "heading"
     assert result[1]["unit_id"] == 1
@@ -106,7 +106,7 @@ def test_stack_then_paragraph():
         _chunk("Пункт два", id_="0002"),
         _chunk("Обычный текст", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["kind"] == "stack"
     assert result[1]["kind"] == "stack"
     assert result[2]["kind"] == "text"
@@ -120,13 +120,13 @@ def test_stack_then_paragraph():
 def test_flow_kind_is_text():
     units = [_unit("flow", "Слово за словом")]
     chunks = [_chunk("Слово за словом")]
-    assert annotate_units(chunks, units)[0]["kind"] == "text"
+    assert annotate_units(chunks, units, section="01_test")[0]["kind"] == "text"
 
 
 def test_prose_with_arrow_kind_is_text():
     units = [_unit("prose_with_arrow", "Вперёд к цели")]
     chunks = [_chunk("Вперёд к цели")]
-    assert annotate_units(chunks, units)[0]["kind"] == "text"
+    assert annotate_units(chunks, units, section="01_test")[0]["kind"] == "text"
 
 
 # ── does not mutate input ─────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ def test_does_not_mutate_manifest_chunks():
     units = [_unit("paragraph", "Текст")]
     chunks = [_chunk("Текст")]
     original_keys = set(chunks[0].keys())
-    annotate_units(chunks, units)
+    annotate_units(chunks, units, section="01_test")
     assert set(chunks[0].keys()) == original_keys
 
 
@@ -145,7 +145,7 @@ def test_token_mismatch_raises_I1():
     units = [_unit("paragraph", "Привет мир")]
     chunks = [_chunk("Привет земля")]  # "земля" != "мир"
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I1" in str(exc_info.value)
     assert exc_info.value.mismatch_idx >= 0
 
@@ -154,7 +154,7 @@ def test_manifest_longer_than_units_raises_I1():
     units = [_unit("paragraph", "Одно слово")]
     chunks = [_chunk("Одно слово"), _chunk("лишний чанк")]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I1" in str(exc_info.value)
 
 
@@ -165,7 +165,7 @@ def test_units_longer_than_manifest_raises_I1():
     ]
     chunks = [_chunk("Первый юнит")]  # second unit has no chunk
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I1" in str(exc_info.value)
 
 
@@ -184,7 +184,7 @@ def test_empty_string_chunk_raises_I2():
     units = [_unit("paragraph", "Текст")]
     chunks = [_chunk("")]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -199,7 +199,7 @@ def test_chunk_crossing_unit_boundary_raises_I3():
     # Chunk text has tokens from both units.
     chunks = [_chunk("Первый Второй")]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I3" in str(exc_info.value)
 
 
@@ -211,7 +211,7 @@ def test_chunk_crossing_kind_boundary_raises_I3():
     ]
     chunks = [_chunk("Заголовок Текст")]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I3" in str(exc_info.value)
 
 
@@ -232,7 +232,7 @@ def test_error_no_manuscript_text_in_message():
     units = [_unit("paragraph", "Секретный текст рукописи")]
     chunks = [_chunk("Другой текст")]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     msg = str(exc_info.value)
     # The mismatch token appears in the message; that is acceptable (single word).
     # Full chunk or unit text must not appear.
@@ -243,14 +243,14 @@ def test_error_no_manuscript_text_in_message():
 # ── empty inputs ──────────────────────────────────────────────────────────────
 
 def test_empty_units_and_chunks_ok():
-    result = annotate_units([], [])
+    result = annotate_units([], [], section="01_test")
     assert result == []
 
 
 def test_units_with_no_cyrillic_and_empty_manifest_ok():
     # A unit with only punctuation has no tokens; empty manifest still ok.
     units = [_unit("paragraph", "--- 123 ---")]
-    result = annotate_units([], units)
+    result = annotate_units([], units, section="01_test")
     assert result == []
 
 
@@ -268,7 +268,7 @@ def test_i2_prime_standalone_unit():
         _chunk("http://example.com", id_="0002"),
         _chunk("Текст после", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[1]["kind"] == "text"
 
@@ -286,7 +286,7 @@ def test_i2_prime_tail_of_text_unit():
         _chunk("http://example.com", id_="0002"),
         _chunk("Следующий", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0  # same unit as chunk 0001
     assert result[1]["kind"] == "text"
 
@@ -304,7 +304,7 @@ def test_i2_prime_trailing_period_stripped():
         _chunk("user@example.com.", id_="0002"),   # trailing period
         _chunk("Следующий текст", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
 
@@ -323,7 +323,7 @@ def test_i2_prime_duplicate_occurrence_raises():
         _chunk("Финал", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "ambiguous" in exc_info.value.reason
 
@@ -343,7 +343,7 @@ def test_i2_prime_missing_occurrence_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "no M1/M2 match" in exc_info.value.reason
 
@@ -365,7 +365,7 @@ def test_i2_prime_match_before_lower_anchor_raises():
         _chunk("Финал", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "no M1/M2 match" in exc_info.value.reason
 
@@ -380,7 +380,7 @@ def test_i2_prime_whitespace_only_raises():
         _chunk("Финал", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "whitespace" in exc_info.value.reason.lower() or "empty" in exc_info.value.reason.lower()
 
@@ -401,7 +401,7 @@ def test_i2_prime_cross_unit_occurrence_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "ambiguous" in exc_info.value.reason
 
@@ -417,7 +417,7 @@ def test_i2_prime_first_chunk_zero_token():
         _chunk("http://intro.com", id_="0001"),
         _chunk("Основной текст", id_="0002"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[0]["kind"] == "text"
 
@@ -433,7 +433,7 @@ def test_i2_prime_last_chunk_zero_token():
         _chunk("Основной текст", id_="0001"),
         _chunk("http://end.com", id_="0002"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[1]["kind"] == "text"
 
@@ -452,7 +452,7 @@ def test_i2_prime_consecutive_zero_token_in_order():
         _chunk("second-url", id_="0003"),
         _chunk("Конец", id_="0004"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[2]["unit_id"] == 1
 
@@ -476,7 +476,7 @@ def test_i2_prime_consecutive_zero_token_reversed_order_raises():
         _chunk("Конец", id_="0004"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "no M1/M2 match" in exc_info.value.reason
 
@@ -496,7 +496,7 @@ def test_i2_prime_key_before_lower_anchor_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -511,7 +511,7 @@ def test_i2_prime_key_after_upper_anchor_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -526,7 +526,7 @@ def test_i2_prime_key_in_prior_chunk_suffix_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -540,7 +540,7 @@ def test_i2_prime_key_between_anchors_passes():
         _chunk("abc", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
 
@@ -564,7 +564,7 @@ def test_i2_prime_global_order_reversed_across_units_raises():
         _chunk("Конец", id_="0004"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -582,7 +582,7 @@ def test_i2_prime_global_order_forward_across_units_passes():
         _chunk("second", id_="0003"),
         _chunk("Конец", id_="0004"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[2]["unit_id"] == 2
 
@@ -601,7 +601,7 @@ def test_i2_prime_global_order_same_unit_overlap_raises():
         _chunk("Конец", id_="0004"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -721,7 +721,7 @@ def test_m1_m2_s1_different_punc_stops():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -735,7 +735,7 @@ def test_m1_m2_s2_tolerant_dot():
         _zchunk("abc.", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "tolerant:46"  # ord('.') == 46
 
 
@@ -748,7 +748,7 @@ def test_m1_m2_s3_exact_when_source_has_dot():
         _zchunk("abc.", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "exact"
 
 
@@ -764,7 +764,7 @@ def test_m1_m2_s4_exact_plus_tolerant_stops():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "ambiguous" in exc_info.value.reason
 
@@ -778,7 +778,7 @@ def test_m1_m2_s5a_unique_ellipsis_exact():
         _zchunk("...", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "exact"
 
 
@@ -792,7 +792,7 @@ def test_m1_m2_s5b_duplicate_ellipsis_stops():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "ambiguous" in exc_info.value.reason
 
@@ -807,7 +807,7 @@ def test_m1_m2_s6_case_mismatch_stops():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -820,7 +820,7 @@ def test_m1_m2_s7a_nbsp_matches():
         _zchunk("a b", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["match"] == "exact"
 
@@ -834,7 +834,7 @@ def test_m1_m2_s7b_multiple_spaces_match():
         _zchunk("a b", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "exact"
 
 
@@ -848,7 +848,7 @@ def test_m1_m2_s8a_missing_stops():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
     assert "no M1/M2 match" in exc_info.value.reason
 
@@ -863,7 +863,7 @@ def test_m1_m2_s9_punctuation_only_m1_only():
         _zchunk("...", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "exact"
 
 
@@ -877,7 +877,7 @@ def test_m1_m2_s10_tolerant_ellipsis_char():
         _zchunk("abc…", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == f"tolerant:{ord(chr(0x2026))}"  # tolerant:8230
 
 
@@ -893,7 +893,7 @@ def test_m1_m2_s11_m2_blocked_by_exclamation():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2′" in str(exc_info.value)
 
 
@@ -907,7 +907,7 @@ def test_m1_m2_s12_match_field_codepoint():
         _zchunk("word.", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["match"] == "tolerant:46"  # '.' == U+002E == 46
 
 
@@ -987,7 +987,7 @@ def test_6c7b_sol_p1_double_space_suffix_blocks_reuse():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1001,7 +1001,7 @@ def test_6c7b_decomposed_suffix_blocks_reuse():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1014,7 +1014,7 @@ def test_6c7b_nbsp_suffix_blocks_reuse():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1026,7 +1026,7 @@ def test_6c7b_valid_zero_token_after_suffix_passes():
         _chunk("xyz", id_="0002"),          # zero-token: starts at pos 11, valid
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
     assert result[1]["match"] == "exact"
@@ -1048,7 +1048,7 @@ def test_6c7c_sol_p1_prefix_blocks_zero_token_overlap():
         _chunk("abc Конец", id_="0003"),  # prefix 'abc ' immediately precedes 'Конец'
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1061,7 +1061,7 @@ def test_6c7c_nbsp_prefix_blocks_zero_token():
         _chunk("abc Конец", id_="0003"),  # NBSP between prefix and Cyrillic
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1074,7 +1074,7 @@ def test_6c7c_double_space_prefix_blocks_zero_token():
         _chunk("abc  Конец", id_="0003"),  # double space: prefix 'abc  ' → norm 'abc'
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1088,7 +1088,7 @@ def test_6c7c_decomposed_prefix_blocks_zero_token():
         _chunk("é Конец", id_="0003"),  # prefix 'é ' NFC-matches '\xe9'
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1100,7 +1100,7 @@ def test_6c7c_valid_zero_token_before_distinct_prefix():
         _chunk("xyz", id_="0002"),        # zero-token: 'xyz' is distinct from prefix 'abc'
         _chunk("abc Конец", id_="0003"),  # prefix 'abc' starts at pos 11
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["kind"] == "text"
     assert result[1]["match"] == "exact"
@@ -1128,7 +1128,7 @@ def test_6c7d_combining_seq_repeated_consumption_blocked():
         _chunk("Конец", id_="0004"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1148,7 +1148,7 @@ def test_6c7d_combining_seq_sequential_consumption_passes():
         _chunk("xyz", id_="0003"),       # matches 'xyz' at (4,7) after the seq
         _chunk("Конец", id_="0004"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[1]["match"] == "exact"
     assert result[2]["unit_id"] == 1
@@ -1167,7 +1167,7 @@ def test_6c7d_suffix_and_prefix_both_active_valid():
         _chunk("zero", id_="0002"),
         _chunk("pre Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["match"] == "exact"
 
@@ -1183,7 +1183,7 @@ def test_6c7d_suffix_and_prefix_both_active_overlap_raises():
         _chunk("pre Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1205,7 +1205,7 @@ def test_6c9a_sol_p1_non_adjacent_suffix_raises():
         _chunk("Конец", id_="0005"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9a_nbsp_non_adjacent_suffix_raises():
@@ -1219,7 +1219,7 @@ def test_6c9a_nbsp_non_adjacent_suffix_raises():
         _chunk("Конец", id_="0005"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9a_double_space_non_adjacent_suffix_raises():
@@ -1233,7 +1233,7 @@ def test_6c9a_double_space_non_adjacent_suffix_raises():
         _chunk("Конец", id_="0005"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9a_valid_adjacent_suffix_passes():
@@ -1244,7 +1244,7 @@ def test_6c9a_valid_adjacent_suffix_passes():
         _chunk("Середина", id_="0002"),
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[0]["unit_id"] == 0
     assert result[1]["unit_id"] == 0
 
@@ -1259,7 +1259,7 @@ def test_6c9a_later_duplicate_does_not_substitute_for_missing_adjacent():
         _chunk("Конец", id_="0004"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 # ── T15-6C9b: anchor-bound prefix alignment ────────────────────────────────────
@@ -1278,7 +1278,7 @@ def test_6c9b_sol_p1_non_adjacent_prefix_raises():
         _chunk("pre Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9b_nbsp_non_adjacent_prefix_raises():
@@ -1290,7 +1290,7 @@ def test_6c9b_nbsp_non_adjacent_prefix_raises():
         _chunk("pre Конец", id_="0003"),  # NBSP between prefix and anchor in chunk
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9b_double_space_non_adjacent_prefix_raises():
@@ -1302,7 +1302,7 @@ def test_6c9b_double_space_non_adjacent_prefix_raises():
         _chunk("pre  Конец", id_="0003"),  # double space in chunk prefix
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9b_decomposed_non_adjacent_prefix_raises():
@@ -1317,7 +1317,7 @@ def test_6c9b_decomposed_non_adjacent_prefix_raises():
         _chunk("pré Конец", id_="0003"),  # decomposed é in prefix
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 def test_6c9b_valid_contiguous_prefix_passes():
@@ -1328,7 +1328,7 @@ def test_6c9b_valid_contiguous_prefix_passes():
         _chunk("zero", id_="0002"),
         _chunk("pre Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[2]["unit_id"] == 0
     assert result[2]["kind"] == "text"
 
@@ -1346,7 +1346,7 @@ def test_6c9b_later_duplicate_prefix_does_not_substitute():
         _chunk("pre Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError):
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
 
 
 # ── T15-6C9c: preserve Unicode match identity ──────────────────────────────────
@@ -1377,7 +1377,7 @@ def test_6c9c_sol_p2_annotate_raises_on_combining_ambiguity():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 
@@ -1393,7 +1393,7 @@ def test_6c9c_single_combining_mark_passes():
         _chunk("̕", id_="0002"),   # zero-token; exactly one occurrence
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1
     assert result[1]["match"] == "exact"
 
@@ -1412,7 +1412,7 @@ def test_6c9c_m1_m2_same_norm_pos_counts_as_one():
         _chunk("foo.", id_="0002"),    # zero-token: M1 matches, M2 rejected by _m2_ok
         _chunk("Конец", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 0
     assert result[1]["match"] == "exact"
 
@@ -1435,7 +1435,7 @@ def test_6c9c_exact_and_tolerant_at_different_positions_raises():
         _chunk("Конец", id_="0003"),
     ]
     with pytest.raises(AnnotationError) as exc_info:
-        annotate_units(chunks, units)
+        annotate_units(chunks, units, section="01_test")
     assert "I2" in str(exc_info.value)
 
 # ── T15-6C9d: full NFC-equivalent source offset mapping ────────────────────────
@@ -1528,5 +1528,5 @@ def test_6c9d_annotate_hangul_zero_token_passes():
         _chunk("\uac00", id_="0002"),  # precomposed syllable
         _chunk("\u041a\u043e\u043d\u0435\u0446", id_="0003"),
     ]
-    result = annotate_units(chunks, units)
+    result = annotate_units(chunks, units, section="01_test")
     assert result[1]["unit_id"] == 1

@@ -183,7 +183,7 @@ def test_gate_nfc_unit_violation():
 def test_gate_nfc_unit_pass():
     units = [{"text": "нормальный текст"}]
     chunks = [{"id": "0001", "n": 1, "text": "нормальный"}]
-    nfc_errors = [e for e in validate_gates(chunks, units) if e.code == "NOT_NFC"]
+    nfc_errors = [e for e in validate_gates(chunks, units, section="01_test") if e.code == "NOT_NFC"]
     assert nfc_errors == []
 
 
@@ -193,7 +193,7 @@ def test_gate_nfc_chunk_violation():
     assert unicodedata.normalize("NFC", nfd) != nfd  # sanity
     units = [{"text": "ёж"}]
     chunks = [{"id": "0001", "n": 1, "text": nfd}]
-    errors = validate_gates(chunks, units)
+    errors = validate_gates(chunks, units, section="01_test")
     nfc_errors = [e for e in errors if e.code == "NOT_NFC"]
     assert nfc_errors  # at least one for the chunk
 
@@ -202,7 +202,7 @@ def test_gate_nfc_chunk_no_empty_chunk_when_nfc_bad():
     # non-NFC chunk: NOT_NFC fires, EMPTY_CHUNK must not also fire (short-circuit)
     nfd = unicodedata.normalize("NFD", "ё")  # non-NFC, non-empty
     chunks = [{"id": "0001", "n": 1, "text": nfd}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     codes = [e.code for e in errors]
     assert "NOT_NFC" in codes
     nfc_hits = [e for e in errors if e.code == "NOT_NFC" and e.chunk_id == "0001"]
@@ -216,28 +216,28 @@ def test_gate_nfc_chunk_no_empty_chunk_when_nfc_bad():
 def test_gate_inner_para_double_newline():
     units = [{"text": "первый\n\nвторой"}]
     chunks = [{"id": "0001", "n": 1, "text": "первый"}]
-    errors = validate_gates(chunks, units)
+    errors = validate_gates(chunks, units, section="01_test")
     assert any(e.code == "UNIT_INNER_PARA" for e in errors)
 
 
 def test_gate_inner_para_single_newline_ok():
     units = [{"text": "первая строка\nвторая строка"}]
     chunks = [{"id": "0001", "n": 1, "text": "первая"}]
-    inner_errors = [e for e in validate_gates(chunks, units) if e.code == "UNIT_INNER_PARA"]
+    inner_errors = [e for e in validate_gates(chunks, units, section="01_test") if e.code == "UNIT_INNER_PARA"]
     assert inner_errors == []
 
 
 def test_gate_inner_para_newline_with_spaces():
     units = [{"text": "первый\n   \nвторой"}]
     chunks = [{"id": "0001", "n": 1, "text": "первый"}]
-    errors = validate_gates(chunks, units)
+    errors = validate_gates(chunks, units, section="01_test")
     assert any(e.code == "UNIT_INNER_PARA" for e in errors)
 
 
 def test_gate_inner_para_newline_with_tabs():
     units = [{"text": "а\n\t\nб"}]
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, units)
+    errors = validate_gates(chunks, units, section="01_test")
     assert any(e.code == "UNIT_INNER_PARA" for e in errors)
 
 
@@ -245,14 +245,14 @@ def test_gate_empty_unit_allowed():
     # empty unit text: no UNIT_INNER_PARA, no NOT_NFC
     units = [{"text": ""}]
     chunks = [{"id": "0001", "n": 1, "text": "слово"}]
-    errors = [e for e in validate_gates(chunks, units) if e.code in ("UNIT_INNER_PARA", "NOT_NFC")]
+    errors = [e for e in validate_gates(chunks, units, section="01_test") if e.code in ("UNIT_INNER_PARA", "NOT_NFC")]
     assert errors == []
 
 
 def test_gate_single_newline_multiple_units():
     units = [{"text": "а\nб"}, {"text": "в\nг"}]
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
-    inner_errors = [e for e in validate_gates(chunks, units) if e.code == "UNIT_INNER_PARA"]
+    inner_errors = [e for e in validate_gates(chunks, units, section="01_test") if e.code == "UNIT_INNER_PARA"]
     assert inner_errors == []
 
 
@@ -264,25 +264,25 @@ def test_gate_manifest_order_ok():
         {"id": "0002", "n": 2, "text": "б"},
         {"id": "0003", "n": 3, "text": "в"},
     ]
-    order_errors = [e for e in validate_gates(chunks, []) if e.code == "MANIFEST_ORDER"]
+    order_errors = [e for e in validate_gates(chunks, [], section="01_test") if e.code == "MANIFEST_ORDER"]
     assert order_errors == []
 
 
 def test_gate_manifest_order_n_gap():
     chunks = [{"id": "0001", "n": 1, "text": "а"}, {"id": "0003", "n": 3, "text": "б"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_gate_manifest_order_n_starts_at_zero():
     chunks = [{"id": "0000", "n": 0, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_gate_manifest_order_n_starts_at_two():
     chunks = [{"id": "0002", "n": 2, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
@@ -291,21 +291,21 @@ def test_gate_manifest_order_duplicate_id():
         {"id": "0001", "n": 1, "text": "а"},
         {"id": "0001", "n": 2, "text": "б"},
     ]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_gate_manifest_order_id_format_mismatch():
     # n=1 but id="1" instead of "0001"
     chunks = [{"id": "1", "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_gate_manifest_order_id_format_too_long():
     # n=1 but id="00001" (5 digits)
     chunks = [{"id": "00001", "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
@@ -313,32 +313,32 @@ def test_gate_manifest_order_id_format_too_long():
 
 def test_gate_empty_chunk_whitespace_only():
     chunks = [{"id": "0001", "n": 1, "text": "   "}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "EMPTY_CHUNK" for e in errors)
 
 
 def test_gate_empty_chunk_empty_string():
     chunks = [{"id": "0001", "n": 1, "text": ""}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "EMPTY_CHUNK" for e in errors)
 
 
 def test_gate_empty_chunk_tabs_newlines():
     chunks = [{"id": "0001", "n": 1, "text": "\t\n  \r\n"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     assert any(e.code == "EMPTY_CHUNK" for e in errors)
 
 
 def test_gate_empty_chunk_ok_single_char():
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
-    empty_errors = [e for e in validate_gates(chunks, []) if e.code == "EMPTY_CHUNK"]
+    empty_errors = [e for e in validate_gates(chunks, [], section="01_test") if e.code == "EMPTY_CHUNK"]
     assert empty_errors == []
 
 
 def test_gate_empty_chunk_ok_punctuation_only():
     # punctuation is non-whitespace → not empty
     chunks = [{"id": "0001", "n": 1, "text": "..."}]
-    empty_errors = [e for e in validate_gates(chunks, []) if e.code == "EMPTY_CHUNK"]
+    empty_errors = [e for e in validate_gates(chunks, [], section="01_test") if e.code == "EMPTY_CHUNK"]
     assert empty_errors == []
 
 
@@ -357,35 +357,35 @@ def test_check_gates_raises_on_inner_para():
     units = [{"text": "а\n\nб"}]
     chunks = [{"id": "0001", "n": 1, "text": "а"}]
     with pytest.raises(AnnotationError) as exc:
-        check_gates(chunks, units)
+        check_gates(chunks, units, section="01_test")
     assert exc.value.code == "UNIT_INNER_PARA"
 
 
 def test_check_gates_raises_on_manifest_order():
     chunks = [{"id": "0002", "n": 2, "text": "а"}]
     with pytest.raises(AnnotationError) as exc:
-        check_gates(chunks, [])
+        check_gates(chunks, [], section="01_test")
     assert exc.value.code == "MANIFEST_ORDER"
 
 
 def test_check_gates_raises_on_empty_chunk():
     chunks = [{"id": "0001", "n": 1, "text": "   "}]
     with pytest.raises(AnnotationError) as exc:
-        check_gates(chunks, [])
+        check_gates(chunks, [], section="01_test")
     assert exc.value.code == "EMPTY_CHUNK"
 
 
 def test_check_gates_passes_on_valid_input():
     units = [{"text": "слово"}]
     chunks = [{"id": "0001", "n": 1, "text": "слово"}]
-    check_gates(chunks, units)  # must not raise
+    check_gates(chunks, units, section="01_test")  # must not raise
 
 
 def test_check_gates_raises_annotation_error_subclass():
     # check_gates must raise AnnotationError specifically (not generic Exception)
     chunks = [{"id": "0001", "n": 1, "text": ""}]
     with pytest.raises(AnnotationError):
-        check_gates(chunks, [])
+        check_gates(chunks, [], section="01_test")
 
 
 # ── map_chunks helpers ────────────────────────────────────────────────────────
@@ -414,7 +414,7 @@ def _head(text: str) -> tuple[str, str]:
 def test_map_basic_single_chunk():
     units = _mk_units(_para("слово раз"))
     chunks = _mk_chunks("слово раз")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert len(spans) == 1
     cs = spans[0]
     assert cs.chunk_id == "0001"
@@ -428,7 +428,7 @@ def test_map_basic_single_chunk():
 def test_map_multiple_chunks_same_unit():
     units = _mk_units(_para("а б в г"))
     chunks = _mk_chunks("а б", "в г")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert [cs.atom_start for cs in spans] == [0, 2]
     assert [cs.atom_end for cs in spans] == [2, 4]
 
@@ -436,7 +436,7 @@ def test_map_multiple_chunks_same_unit():
 def test_map_chunks_across_units():
     units = _mk_units(_para("а б"), _para("в г"))
     chunks = _mk_chunks("а б", "в г")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].unit_ids == frozenset({0})
     assert spans[1].unit_ids == frozenset({1})
 
@@ -447,7 +447,7 @@ def test_map_stream_exhausted_extra_chunk():
     units = _mk_units(_para("слово"))
     chunks = _mk_chunks("слово", "лишнее")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "STREAM_EXHAUSTED"
 
 
@@ -455,7 +455,7 @@ def test_map_stream_exhausted_empty_source():
     units = _mk_units(_para(""))
     chunks = _mk_chunks("слово")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "STREAM_EXHAUSTED"
 
 
@@ -465,7 +465,7 @@ def test_map_trailing_source_atoms():
     units = _mk_units(_para("слово раз"))
     chunks = _mk_chunks("слово")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "TRAILING_SOURCE"
 
 
@@ -473,7 +473,7 @@ def test_map_trailing_source_multiple_units():
     units = _mk_units(_para("а б"), _para("в"))
     chunks = _mk_chunks("а б")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "TRAILING_SOURCE"
 
 
@@ -483,7 +483,7 @@ def test_map_atom_mismatch_case():
     units = _mk_units(_para("Слово"))
     chunks = _mk_chunks("слово")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -491,7 +491,7 @@ def test_map_atom_mismatch_uppercase():
     units = _mk_units(_para("слово"))
     chunks = _mk_chunks("СЛОВО")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -499,7 +499,7 @@ def test_map_atom_mismatch_yo_e():
     units = _mk_units(_para("ёлка"))
     chunks = _mk_chunks("елка")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -507,7 +507,7 @@ def test_map_atom_mismatch_e_yo():
     units = _mk_units(_para("елка"))
     chunks = _mk_chunks("ёлка")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -515,7 +515,7 @@ def test_map_atom_mismatch_trailing_punct():
     units = _mk_units(_para("слово."))
     chunks = _mk_chunks("слово")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -523,7 +523,7 @@ def test_map_atom_mismatch_added_punct():
     units = _mk_units(_para("слово"))
     chunks = _mk_chunks("слово.")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -531,7 +531,7 @@ def test_map_atom_mismatch_different_word():
     units = _mk_units(_para("кот"))
     chunks = _mk_chunks("кит")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -541,21 +541,21 @@ def test_map_nbsp_in_source():
     # NBSP treated as whitespace by \S+: atoms still split correctly
     units = _mk_units(_para("слово\xa0раз"))
     chunks = _mk_chunks("слово раз")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].atom_end - spans[0].atom_start == 2
 
 
 def test_map_double_space_in_source():
     units = _mk_units(_para("слово  раз"))
     chunks = _mk_chunks("слово раз")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].atom_end - spans[0].atom_start == 2
 
 
 def test_map_double_space_in_chunk():
     units = _mk_units(_para("слово раз"))
     chunks = _mk_chunks("слово  раз")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].atom_end - spans[0].atom_start == 2
 
 
@@ -564,14 +564,14 @@ def test_map_double_space_in_chunk():
 def test_map_newline_in_source():
     units = _mk_units(_para("слово\nраз"))
     chunks = _mk_chunks("слово раз")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].atom_end - spans[0].atom_start == 2
 
 
 def test_map_newline_between_chunks():
     units = _mk_units(_para("а\nб"))
     chunks = _mk_chunks("а", "б")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert len(spans) == 2
 
 
@@ -580,7 +580,7 @@ def test_map_newline_between_chunks():
 def test_map_repeated_atoms_sequential():
     units = _mk_units(_para("abc abc abc"))
     chunks = _mk_chunks("abc", "abc", "abc")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert [cs.atom_start for cs in spans] == [0, 1, 2]
     assert [cs.atom_end for cs in spans] == [1, 2, 3]
     # each span points to a different source position
@@ -594,7 +594,7 @@ def test_map_reused_atom_stops():
     units = _mk_units(_para("Начало abc Конец"))
     chunks = _mk_chunks("Начало abc", "abc Конец")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -603,7 +603,7 @@ def test_map_mismatch_before_exhaustion():
     units = _mk_units(_para("кот пёс"))
     chunks = _mk_chunks("кот рыба")  # "рыба" ≠ "пёс" at position 1
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "ATOM_MISMATCH"
 
 
@@ -612,7 +612,7 @@ def test_map_genuine_exhaustion():
     units = _mk_units(_para("кот"))  # 1 atom
     chunks = _mk_chunks("кот пёс")   # 2 atoms needed
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "STREAM_EXHAUSTED"
 
 
@@ -622,14 +622,14 @@ def test_map_kind_ambiguous():
     units = _mk_units(_head("Глава"), _para("текст"))
     chunks = _mk_chunks("Глава текст")
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code == "KIND_AMBIGUOUS"
 
 
 def test_map_same_kind_two_units_ok():
     units = _mk_units(_para("а"), _para("б"))
     chunks = _mk_chunks("а б")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].unit_ids == frozenset({0, 1})
     assert spans[0].kind == "text"
 
@@ -640,7 +640,7 @@ def test_map_zero_cyrillic_chunk_punct():
     # "—" has no Cyrillic but one atom; must map through cursor correctly
     units = _mk_units(_para("—"))
     chunks = _mk_chunks("—")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].spans == ((0, 1),)
     assert spans[0].kind == "text"
 
@@ -648,7 +648,7 @@ def test_map_zero_cyrillic_chunk_punct():
 def test_map_zero_cyrillic_between_cyr_chunks():
     units = _mk_units(_para("слово — конец"))
     chunks = _mk_chunks("слово", "—", "конец")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert len(spans) == 3
     assert spans[1].spans == ((6, 7),)
 
@@ -658,7 +658,7 @@ def test_map_zero_cyrillic_between_cyr_chunks():
 def test_map_zero_cyrillic_tail_of_unit():
     units = _mk_units(_para("слово..."))
     chunks = _mk_chunks("слово...")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     # "слово..." is one atom
     assert len(spans[0].spans) == 1
     assert spans[0].spans[0] == (0, 8)
@@ -667,7 +667,7 @@ def test_map_zero_cyrillic_tail_of_unit():
 def test_map_zero_cyrillic_separate_tail_atom():
     units = _mk_units(_para("слово ..."))
     chunks = _mk_chunks("слово", "...")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].spans == ((0, 5),)
     assert spans[1].spans == ((6, 9),)
 
@@ -677,7 +677,7 @@ def test_map_zero_cyrillic_separate_tail_atom():
 def test_map_reconstruction_from_spans():
     units = _mk_units(_para("первый второй третий"))
     chunks = _mk_chunks("первый второй", "третий")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     unit_texts = [u["text"] for u in units]
 
     for cs in spans:
@@ -691,7 +691,7 @@ def test_map_reconstruction_from_spans():
 def test_map_reconstruction_multi_unit():
     units = _mk_units(_para("первый"), _para("второй"))
     chunks = _mk_chunks("первый", "второй")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
 
     for cs in spans:
         unit_id = next(iter(cs.unit_ids))
@@ -708,14 +708,14 @@ def test_map_skipped_atom_mismatch():
     units = _mk_units(_para("а б в"))
     chunks = _mk_chunks("а в")  # would need "а" then "в" but source[1]="б"
     with pytest.raises(AnnotationError) as exc:
-        map_chunks(units, chunks)
+        map_chunks(units, chunks, section="01_test")
     assert exc.value.code in ("ATOM_MISMATCH", "TRAILING_SOURCE")
 
 
 def test_map_heading_kind():
     units = _mk_units(_head("Введение"))
     chunks = _mk_chunks("Введение")
-    spans = map_chunks(units, chunks)
+    spans = map_chunks(units, chunks, section="01_test")
     assert spans[0].kind == "heading"
 
 
@@ -734,7 +734,7 @@ def _no_disclosure(exc: AnnotationError, marker: str) -> None:
 def test_3b_invalid_id_secret_not_in_manifest_order():
     """MANIFEST_ORDER error must not expose the raw invalid ID."""
     chunks = [{"id": _SECRET, "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
     assert order_errs, "expected MANIFEST_ORDER error"
     _no_disclosure(order_errs[0], _SECRET)
@@ -743,7 +743,7 @@ def test_3b_invalid_id_secret_not_in_manifest_order():
 def test_3b_invalid_id_cyrillic_latin_not_disclosed():
     """Cyrillic+Latin marker in ID must not appear in diagnostics."""
     chunks = [{"id": _CYR_MARKER, "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
     assert order_errs
     _no_disclosure(order_errs[0], _CYR_MARKER)
@@ -752,7 +752,7 @@ def test_3b_invalid_id_cyrillic_latin_not_disclosed():
 def test_3b_wrong_format_id_not_disclosed():
     """Wrong-format ID (single digit) must not appear in diagnostics."""
     chunks = [{"id": "1", "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
     assert order_errs
     assert "1" not in order_errs[0].chunk_id or order_errs[0].chunk_id.startswith("@")
@@ -765,7 +765,7 @@ def test_3b_duplicate_id_not_disclosed():
         {"id": "0001", "n": 1, "text": "а"},
         {"id": "0001", "n": 2, "text": "б"},
     ]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
     assert order_errs
     # Second error (the duplicate) must not carry the raw ID
@@ -777,7 +777,7 @@ def test_3b_unexpected_id_type_not_disclosed():
     """Non-string ID value must not appear in diagnostics."""
     secret_val = 99999
     chunks = [{"id": secret_val, "n": 1, "text": "а"}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     order_errs = [e for e in errors if e.code == "MANIFEST_ORDER"]
     assert order_errs
     assert str(secret_val) not in order_errs[0].chunk_id or order_errs[0].chunk_id.startswith("@")
@@ -787,7 +787,7 @@ def test_3b_invalid_id_not_in_nfc_error():
     """NOT_NFC error for chunk with invalid ID must not expose the raw ID."""
     nfd_text = unicodedata.normalize("NFD", "ё")  # non-NFC
     chunks = [{"id": _SECRET, "n": 1, "text": nfd_text}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     nfc_errs = [e for e in errors if e.code == "NOT_NFC" and e.chunk_id != "0"]
     # May or may not raise NOT_NFC (MANIFEST_ORDER may mask it), but if it does, no disclosure
     for e in nfc_errs:
@@ -797,7 +797,7 @@ def test_3b_invalid_id_not_in_nfc_error():
 def test_3b_invalid_id_not_in_empty_chunk_error():
     """EMPTY_CHUNK error for chunk with invalid ID must not expose the raw ID."""
     chunks = [{"id": _SECRET, "n": 1, "text": "   "}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     empty_errs = [e for e in errors if e.code == "EMPTY_CHUNK"]
     for e in empty_errs:
         _no_disclosure(e, _SECRET)
@@ -807,7 +807,7 @@ def test_3b_valid_ids_still_appear_in_diagnostics():
     """Valid IDs (passed MANIFEST_ORDER) must still appear in permitted diagnostics."""
     nfd_text = unicodedata.normalize("NFD", "ё")
     chunks = [{"id": "0001", "n": 1, "text": nfd_text}]
-    errors = validate_gates(chunks, [])
+    errors = validate_gates(chunks, [], section="01_test")
     nfc_errs = [e for e in errors if e.code == "NOT_NFC" and e.chunk_id]
     assert any(e.chunk_id == "0001" for e in nfc_errs), (
         "valid ID must appear in NOT_NFC diagnostics"
@@ -848,32 +848,32 @@ def test_3c_sol_chunk_record_none():
 # --- Chunk structural errors ---
 
 def test_3c_chunk_none_raises_manifest_order():
-    errors = validate_gates([None], [])
+    errors = validate_gates([None], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_chunk_int_raises_manifest_order():
-    errors = validate_gates([42], [])
+    errors = validate_gates([42], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_chunk_list_raises_manifest_order():
-    errors = validate_gates([["id", "0001"]], [])
+    errors = validate_gates([["id", "0001"]], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_chunk_text_none_raises_manifest_order():
-    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [])
+    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_chunk_text_int_raises_manifest_order():
-    errors = validate_gates([{"id": "0001", "n": 1, "text": 123}], [])
+    errors = validate_gates([{"id": "0001", "n": 1, "text": 123}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_chunk_text_missing_raises_manifest_order():
-    errors = validate_gates([{"id": "0001", "n": 1}], [])
+    errors = validate_gates([{"id": "0001", "n": 1}], [], section="01_test")
     # text defaults to None → structural error
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
@@ -882,57 +882,57 @@ def test_3c_chunk_text_missing_raises_manifest_order():
 
 def test_3c_n_true_rejected():
     """n=True must not be accepted as n=1."""
-    errors = validate_gates([{"id": "0001", "n": True, "text": "а"}], [])
+    errors = validate_gates([{"id": "0001", "n": True, "text": "а"}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_n_false_rejected():
     """n=False must not be accepted."""
-    errors = validate_gates([{"id": "0001", "n": False, "text": "а"}], [])
+    errors = validate_gates([{"id": "0001", "n": False, "text": "а"}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_n_float_rejected():
     """n=1.0 must not be accepted as n=1."""
-    errors = validate_gates([{"id": "0001", "n": 1.0, "text": "а"}], [])
+    errors = validate_gates([{"id": "0001", "n": 1.0, "text": "а"}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_n_none_rejected():
-    errors = validate_gates([{"id": "0001", "n": None, "text": "а"}], [])
+    errors = validate_gates([{"id": "0001", "n": None, "text": "а"}], [], section="01_test")
     assert any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 def test_3c_n_valid_int_accepted():
     """Valid int n=1 must pass."""
-    errors = validate_gates([{"id": "0001", "n": 1, "text": "а"}], [])
+    errors = validate_gates([{"id": "0001", "n": 1, "text": "а"}], [], section="01_test")
     assert not any(e.code == "MANIFEST_ORDER" for e in errors)
 
 
 # --- Unit structural errors ---
 
 def test_3c_unit_none_raises_not_nfc():
-    errors = validate_gates([], [None])
+    errors = validate_gates([], [None], section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
 def test_3c_unit_int_raises_not_nfc():
-    errors = validate_gates([], [42])
+    errors = validate_gates([], [42], section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
 def test_3c_unit_text_none_raises_not_nfc():
-    errors = validate_gates([], [{"text": None}])
+    errors = validate_gates([], [{"text": None}], section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
 def test_3c_unit_text_int_raises_not_nfc():
-    errors = validate_gates([], [{"text": 0}])
+    errors = validate_gates([], [{"text": 0}], section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
 def test_3c_unit_text_missing_raises_not_nfc():
-    errors = validate_gates([], [{}])
+    errors = validate_gates([], [{}], section="01_test")
     assert any(e.code == "NOT_NFC" for e in errors)
 
 
@@ -940,13 +940,13 @@ def test_3c_unit_text_missing_raises_not_nfc():
 
 def test_3c_chunk_none_no_disclosure():
     """None chunk must not disclose repr(None) in diagnostics."""
-    errors = validate_gates([None], [])
+    errors = validate_gates([None], [], section="01_test")
     for e in errors:
         assert "None" not in e.chunk_id
 
 
 def test_3c_chunk_text_none_no_disclosure():
-    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [])
+    errors = validate_gates([{"id": "0001", "n": 1, "text": None}], [], section="01_test")
     for e in errors:
         assert "None" not in str(e) or e.chunk_id in ("", "0001")
 
@@ -957,13 +957,13 @@ def test_3c_valid_chunk_with_extra_metadata():
     """Extra fields on valid chunks must not cause errors."""
     chunks = [{"id": "0001", "n": 1, "text": "а", "meta": "ok", "extra": 42}]
     units = [{"text": "а", "type": "text"}]
-    errors = validate_gates(chunks, units)
+    errors = validate_gates(chunks, units, section="01_test")
     assert errors == []
 
 
 def test_3c_valid_unit_with_extra_metadata():
     units = [{"text": "а", "type": "heading", "speaker": "narrator"}]
-    errors = validate_gates([], units)
+    errors = validate_gates([], units, section="01_test")
     assert not any(e.code in ("NOT_NFC", "UNIT_INNER_PARA") for e in errors)
 
 
@@ -971,7 +971,7 @@ def test_3c_valid_unit_with_extra_metadata():
 
 def _inner_para_errors(unit_text: str) -> list[AnnotationError]:
     units = [{"text": unit_text}]
-    return [e for e in validate_gates([], units) if e.code == "UNIT_INNER_PARA"]
+    return [e for e in validate_gates([], units, section="01_test") if e.code == "UNIT_INNER_PARA"]
 
 
 def test_3d_sol_crlf_blank_line():
@@ -1027,7 +1027,7 @@ def test_3d_multiple_nonempty_lines_no_trigger():
 
 # ── 6C11-3e: SectionMap and atom provenance ──────────────────────────────────
 
-def _mk_sm(unit_texts, chunk_texts, *, section=""):
+def _mk_sm(unit_texts, chunk_texts, *, section="01_test"):
     """Helper: build SectionMap from plain text lists."""
     units = [{"text": t} for t in unit_texts]
     chunks = [{"id": f"{i+1:04d}", "n": i + 1, "text": t}
@@ -1041,7 +1041,7 @@ def test_27_provenance_units_A():
     """units_A: 'a' in unit 0, 'b c' in unit 1."""
     units_A = [{"text": "a"}, {"text": "  b c"}]
     chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
-    sm = map_section(units_A, chunks)
+    sm = map_section(units_A, chunks, section="01_test")
     ca = chunk_atoms(sm, "0001")
     assert len(ca) == 3
     # Explicit provenance: 'a' from unit 0, 'b' and 'c' from unit 1
@@ -1054,7 +1054,7 @@ def test_27_provenance_units_B():
     """units_B: 'a b' in unit 0, 'c' in unit 1."""
     units_B = [{"text": "a b"}, {"text": "    c"}]
     chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
-    sm = map_section(units_B, chunks)
+    sm = map_section(units_B, chunks, section="01_test")
     ca = chunk_atoms(sm, "0001")
     assert len(ca) == 3
     # 'a' and 'b' from unit 0, 'c' from unit 1
@@ -1068,8 +1068,8 @@ def test_27_different_distributions_different_provenance():
     units_A = [{"text": "a"}, {"text": "  b c"}]
     units_B = [{"text": "a b"}, {"text": "    c"}]
     chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
-    sm_A = map_section(units_A, chunks)
-    sm_B = map_section(units_B, chunks)
+    sm_A = map_section(units_A, chunks, section="01_test")
+    sm_B = map_section(units_B, chunks, section="01_test")
     ca_A = chunk_atoms(sm_A, "0001")
     ca_B = chunk_atoms(sm_B, "0001")
     # Different unit_id sequences
@@ -1084,8 +1084,8 @@ def test_27_same_input_same_provenance():
     """Same input always produces the same atom provenance (determinism)."""
     units_A = [{"text": "a"}, {"text": "  b c"}]
     chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
-    sm1 = map_section(units_A, chunks)
-    sm2 = map_section(units_A, chunks)
+    sm1 = map_section(units_A, chunks, section="01_test")
+    sm2 = map_section(units_A, chunks, section="01_test")
     assert chunk_atoms(sm1, "0001") == chunk_atoms(sm2, "0001")
 
 
@@ -1144,7 +1144,7 @@ def test_29_fuzz_atom_text_matches_unit_source():
         {"id": "0002", "n": 2, "text": "три четыре"},
         {"id": "0003", "n": 3, "text": "пять"},
     ]
-    sm = map_section(units, chunks)
+    sm = map_section(units, chunks, section="01_test")
     for cid in ("0001", "0002", "0003"):
         for atom in chunk_atoms(sm, cid):
             unit_text = units[atom.unit_id]["text"]
@@ -1289,10 +1289,10 @@ def test_30_ast_chunk_atoms_no_tokenization():
     assert not violations, "\n".join(violations)
 
 
-# ── #31: map_chunks() == list(map_section(...).spans) ────────────────────────
+# ── #31: map_chunks(, section="01_test") == list(map_section(..., section="01_test").spans) ────────────────────────
 
 def test_31_map_chunks_equals_map_section_spans():
-    """map_chunks() elements and order equal map_section(...).spans."""
+    """map_chunks(, section="01_test") elements and order equal map_section(..., section="01_test").spans."""
     units = [{"text": "а б в г"}, {"text": "д е"}]
     chunks = [
         {"id": "0001", "n": 1, "text": "а б"},
@@ -1308,7 +1308,7 @@ def test_31_map_chunks_equals_map_section_single():
     """Single-chunk case: map_chunks == list(map_section.spans)."""
     units = [{"text": "слово"}]
     chunks = [{"id": "0001", "n": 1, "text": "слово"}]
-    assert map_chunks(units, chunks) == list(map_section(units, chunks).spans)
+    assert map_chunks(units, chunks, section="01_test") == list(map_section(units, chunks, section="01_test").spans)
 
 
 # ── SectionMap structure and chunk_atoms basics ───────────────────────────────
@@ -1350,13 +1350,13 @@ def test_source_atoms_matches_map_section_stream():
     """source_atoms() matches the stream stored in SectionMap."""
     units = [{"text": "один два"}, {"text": "три"}]
     chunks = [{"id": "0001", "n": 1, "text": "один два три"}]
-    sm = map_section(units, chunks)
+    sm = map_section(units, chunks, section="01_test")
     assert sm.stream == source_atoms(units)
 
 
 # ── #32: UNKNOWN_CHUNK diagnostic privacy; section validation (BLOCKED) ───────
 
-def _mk_sm_one(unit_text: str, chunk_text: str, section: str = "") -> "SectionMap":
+def _mk_sm_one(unit_text: str, chunk_text: str, section: str = "01_test") -> "SectionMap":
     units = [{"text": unit_text}]
     chunks = [{"id": "0001", "n": 1, "text": chunk_text}]
     return map_section(units, chunks, section=section)
