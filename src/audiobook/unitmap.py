@@ -356,6 +356,8 @@ def chunk_atoms(section_map: SectionMap, chunk_id: str) -> tuple[Atom, ...]:
 
     Raises AnnotationError("UNKNOWN_CHUNK") for an unrecognised chunk_id.
     """
+    if type(chunk_id) is not str:
+        raise AnnotationError("UNKNOWN_CHUNK", section=section_map.section) from None
     for cs in section_map.spans:
         if cs.chunk_id == chunk_id:
             return section_map.stream[cs.atom_start:cs.atom_end]

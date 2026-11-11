@@ -1843,3 +1843,102 @@ def test_38_chunk_id_dict_not_retained():
     e = AnnotationError("SOME_CODE", chunk_id=bad)  # type: ignore[arg-type]
     assert e.chunk_id is not bad
     assert e.chunk_id is None
+
+
+# ── #39: chunk_atoms() hostile/spoofed chunk_id boundary (T15-6C11-3f1c) ─────
+
+def _single_chunk_sm() -> "SectionMap":
+    """Return a minimal SectionMap with one known chunk '0001'."""
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    return map_section(units, chunks, section="01_test")
+
+
+def test_39_hostile_eq_raises_unknown_chunk():
+    """Hostile __eq__ must trigger UNKNOWN_CHUNK, not propagate the exception."""
+    class _Hostile:
+        def __eq__(self, other): raise RuntimeError("SYNTHETIC_SECRET")
+        def __str__(self): raise RuntimeError("__str__")
+        def __repr__(self): raise RuntimeError("__repr__")
+        def __bool__(self): raise RuntimeError("__bool__")
+        def __hash__(self): return 0
+
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, _Hostile())  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_spoof_eq_raises_unknown_chunk():
+    """Spoofed __eq__ returning True must still raise UNKNOWN_CHUNK."""
+    class _Spoof:
+        def __eq__(self, other): return True
+        def __hash__(self): return 0
+
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, _Spoof())  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_none_raises_unknown_chunk():
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, None)  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_int_raises_unknown_chunk():
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, 1)  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_bool_raises_unknown_chunk():
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, True)  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_bytes_raises_unknown_chunk():
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, b"0001")  # type: ignore[arg-type]
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+def test_39_malformed_string_raises_unknown_chunk():
+    """Unknown string ID raises UNKNOWN_CHUNK without disclosing the value."""
+    secret = "MALFORMED_SECRET_ID"
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, secret)
+    e = exc.value
+    assert e.code == "UNKNOWN_CHUNK"
+    assert secret not in str(e)
+    assert secret not in repr(e)
+    assert all(secret not in str(a) for a in e.args)
+    assert e.chunk_id != secret
+
+
+def test_39_no_secret_in_exception_attrs():
+    """Non-string chunk_id secret must not appear in any exception attribute."""
+    secret_key = "CHUNK_BOUNDARY_SECRET"
+    sm = _single_chunk_sm()
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, {secret_key: 1})  # type: ignore[arg-type]
+    e = exc.value
+    combined = str(e) + repr(e) + " ".join(str(a) for a in e.args)
+    assert secret_key not in combined
+    for v in vars(e).values():
+        assert secret_key not in str(v)
+
+
+def test_39_valid_id_returns_atoms():
+    """Known valid chunk_id returns exactly the stored atom slice."""
+    sm = _single_chunk_sm()
+    result = chunk_atoms(sm, "0001")
+    assert len(result) == 1
+    assert result[0].text == "слово"
