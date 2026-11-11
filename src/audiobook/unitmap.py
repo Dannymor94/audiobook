@@ -825,6 +825,10 @@ def annotate_units(
       I3  — chunk spans multiple source units or units with conflicting kinds
     """
     validate_section(section)
+    if not isinstance(units, list):
+        raise AnnotationError("MALFORMED_INPUT") from None
+    if not isinstance(manifest_chunks, list):
+        raise AnnotationError("MALFORMED_INPUT") from None
     # Build flat unit token stream with char spans: (token, unit_id, kind, char_start, char_end).
     unit_stream: list[tuple[str, int, str, int, int]] = []
     for uid, unit in enumerate(units):

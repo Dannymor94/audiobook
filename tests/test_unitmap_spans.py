@@ -6,7 +6,7 @@ import pytest
 from audiobook.unitmap import (
     Atom, ChunkSpan, SectionMap, AnnotationError,
     atoms, source_atoms, validate_gates, check_gates,
-    map_section, map_chunks, chunk_atoms,
+    map_section, map_chunks, chunk_atoms, annotate_units,
     validate_section, _section_violation, _validate_chunk_span,
 )
 
@@ -3160,3 +3160,56 @@ def test_46_malformed_input_no_context_disclosure():
     except AnnotationError as e:
         assert e.__cause__ is None
         assert "None" not in str(e)
+
+
+# ── #47: annotate_units() malformed-container hardening ───────────────────────
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42, ()])
+def test_47_annotate_units_malformed_units(bad_units):
+    """annotate_units() raises MALFORMED_INPUT for non-list units."""
+    with pytest.raises(AnnotationError) as exc:
+        annotate_units(_VALID_CHUNKS, bad_units, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+    assert exc.value.__cause__ is None
+
+
+@pytest.mark.parametrize("bad_chunks", [None, {}, "string", 42, ()])
+def test_47_annotate_units_malformed_chunks(bad_chunks):
+    """annotate_units() raises MALFORMED_INPUT for non-list manifest_chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        annotate_units(bad_chunks, _VALID_UNITS, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+    assert exc.value.__cause__ is None
+
+
+def test_47_invalid_section_takes_precedence_over_malformed_units():
+    """INVALID_SECTION fires before MALFORMED_INPUT when section is bad."""
+    with pytest.raises(AnnotationError) as exc:
+        annotate_units(_VALID_CHUNKS, None, section="")
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_47_invalid_section_takes_precedence_over_malformed_chunks():
+    """INVALID_SECTION fires before MALFORMED_INPUT when section is bad."""
+    with pytest.raises(AnnotationError) as exc:
+        annotate_units(None, _VALID_UNITS, section="bad!")
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_47_malformed_input_no_disclosure():
+    """MALFORMED_INPUT carries no chained context and no caller-controlled content."""
+    try:
+        annotate_units(_VALID_CHUNKS, None, section="01_test")
+    except AnnotationError as e:
+        assert e.__cause__ is None
+        assert "None" not in str(e)
+        assert "NoneType" not in str(e)
+
+
+def test_47_annotate_units_valid_input_unchanged():
+    """Valid annotate_units() call still returns expected annotations."""
+    result = annotate_units(_VALID_CHUNKS, _VALID_UNITS, section="01_test")
+    assert len(result) == 1
+    assert result[0]["unit_id"] == 0
+    assert result[0]["kind"] == "text"
+    assert result[0]["id"] == "0001"
