@@ -262,27 +262,30 @@ def _validate_chunk_span(
     stream: tuple[Atom, ...],
     unit_kinds: list[str],
     expected_start: int,
+    expected_end: int,
     section: str,
 ) -> None:
     """Raise SPAN_STREAM_MISMATCH if cs is inconsistent with stream and unit_kinds.
 
     All bounds checks run before any stream indexing.  Values are derived
-    independently from stream/unit_kinds, never from cs fields.
+    independently from stream/unit_kinds/manifest, never from cs fields.
+    expected_start and expected_end are computed from the manifest atom count.
     """
     def _fail() -> None:
         raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=cs.chunk_id)
 
-    # 1. Atom range must be within stream bounds.
-    if not (0 <= cs.atom_start <= cs.atom_end <= len(stream)):
+    # n is the manifest-derived expected atom count — independent of cs.
+    n = expected_end - expected_start
+
+    # 1. Exact equality with independently computed boundaries (gap/overlap/incomplete).
+    if cs.atom_start != expected_start or cs.atom_end != expected_end:
         _fail()
 
-    # 2. Must be contiguous with the previous chunk (or start at 0).
-    if cs.atom_start != expected_start:
+    # 2. Atom range must be within stream bounds (defense-in-depth, before indexing).
+    if not (0 <= expected_start <= expected_end <= len(stream)):
         _fail()
 
-    n = cs.atom_end - cs.atom_start
-
-    # 3. Span count must equal the atom range.
+    # 3. Span count must equal the manifest atom count.
     if len(cs.spans) != n:
         _fail()
 
@@ -375,7 +378,7 @@ def map_section(
         )
 
         # Independently validate ChunkSpan against stream before accepting it.
-        _validate_chunk_span(cs, stream, unit_kinds, cursor, section)
+        _validate_chunk_span(cs, stream, unit_kinds, cursor, cursor + n, section)
 
         result.append(cs)
         cursor += n

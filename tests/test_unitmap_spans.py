@@ -2033,7 +2033,7 @@ def test_41_sol_injection_atom_end_plus_one():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2051,7 +2051,7 @@ def test_41_sol_injection_empty_spans():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2070,29 +2070,29 @@ def test_41_sol_injection_extra_span():
         end_modes=None,
     )
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
 # ── Additional injections ─────────────────────────────────────────────────────
 
 def test_41_bad_atom_start_raises():
-    """atom_start < 0 raises SPAN_STREAM_MISMATCH before any indexing."""
+    """atom_start < 0 raises SPAN_STREAM_MISMATCH: does not match expected_start=0."""
     sm, stream, unit_kinds = _base_sm_and_meta()
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, -1, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, -1, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
 def test_41_reversed_range_raises():
-    """atom_start > atom_end raises SPAN_STREAM_MISMATCH."""
+    """Reversed atom_start/atom_end raises SPAN_STREAM_MISMATCH."""
     sm, stream, unit_kinds = _base_sm_and_meta()
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_end, cs.atom_start, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_end, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2102,7 +2102,7 @@ def test_41_gap_between_chunks_raises():
     cs = sm.spans[1]
     # Second chunk normally starts at spans[0].atom_end, present expected_start as 0 (gap)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(cs, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(cs, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2112,7 +2112,7 @@ def test_41_overlapping_range_raises():
     cs = sm.spans[-1]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, len(stream) + 5, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_start, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, cs.atom_start, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2122,7 +2122,7 @@ def test_41_wrong_unit_ids_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, frozenset({99}), cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2132,7 +2132,7 @@ def test_41_wrong_kind_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, "heading", None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2143,7 +2143,7 @@ def test_41_wrong_offsets_raises():
     corrupted = ((999, 999),) + cs.spans[1:]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, corrupted, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2153,7 +2153,7 @@ def test_41_nonzero_end_modes_raises():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end, cs.spans, cs.unit_ids, cs.kind, frozenset({"open_end"}))
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2163,7 +2163,7 @@ def test_41_no_indexerror_on_oob():
     cs = sm.spans[0]
     bad = ChunkSpan(cs.chunk_id, 0, len(stream) + 100, cs.spans, cs.unit_ids, cs.kind, None)
     with pytest.raises(AnnotationError) as exc:
-        _validate_chunk_span(bad, stream, unit_kinds, 0, "01_test")
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
     assert exc.value.code == "SPAN_STREAM_MISMATCH"
 
 
@@ -2240,3 +2240,121 @@ def test_41_valid_zero_cyrillic_accepted():
     ]
     sm = map_section(units, chunks, section="01_test")
     assert len(sm.spans) == 2
+
+
+# ── #42: independently computed atom-range boundaries (T15-6C11-3g1) ─────────
+
+def _two_atom_sm():
+    """Single chunk 'x0 x1' — stream has 2 atoms."""
+    units = [{"text": "x0 x1"}]
+    chunks = [{"id": "0001", "n": 1, "text": "x0 x1"}]
+    return map_section(units, chunks, section="01_test")
+
+
+def test_42_sol_incomplete_range_coherent_corruption():
+    """Sol P2 repro 1: atom_end=1 with matching spans accepts only 1 atom — must MISMATCH."""
+    sm = _two_atom_sm()
+    stream = sm.stream
+    unit_kinds = ["text"]
+    cs = sm.spans[0]
+    # Coherent corruption: atom_end reduced, span matches first atom only
+    bad = ChunkSpan(
+        chunk_id=cs.chunk_id,
+        atom_start=0,
+        atom_end=1,
+        spans=(cs.spans[0],),  # only 1 span, consistent with atom_end=1
+        unit_ids=cs.unit_ids,
+        kind=cs.kind,
+        end_modes=None,
+    )
+    # expected_end is independently derived from manifest (2 atoms)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, stream, unit_kinds, 0, cs.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_sol_incomplete_range_via_map_section(monkeypatch):
+    """Sol P2 repro 1 via map_section: injected atom_end=cursor+n-1 raises MISMATCH."""
+    def corrupt(cs):
+        return ChunkSpan(cs.chunk_id, cs.atom_start, cs.atom_end - 1, cs.spans[:-1], cs.unit_ids, cs.kind, None)
+    monkeypatch.setattr(_unitmap, "ChunkSpan", _make_bad_cs_factory(corrupt))
+    units = [{"text": "x0 x1"}]
+    chunks = [{"id": "0001", "n": 1, "text": "x0 x1"}]
+    with pytest.raises(AnnotationError) as exc:
+        map_section(units, chunks, section="01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_sol_gap_ranges():
+    """Sol P2 repro 2a: gap (0,1),(2,4) — second chunk atom_start != expected_start."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs1 = sm.spans[0]
+    cs2 = sm.spans[1]
+    # First chunk validated correctly (atom_start=0, atom_end=2)
+    _validate_chunk_span(cs1, stream, unit_kinds, 0, cs1.atom_end, "01_test")
+    # Second chunk: inject a gap — tell validator expected_start=1 but cs2.atom_start=2
+    # (or use bad cs with atom_start=3 to simulate (0,1),(3,4) gap)
+    bad2 = ChunkSpan(cs2.chunk_id, 3, cs2.atom_end, cs2.spans[1:], cs2.unit_ids, cs2.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_sol_overlapping_ranges():
+    """Sol P2 repro 2b: overlap (0,3),(2,4) — second chunk atom_start < first chunk atom_end."""
+    sm, stream, unit_kinds = _base_sm_and_meta()
+    cs1 = sm.spans[0]
+    cs2 = sm.spans[1]
+    # Second chunk: atom_start=1 overlaps with first chunk's range (0,2)
+    # expected_start (from cursor after cs1) = cs1.atom_end = 2
+    bad2 = ChunkSpan(cs2.chunk_id, 1, cs2.atom_end, (cs1.spans[1],) + cs2.spans, cs2.unit_ids, cs2.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad2, stream, unit_kinds, cs1.atom_end, cs2.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_shortened_range_raises():
+    """atom_end less than manifest count raises SPAN_STREAM_MISMATCH."""
+    sm = _two_atom_sm()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, 0, 1, cs.spans[:1], cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_extended_range_raises():
+    """atom_end more than manifest count raises SPAN_STREAM_MISMATCH."""
+    sm = _two_atom_sm()
+    cs = sm.spans[0]
+    bad = ChunkSpan(cs.chunk_id, 0, len(sm.stream), cs.spans + cs.spans, cs.unit_ids, cs.kind, None)
+    with pytest.raises(AnnotationError) as exc:
+        _validate_chunk_span(bad, sm.stream, ["text"], 0, cs.atom_end, "01_test")
+    assert exc.value.code == "SPAN_STREAM_MISMATCH"
+
+
+def test_42_valid_single_chunk_accepted():
+    """Valid single-chunk mapping passes validation and chunk_atoms returns atoms."""
+    sm = _two_atom_sm()
+    result = chunk_atoms(sm, "0001")
+    assert len(result) == 2
+    assert result[0].text == "x0"
+    assert result[1].text == "x1"
+
+
+def test_42_valid_multi_chunk_accepted():
+    """Valid multi-chunk mapping passes validation."""
+    sm, _, _ = _base_sm_and_meta()
+    assert len(sm.spans) == 2
+    atoms_0 = chunk_atoms(sm, "0001")
+    atoms_1 = chunk_atoms(sm, "0002")
+    assert atoms_0[0].text == "слово"
+    assert atoms_1[0].text == "слово"
+
+
+def test_42_chunk_atoms_provenance_correct():
+    """chunk_atoms() returns the exact stored stream slice after 3g1 fix."""
+    sm = _two_atom_sm()
+    result = chunk_atoms(sm, "0001")
+    # Must be the slice from sm.stream, not re-tokenized
+    assert result is sm.stream[sm.spans[0].atom_start:sm.spans[0].atom_end]
