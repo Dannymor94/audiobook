@@ -1,6 +1,9 @@
 """Recover source unit identity and chunk kind via Cyrillic token-index alignment.
 
 Public API:
+  Atom, ChunkSpan                                      — data structures
+  atoms(unit_text, unit_id) -> list[Atom]              — non-whitespace atom extractor
+  validate_gates(chunks, units, *, section) -> list[AnnotationError]
   annotate_units(manifest_chunks, units, *, section="") -> list[dict]
   find_exact_in_unit(key, unit_text, *, orig_lb, orig_ub) -> list[tuple[int, int]]
   AnnotationError
@@ -9,14 +12,126 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 _CYR = re.compile(r"[а-яёА-ЯЁ]+")
 _WS = re.compile(r"\s+")
 _TRAILING_TERM = re.compile(r"[.!?…]+$")
+_INNER_PARA = re.compile(r"\n[ \t]*\n")
 # M2 tolerant matching: T = {".", "…"} — only characters text_prep can append.
 _M2_TERMINAL: frozenset[str] = frozenset((".", "…"))
 # Characters that, when following an M2 match, disqualify it.
 _PUNCT_AFTER_M2: frozenset[str] = frozenset((".", "!", "?", "…"))
+
+
+@dataclass(frozen=True)
+class Atom:
+    """Non-whitespace token with its position in the source unit text."""
+    text: str
+    unit_id: int
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class ChunkSpan:
+    """Typed, gate-validated view of a manifest chunk before cursor/mapping phases."""
+    chunk_id: str
+    n: int
+    text: str
+    kind: str | None = None
+    unit_id: int | None = None
+
+
+class AnnotationError(Exception):
+    """Raised when manifest chunks cannot be reliably mapped to source units.
+
+    Attributes:
+        code        — structured error code (e.g. NOT_NFC, MANIFEST_ORDER) or
+                      human-readable failure description for legacy callers
+        reason      — alias for code (backward compat)
+        section     — section slug (empty if caller did not pass it)
+        chunk_id    — manifest chunk id (empty if unavailable)
+        detail      — additional structured detail (empty if unused)
+        mismatch_idx — absolute token index of first mismatch (-1 if N/A)
+    """
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        section: str = "",
+        chunk_id: str = "",
+        detail: str = "",
+        mismatch_idx: int = -1,
+    ) -> None:
+        self.code = code
+        self.reason = code  # backward-compat alias
+        self.section = section
+        self.chunk_id = chunk_id
+        self.detail = detail
+        self.mismatch_idx = mismatch_idx
+        parts = []
+        if section:
+            parts.append(f"section={section!r}")
+        if chunk_id:
+            parts.append(f"chunk={chunk_id!r}")
+        if mismatch_idx >= 0:
+            parts.append(f"tok={mismatch_idx}")
+        if detail:
+            parts.append(f"detail={detail!r}")
+        ctx = f" ({', '.join(parts)})" if parts else ""
+        super().__init__(f"unitmap: {code}{ctx}")
+
+
+def atoms(unit_text: str, unit_id: int) -> list[Atom]:
+    """Return one Atom per non-whitespace token with its original offsets."""
+    return [Atom(m.group(), unit_id, m.start(), m.end()) for m in re.finditer(r"\S+", unit_text)]
+
+
+def validate_gates(
+    manifest_chunks: list[dict],
+    units: list[dict],
+    *,
+    section: str = "",
+) -> list[AnnotationError]:
+    """Run pre-mapping gates; return list of AnnotationErrors (empty = all pass).
+
+    Gates (in order):
+      NOT_NFC        — unit or chunk text is not NFC-normalized
+      UNIT_INNER_PARA — unit text contains a blank line (\\n\\s*\\n)
+      MANIFEST_ORDER  — n not sequential from 1, id != f"{n:04d}", or duplicate id
+      EMPTY_CHUNK     — chunk has no non-whitespace atoms
+    """
+    errors: list[AnnotationError] = []
+
+    for uid, unit in enumerate(units):
+        text = unit.get("text", "")
+        if unicodedata.normalize("NFC", text) != text:
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=str(uid)))
+            continue  # inner-para check on non-NFC text is unreliable
+        if _INNER_PARA.search(text):
+            errors.append(AnnotationError("UNIT_INNER_PARA", section=section, chunk_id=str(uid)))
+
+    seen_ids: set[str] = set()
+    for i, chunk in enumerate(manifest_chunks):
+        chunk_id = str(chunk.get("id", ""))
+        n = chunk.get("n")
+        expected_n = i + 1
+        if n != expected_n or chunk_id != f"{expected_n:04d}" or chunk_id in seen_ids:
+            errors.append(AnnotationError("MANIFEST_ORDER", section=section, chunk_id=chunk_id))
+        seen_ids.add(chunk_id)
+
+    for chunk in manifest_chunks:
+        chunk_id = str(chunk.get("id", ""))
+        text = chunk.get("text", "")
+        if unicodedata.normalize("NFC", text) != text:
+            errors.append(AnnotationError("NOT_NFC", section=section, chunk_id=chunk_id))
+            continue
+        if not atoms(text, 0):
+            errors.append(AnnotationError("EMPTY_CHUNK", section=section, chunk_id=chunk_id))
+
+    return errors
 
 
 def _tokens(text: str) -> list[str]:
@@ -211,39 +326,6 @@ def find_exact_in_unit(
     if orig_ub is None:
         orig_ub = len(unit_text)
     return [(s, e) for _, s, e in _find_normalized(key, unit_text, orig_lb=orig_lb, orig_ub=orig_ub)]
-
-
-class AnnotationError(Exception):
-    """Raised when manifest chunks cannot be reliably mapped to source units.
-
-    Attributes:
-        reason      — human-readable failure description
-        section     — section slug (empty if caller did not pass it)
-        chunk_id    — manifest chunk id (empty if unavailable)
-        mismatch_idx — absolute token index of first mismatch (-1 if N/A)
-    """
-
-    def __init__(
-        self,
-        reason: str,
-        *,
-        section: str = "",
-        chunk_id: str = "",
-        mismatch_idx: int = -1,
-    ) -> None:
-        self.reason = reason
-        self.section = section
-        self.chunk_id = chunk_id
-        self.mismatch_idx = mismatch_idx
-        parts = []
-        if section:
-            parts.append(f"section={section!r}")
-        if chunk_id:
-            parts.append(f"chunk={chunk_id!r}")
-        if mismatch_idx >= 0:
-            parts.append(f"tok={mismatch_idx}")
-        detail = f" ({', '.join(parts)})" if parts else ""
-        super().__init__(f"unitmap: {reason}{detail}")
 
 
 def _resolve_zero_token(
