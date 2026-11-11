@@ -1,4 +1,5 @@
 """Tests for Atom, ChunkSpan, AnnotationError and pre-mapping gates — T15-6C11-1b."""
+import ast
 import unicodedata
 import pytest
 
@@ -1164,9 +1165,56 @@ def test_29_provenance_with_punctuation_atom():
 
 # ── #30: AST guard — SectionMap construction restrictions ────────────────────
 
+def _tc_import_linenos(tree) -> set:
+    """Line numbers of import stmts inside 'if TYPE_CHECKING:' blocks."""
+    linenos: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            t = node.test
+            is_tc = (isinstance(t, ast.Name) and t.id == "TYPE_CHECKING") or \
+                    (isinstance(t, ast.Attribute) and t.attr == "TYPE_CHECKING")
+            if is_tc:
+                for child in ast.walk(node):
+                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                        linenos.add(child.lineno)
+    return linenos
+
+
+def _unitmap_class_aliases(tree, tc_lines: set, classes: set) -> set:
+    """Names that alias any of `classes` via runtime imports from unitmap."""
+    aliases: set = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.lineno in tc_lines:
+            continue
+        if node.module is None or "unitmap" not in node.module:
+            continue
+        for a in node.names:
+            if a.name in classes:
+                aliases.add(a.asname if a.asname else a.name)
+    return aliases
+
+
+def _dc_replace_aliases(tree, tc_lines: set) -> tuple:
+    """Return (dc_module_aliases, replace_func_aliases) for dataclasses."""
+    mods: set = set()
+    funcs: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and node.lineno not in tc_lines:
+            for a in node.names:
+                if a.name == "dataclasses":
+                    mods.add(a.asname if a.asname else a.name)
+        elif isinstance(node, ast.ImportFrom) and node.lineno not in tc_lines:
+            if node.module == "dataclasses":
+                for a in node.names:
+                    if a.name == "replace":
+                        funcs.add(a.asname if a.asname else a.name)
+    return mods, funcs
+
+
 def test_30_ast_no_sectionmap_construction_outside_unitmap():
-    """No runtime SectionMap() construction outside unitmap.py."""
-    import ast
+    """No runtime SectionMap() construction outside unitmap.py, including aliased names."""
     import pathlib
 
     repo_root = pathlib.Path(__file__).parent.parent
@@ -1186,6 +1234,9 @@ def test_30_ast_no_sectionmap_construction_outside_unitmap():
             tree = ast.parse(source, filename=str(path))
         except SyntaxError:
             continue
+        tc_lines = _tc_import_linenos(tree)
+        forbidden = _unitmap_class_aliases(tree, tc_lines, {"SectionMap"})
+        forbidden.add("SectionMap")  # always catch the canonical name
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -1195,7 +1246,7 @@ def test_30_ast_no_sectionmap_construction_outside_unitmap():
                 name = func.id
             elif isinstance(func, ast.Attribute):
                 name = func.attr
-            if name == "SectionMap":
+            if name in forbidden:
                 rel = path.relative_to(repo_root)
                 violations.append(
                     f"{rel}:{node.lineno}: rule 1 — SectionMap() constructed outside unitmap.py"
@@ -1205,8 +1256,7 @@ def test_30_ast_no_sectionmap_construction_outside_unitmap():
 
 
 def test_30_ast_no_dataclasses_replace_in_unitmap_importers():
-    """No dataclasses.replace() calls in files that import from unitmap."""
-    import ast
+    """No dataclasses.replace() calls (including aliases) in files that import from unitmap."""
     import pathlib
 
     repo_root = pathlib.Path(__file__).parent.parent
@@ -1226,8 +1276,10 @@ def test_30_ast_no_dataclasses_replace_in_unitmap_importers():
         except SyntaxError:
             continue
 
+        tc_lines = _tc_import_linenos(tree)
         imports_unitmap = any(
             isinstance(n, ast.ImportFrom)
+            and n.lineno not in tc_lines
             and n.module is not None
             and "unitmap" in n.module
             for n in ast.walk(tree)
@@ -1235,17 +1287,21 @@ def test_30_ast_no_dataclasses_replace_in_unitmap_importers():
         if not imports_unitmap:
             continue
 
+        dc_mods, replace_funcs = _dc_replace_aliases(tree, tc_lines)
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            # dataclasses.replace(...)
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "replace"
-                and isinstance(func.value, ast.Name)
-                and func.value.id == "dataclasses"
-            ):
+            hit = False
+            if isinstance(func, ast.Attribute) and func.attr == "replace":
+                # any_dc_alias.replace(...)
+                if isinstance(func.value, ast.Name) and func.value.id in dc_mods:
+                    hit = True
+            elif isinstance(func, ast.Name) and func.id in replace_funcs:
+                # from dataclasses import replace [as repl]; repl(...)
+                hit = True
+            if hit:
                 rel = path.relative_to(repo_root)
                 violations.append(
                     f"{rel}:{node.lineno}: rule 3 — dataclasses.replace() in unitmap importer"
@@ -1287,6 +1343,128 @@ def test_30_ast_chunk_atoms_no_tokenization():
             violations.append(f"line {node.lineno}: forbidden call .{name}() in chunk_atoms()")
 
     assert not violations, "\n".join(violations)
+
+
+def test_30_ast_no_chunkspan_construction_in_src():
+    """No runtime ChunkSpan() construction in src/ (including aliased names)."""
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).parent.parent
+    unitmap_path = repo_root / "src" / "audiobook" / "unitmap.py"
+    src_py = [p for p in (repo_root / "src").rglob("*.py") if p != unitmap_path]
+
+    violations = []
+    for path in src_py:
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+        tc_lines = _tc_import_linenos(tree)
+        forbidden = _unitmap_class_aliases(tree, tc_lines, {"ChunkSpan"})
+        forbidden.add("ChunkSpan")
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name in forbidden:
+                rel = path.relative_to(repo_root)
+                violations.append(
+                    f"{rel}:{node.lineno}: rule 1 — ChunkSpan() constructed outside unitmap.py"
+                )
+
+    assert not violations, "AST guard violations:\n" + "\n".join(violations)
+
+
+# ── #45: AST guard alias bypass regression fixtures ──────────────────────────
+
+def test_45_sectionmap_alias_bypass_detected(tmp_path):
+    """'from audiobook.unitmap import SectionMap as SM; SM()' is flagged."""
+    src = tmp_path / "bypass.py"
+    src.write_text(
+        "from audiobook.unitmap import SectionMap as SM\nSM()\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    forbidden = _unitmap_class_aliases(tree, tc_lines, {"SectionMap"})
+    forbidden.add("SectionMap")
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in forbidden
+    ]
+    assert calls, "alias SM() was not detected"
+
+
+def test_45_type_checking_sectionmap_not_flagged(tmp_path):
+    """'if TYPE_CHECKING: from audiobook.unitmap import SectionMap as SM' is excluded."""
+    src = tmp_path / "tc_import.py"
+    src.write_text(
+        "from __future__ import annotations\n"
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from audiobook.unitmap import SectionMap as SM\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    aliases = _unitmap_class_aliases(tree, tc_lines, {"SectionMap"})
+    assert "SM" not in aliases, "TYPE_CHECKING import was incorrectly tracked as alias"
+
+
+def test_45_dc_replace_alias_bypass_detected(tmp_path):
+    """'import dataclasses as dc; dc.replace(obj)' is flagged."""
+    src = tmp_path / "dc_bypass.py"
+    src.write_text(
+        "import dataclasses as dc\nfrom audiobook.unitmap import chunk_atoms\ndc.replace(None)\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    dc_mods, _ = _dc_replace_aliases(tree, tc_lines)
+    assert "dc" in dc_mods, "aliased dataclasses module 'dc' not detected"
+
+
+def test_45_replace_func_alias_bypass_detected(tmp_path):
+    """'from dataclasses import replace as repl; repl(obj)' is flagged."""
+    src = tmp_path / "func_bypass.py"
+    src.write_text(
+        "from dataclasses import replace as repl\n"
+        "from audiobook.unitmap import chunk_atoms\n"
+        "repl(None)\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    _, replace_funcs = _dc_replace_aliases(tree, tc_lines)
+    assert "repl" in replace_funcs, "aliased replace function 'repl' not detected"
+
+
+def test_45_chunkspan_alias_bypass_in_src_detected(tmp_path):
+    """'from audiobook.unitmap import ChunkSpan as CS; CS()' in src/ is flagged."""
+    src = tmp_path / "cs_bypass.py"
+    src.write_text(
+        "from audiobook.unitmap import ChunkSpan as CS\nCS()\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tc_lines = _tc_import_linenos(tree)
+    forbidden = _unitmap_class_aliases(tree, tc_lines, {"ChunkSpan"})
+    forbidden.add("ChunkSpan")
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in forbidden
+    ]
+    assert calls, "alias CS() was not detected"
 
 
 # ── #31: map_chunks(, section="01_test") == list(map_section(..., section="01_test").spans) ────────────────────────
