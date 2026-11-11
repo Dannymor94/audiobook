@@ -135,9 +135,9 @@ def test_chunkspan_hashable():
 # ── AnnotationError ───────────────────────────────────────────────────────────
 
 def test_annotation_error_code():
-    e = AnnotationError("NOT_NFC", section="ch01", chunk_id="0001")
+    e = AnnotationError("NOT_NFC", section="01_test", chunk_id="0001")
     assert e.code == "NOT_NFC"
-    assert e.section == "ch01"
+    assert e.section == "01_test"
     assert e.chunk_id == "0001"
     assert e.detail == ""
 
@@ -162,9 +162,9 @@ def test_annotation_error_mismatch_idx_preserved():
 
 def test_annotation_error_message_no_manuscript():
     # error message must not embed raw text — just code and context
-    e = AnnotationError("NOT_NFC", section="ch02", chunk_id="0010")
+    e = AnnotationError("NOT_NFC", section="02_test", chunk_id="0010")
     assert "NOT_NFC" in str(e)
-    assert "ch02" in str(e)
+    assert "02_test" in str(e)
     assert "0010" in str(e)
 
 
@@ -1755,3 +1755,91 @@ def test_37_valid_section_stored_in_subsequent_errors():
     with pytest.raises(AnnotationError) as exc:
         map_section(units, chunks, section="01_test")
     assert exc.value.section == "01_test"
+
+
+# ── #38: AnnotationError constructor boundary sanitization (T15-6C11-3f1b) ───
+
+import inspect
+import logging
+
+
+def test_38_constructor_signature_matches_baseline():
+    """AnnotationError.__init__ signature must match the 06f3ffd baseline exactly."""
+    sig = inspect.signature(AnnotationError.__init__)
+    params = sig.parameters
+    assert list(params.keys()) == ["self", "code", "section", "chunk_id", "detail", "mismatch_idx"]
+    assert str(params["section"].annotation) == "str"
+    assert str(params["chunk_id"].annotation) == "str"
+    assert params["section"].default == ""
+    assert params["chunk_id"].default == ""
+    assert params["detail"].default == ""
+    assert params["mismatch_idx"].default == -1
+
+
+def test_38_dict_section_not_retained():
+    """Direct AnnotationError construction with a dict section must not retain it."""
+    secret = {"SYNTHETIC_SECRET": 1}
+    e = AnnotationError("TEST", section=secret)  # type: ignore[arg-type]
+    assert e.section is not secret
+    assert e.section is None
+    # Must not appear in any string representation
+    assert "SYNTHETIC_SECRET" not in str(e)
+    assert "SYNTHETIC_SECRET" not in repr(e)
+    assert all("SYNTHETIC_SECRET" not in str(a) for a in e.args)
+
+
+def test_38_hostile_section_no_dunder_calls():
+    """Hostile section object whose dunders raise must not cause AnnotationError to crash."""
+    class _Hostile:
+        def __bool__(self): raise RuntimeError("__bool__ invoked")
+        def __str__(self): raise RuntimeError("__str__ invoked")
+        def __repr__(self): raise RuntimeError("__repr__ invoked")
+        def __eq__(self, other): raise RuntimeError("__eq__ invoked")
+        def __hash__(self): raise RuntimeError("__hash__ invoked")
+
+    obj = _Hostile()
+    # Must not raise during construction
+    e = AnnotationError("TEST", section=obj)  # type: ignore[arg-type]
+    assert e.section is None
+
+
+def test_38_invalid_section_not_retained_by_identity():
+    """Invalid section object must not be reachable via any exception attribute."""
+    bad = object()
+    e = AnnotationError("SOME_CODE", section=bad)  # type: ignore[arg-type]
+    for v in vars(e).values():
+        assert v is not bad
+    for a in e.args:
+        assert a is not bad
+
+
+def test_38_invalid_section_no_leak_in_str_repr_args():
+    """str/repr/args for constructor with dict section must not expose the dict."""
+    secret_key = "CONSTRUCTOR_BOUNDARY_SECRET"
+    e = AnnotationError("LEAK_CHECK", section={secret_key: 99})  # type: ignore[arg-type]
+    combined = str(e) + repr(e) + " ".join(str(a) for a in e.args)
+    assert secret_key not in combined
+
+
+def test_38_invalid_section_no_leak_in_logging(caplog):
+    """Logging an AnnotationError with an invalid section must not expose the value."""
+    secret_key = "LOG_LEAK_SECRET"
+    e = AnnotationError("LOG_CHECK", section={secret_key: 1})  # type: ignore[arg-type]
+    with caplog.at_level(logging.ERROR):
+        logging.error("caught: %s", e)
+    assert secret_key not in caplog.text
+
+
+def test_38_valid_section_retained_by_constructor():
+    """Valid section string must be stored unchanged when passed directly."""
+    e = AnnotationError("SOME_CODE", section="01_test", chunk_id="0001")
+    assert e.section == "01_test"
+    assert e.chunk_id == "0001"
+
+
+def test_38_chunk_id_dict_not_retained():
+    """Non-string chunk_id must not be retained."""
+    bad = {"chunk": "secret"}
+    e = AnnotationError("SOME_CODE", chunk_id=bad)  # type: ignore[arg-type]
+    assert e.chunk_id is not bad
+    assert e.chunk_id is None

@@ -99,22 +99,24 @@ class AnnotationError(Exception):
         self,
         code: str,
         *,
-        section: str | None = "",
-        chunk_id: str | None = "",
+        section: str = "",
+        chunk_id: str = "",
         detail: str = "",
         mismatch_idx: int = -1,
     ) -> None:
         self.code = code
         self.reason = code  # backward-compat alias
-        self.section = section
-        self.chunk_id = chunk_id
+        # Sanitize at boundary: never retain invalid/untrusted values.
+        # _section_violation uses only type() and safe str ops — no untrusted dunders.
+        self.section = section if _section_violation(section) is None else None
+        self.chunk_id = chunk_id if type(chunk_id) is str else None
         self.detail = detail
         self.mismatch_idx = mismatch_idx
         parts = []
-        if section:
-            parts.append(f"section={section!r}")
-        if chunk_id:
-            parts.append(f"chunk={chunk_id!r}")
+        if self.section:
+            parts.append(f"section={self.section!r}")
+        if self.chunk_id:
+            parts.append(f"chunk={self.chunk_id!r}")
         if mismatch_idx >= 0:
             parts.append(f"tok={mismatch_idx}")
         if detail:
