@@ -2820,3 +2820,109 @@ def test_44_valid_id_mapping_preserved():
     assert len(result) == 1
     assert result[0].text == "слово"
     assert result is sm.stream[0:1]
+
+
+# ── #46: malformed top-level units/chunks containers ──────────────────────────
+
+_VALID_UNITS = [{"text": "слово"}]
+_VALID_CHUNKS = [{"id": "0001", "n": 1, "text": "слово"}]
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42, ()])
+def test_46_source_atoms_malformed_units(bad_units):
+    """source_atoms() raises MALFORMED_INPUT for non-list units."""
+    with pytest.raises(AnnotationError) as exc:
+        source_atoms(bad_units)
+    assert exc.value.code == "MALFORMED_INPUT"
+    assert exc.value.__cause__ is None
+
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42])
+def test_46_validate_gates_malformed_units(bad_units):
+    """validate_gates() returns MALFORMED_INPUT error for non-list units."""
+    errors = validate_gates(_VALID_CHUNKS, bad_units, section="01_test")
+    assert errors and errors[0].code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_chunks", [None, {}, "string", 42])
+def test_46_validate_gates_malformed_chunks(bad_chunks):
+    """validate_gates() returns MALFORMED_INPUT error for non-list chunks."""
+    errors = validate_gates(bad_chunks, _VALID_UNITS, section="01_test")
+    assert errors and errors[0].code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42])
+def test_46_check_gates_malformed_units(bad_units):
+    """check_gates() raises MALFORMED_INPUT for non-list units."""
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(_VALID_CHUNKS, bad_units, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_chunks", [None, {}, "string", 42])
+def test_46_check_gates_malformed_chunks(bad_chunks):
+    """check_gates() raises MALFORMED_INPUT for non-list chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        check_gates(bad_chunks, _VALID_UNITS, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42])
+def test_46_map_section_malformed_units(bad_units):
+    """map_section() raises MALFORMED_INPUT for non-list units."""
+    with pytest.raises(AnnotationError) as exc:
+        map_section(bad_units, _VALID_CHUNKS, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_chunks", [None, {}, "string", 42])
+def test_46_map_section_malformed_chunks(bad_chunks):
+    """map_section() raises MALFORMED_INPUT for non-list chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        map_section(_VALID_UNITS, bad_chunks, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_units", [None, {}, "string", 42])
+def test_46_map_chunks_malformed_units(bad_units):
+    """map_chunks() raises MALFORMED_INPUT for non-list units."""
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(bad_units, _VALID_CHUNKS, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+@pytest.mark.parametrize("bad_chunks", [None, {}, "string", 42])
+def test_46_map_chunks_malformed_chunks(bad_chunks):
+    """map_chunks() raises MALFORMED_INPUT for non-list chunks."""
+    with pytest.raises(AnnotationError) as exc:
+        map_chunks(_VALID_UNITS, bad_chunks, section="01_test")
+    assert exc.value.code == "MALFORMED_INPUT"
+
+
+def test_46_invalid_section_takes_precedence_over_malformed_units():
+    """INVALID_SECTION raised before MALFORMED_INPUT when section is bad."""
+    with pytest.raises(AnnotationError) as exc:
+        map_section(None, _VALID_CHUNKS, section="bad!")
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_46_invalid_section_takes_precedence_over_malformed_chunks():
+    """INVALID_SECTION raised before MALFORMED_INPUT when section is bad."""
+    with pytest.raises(AnnotationError) as exc:
+        map_section(_VALID_UNITS, None, section="bad!")
+    assert exc.value.code == "INVALID_SECTION"
+
+
+def test_46_valid_inputs_still_work():
+    """Existing valid inputs are unaffected by container guards."""
+    sm = map_section(_VALID_UNITS, _VALID_CHUNKS, section="01_test")
+    assert len(sm.spans) == 1
+    assert sm.spans[0].chunk_id == "0001"
+
+
+def test_46_malformed_input_no_context_disclosure():
+    """MALFORMED_INPUT exception carries no chained context."""
+    try:
+        map_section(None, _VALID_CHUNKS, section="01_test")
+    except AnnotationError as e:
+        assert e.__cause__ is None
+        assert "None" not in str(e)

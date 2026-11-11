@@ -163,6 +163,8 @@ def source_atoms(units: list[dict]) -> tuple[Atom, ...]:
     This is the ONLY function that constructs the stream; map_section() calls it
     and all callers that need the stream must go through here.
     """
+    if not isinstance(units, list):
+        raise AnnotationError("MALFORMED_INPUT") from None
     result: list[Atom] = []
     for uid, unit in enumerate(units):
         result.extend(atoms(unit.get("text", ""), uid))
@@ -184,6 +186,10 @@ def validate_gates(
       EMPTY_CHUNK     — chunk has no non-whitespace atoms
     """
     validate_section(section)
+    if not isinstance(units, list):
+        return [AnnotationError("MALFORMED_INPUT", section=section)]
+    if not isinstance(manifest_chunks, list):
+        return [AnnotationError("MALFORMED_INPUT", section=section)]
     errors: list[AnnotationError] = []
 
     # --- Unit structural + content validation ---
