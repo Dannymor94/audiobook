@@ -74,6 +74,18 @@ AUDIOBOOK_DEVICE=cpu ./run.sh ...  # репетиция Windows на Mac
 
 ---
 
+## unitmap.py — SectionMap construction rules
+
+`SectionMap` (defined in `src/audiobook/unitmap.py`) may only be created by `map_section()`.
+
+- **Direct construction** (`SectionMap(...)`) outside `unitmap.py` is prohibited.
+- **`dataclasses.replace()`** on a `SectionMap` instance, in any file that imports `unitmap`, is prohibited.
+- Imports for type annotations are allowed only under `if TYPE_CHECKING:`.
+
+These rules are enforced by AST guard tests in `tests/test_unitmap_spans.py`.
+
+---
+
 ## INVENTORY_ALGO_VERSION bump rules
 
 `INVENTORY_ALGO_VERSION` в `src/audiobook/stress_fp.py` определяет версию алгоритма инвентаря ударений.

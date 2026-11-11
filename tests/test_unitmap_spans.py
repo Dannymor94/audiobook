@@ -2,7 +2,11 @@
 import unicodedata
 import pytest
 
-from audiobook.unitmap import Atom, ChunkSpan, AnnotationError, atoms, validate_gates, check_gates
+from audiobook.unitmap import (
+    Atom, ChunkSpan, SectionMap, AnnotationError,
+    atoms, source_atoms, validate_gates, check_gates,
+    map_section, map_chunks, chunk_atoms,
+)
 
 
 # ── Atom ──────────────────────────────────────────────────────────────────────
@@ -385,7 +389,7 @@ def test_check_gates_raises_annotation_error_subclass():
 
 # ── map_chunks helpers ────────────────────────────────────────────────────────
 
-from audiobook.unitmap import map_chunks
+# (map_chunks already imported at top)
 
 
 def _mk_chunks(*texts: str) -> list[dict]:
@@ -1018,3 +1022,332 @@ def test_3d_multiple_nonempty_lines_no_trigger():
     """Several nonempty lines separated by single LF/CRLF must PASS."""
     assert not _inner_para_errors("а\nб\nв")
     assert not _inner_para_errors("а\r\nб\r\nв")
+
+
+# ── 6C11-3e: SectionMap and atom provenance ──────────────────────────────────
+
+def _mk_sm(unit_texts, chunk_texts, *, section=""):
+    """Helper: build SectionMap from plain text lists."""
+    units = [{"text": t} for t in unit_texts]
+    chunks = [{"id": f"{i+1:04d}", "n": i + 1, "text": t}
+              for i, t in enumerate(chunk_texts)]
+    return map_section(units, chunks, section=section)
+
+
+# ── #27: Sol ambiguity — same atoms, different provenance by unit split ───────
+
+def test_27_provenance_units_A():
+    """units_A: 'a' in unit 0, 'b c' in unit 1."""
+    units_A = [{"text": "a"}, {"text": "  b c"}]
+    chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
+    sm = map_section(units_A, chunks)
+    ca = chunk_atoms(sm, "0001")
+    assert len(ca) == 3
+    # Explicit provenance: 'a' from unit 0, 'b' and 'c' from unit 1
+    assert ca[0] == Atom("a", 0, 0, 1)
+    assert ca[1] == Atom("b", 1, 2, 3)
+    assert ca[2] == Atom("c", 1, 4, 5)
+
+
+def test_27_provenance_units_B():
+    """units_B: 'a b' in unit 0, 'c' in unit 1."""
+    units_B = [{"text": "a b"}, {"text": "    c"}]
+    chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
+    sm = map_section(units_B, chunks)
+    ca = chunk_atoms(sm, "0001")
+    assert len(ca) == 3
+    # 'a' and 'b' from unit 0, 'c' from unit 1
+    assert ca[0] == Atom("a", 0, 0, 1)
+    assert ca[1] == Atom("b", 0, 2, 3)
+    assert ca[2] == Atom("c", 1, 4, 5)
+
+
+def test_27_different_distributions_different_provenance():
+    """Same chunk text 'a b c' but different unit distributions → different provenance."""
+    units_A = [{"text": "a"}, {"text": "  b c"}]
+    units_B = [{"text": "a b"}, {"text": "    c"}]
+    chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
+    sm_A = map_section(units_A, chunks)
+    sm_B = map_section(units_B, chunks)
+    ca_A = chunk_atoms(sm_A, "0001")
+    ca_B = chunk_atoms(sm_B, "0001")
+    # Different unit_id sequences
+    assert [a.unit_id for a in ca_A] != [a.unit_id for a in ca_B]
+    # Different (unit_id, start, end) triples
+    provA = [(a.unit_id, a.start, a.end) for a in ca_A]
+    provB = [(a.unit_id, a.start, a.end) for a in ca_B]
+    assert provA != provB
+
+
+def test_27_same_input_same_provenance():
+    """Same input always produces the same atom provenance (determinism)."""
+    units_A = [{"text": "a"}, {"text": "  b c"}]
+    chunks = [{"id": "0001", "n": 1, "text": "a b c"}]
+    sm1 = map_section(units_A, chunks)
+    sm2 = map_section(units_A, chunks)
+    assert chunk_atoms(sm1, "0001") == chunk_atoms(sm2, "0001")
+
+
+# ── #28: independent maps retain atom texts; signature check; UNKNOWN_CHUNK ──
+
+def test_28_independent_maps_retain_texts():
+    """Independent SectionMaps for 'abc' and 'xyz' retain respective atom texts."""
+    sm_abc = _mk_sm(["abc def"], ["abc", "def"])
+    sm_xyz = _mk_sm(["xyz uvw"], ["xyz", "uvw"])
+    assert chunk_atoms(sm_abc, "0001")[0].text == "abc"
+    assert chunk_atoms(sm_xyz, "0001")[0].text == "xyz"
+    # Streams are independent — no cross-contamination
+    assert sm_abc.stream[0].text == "abc"
+    assert sm_xyz.stream[0].text == "xyz"
+
+
+def test_28_chunk_atoms_signature():
+    """chunk_atoms() must accept exactly (section_map, chunk_id)."""
+    import inspect
+    sig = inspect.signature(chunk_atoms)
+    params = list(sig.parameters.keys())
+    assert params == ["section_map", "chunk_id"], f"unexpected params: {params}"
+
+
+def test_28_unknown_chunk_id_raises():
+    """Unknown chunk_id → AnnotationError('UNKNOWN_CHUNK')."""
+    sm = _mk_sm(["слово"], ["слово"])
+    with pytest.raises(AnnotationError) as exc:
+        chunk_atoms(sm, "9999")
+    assert exc.value.code == "UNKNOWN_CHUNK"
+
+
+# ── #29: manually specified provenance literals; fuzz boundary check ──────────
+
+def test_29_provenance_three_chunks():
+    """Expected provenance literals for 3 chunks in one unit."""
+    sm = _mk_sm(["а б в"], ["а б", "в"])
+    ca1 = chunk_atoms(sm, "0001")
+    ca2 = chunk_atoms(sm, "0002")
+    assert ca1 == (Atom("а", 0, 0, 1), Atom("б", 0, 2, 3))
+    assert ca2 == (Atom("в", 0, 4, 5),)
+
+
+def test_29_provenance_multi_unit():
+    """Expected provenance literals spanning two units."""
+    sm = _mk_sm(["первый", "второй"], ["первый", "второй"])
+    assert chunk_atoms(sm, "0001") == (Atom("первый", 0, 0, 6),)
+    assert chunk_atoms(sm, "0002") == (Atom("второй", 1, 0, 6),)
+
+
+def test_29_fuzz_atom_text_matches_unit_source():
+    """Fuzz: every atom from chunk_atoms() matches its source unit text exactly."""
+    units = [{"text": "один два три"}, {"text": "четыре пять"}]
+    chunks = [
+        {"id": "0001", "n": 1, "text": "один два"},
+        {"id": "0002", "n": 2, "text": "три четыре"},
+        {"id": "0003", "n": 3, "text": "пять"},
+    ]
+    sm = map_section(units, chunks)
+    for cid in ("0001", "0002", "0003"):
+        for atom in chunk_atoms(sm, cid):
+            unit_text = units[atom.unit_id]["text"]
+            # Text slice must match exactly (no unitmap tokenizer used as reference)
+            assert unit_text[atom.start:atom.end] == atom.text
+            # Whitespace boundary: position before start must be whitespace or start of text
+            assert atom.start == 0 or unit_text[atom.start - 1].isspace()
+            # Whitespace boundary: position at end must be whitespace or end of text
+            assert atom.end == len(unit_text) or unit_text[atom.end].isspace()
+
+
+def test_29_provenance_with_punctuation_atom():
+    """Non-Cyrillic atom (em-dash) has correct provenance."""
+    sm = _mk_sm(["слово — конец"], ["слово", "—", "конец"])
+    assert chunk_atoms(sm, "0002") == (Atom("—", 0, 6, 7),)
+
+
+# ── #30: AST guard — SectionMap construction restrictions ────────────────────
+
+def test_30_ast_no_sectionmap_construction_outside_unitmap():
+    """No runtime SectionMap() construction outside unitmap.py."""
+    import ast
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).parent.parent
+    unitmap_path = repo_root / "src" / "audiobook" / "unitmap.py"
+
+    violations = []
+    all_py = (
+        list((repo_root / "src").rglob("*.py"))
+        + list((repo_root / "tests").rglob("*.py"))
+    )
+
+    for path in all_py:
+        if path == unitmap_path:
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name == "SectionMap":
+                rel = path.relative_to(repo_root)
+                violations.append(
+                    f"{rel}:{node.lineno}: rule 1 — SectionMap() constructed outside unitmap.py"
+                )
+
+    assert not violations, "AST guard violations:\n" + "\n".join(violations)
+
+
+def test_30_ast_no_dataclasses_replace_in_unitmap_importers():
+    """No dataclasses.replace() calls in files that import from unitmap."""
+    import ast
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).parent.parent
+    unitmap_path = repo_root / "src" / "audiobook" / "unitmap.py"
+    all_py = (
+        list((repo_root / "src").rglob("*.py"))
+        + list((repo_root / "tests").rglob("*.py"))
+    )
+
+    violations = []
+    for path in all_py:
+        if path == unitmap_path:
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+
+        imports_unitmap = any(
+            isinstance(n, ast.ImportFrom)
+            and n.module is not None
+            and "unitmap" in n.module
+            for n in ast.walk(tree)
+        )
+        if not imports_unitmap:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # dataclasses.replace(...)
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "replace"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "dataclasses"
+            ):
+                rel = path.relative_to(repo_root)
+                violations.append(
+                    f"{rel}:{node.lineno}: rule 3 — dataclasses.replace() in unitmap importer"
+                )
+
+    assert not violations, "AST guard violations:\n" + "\n".join(violations)
+
+
+def test_30_ast_chunk_atoms_no_tokenization():
+    """chunk_atoms() must not contain tokenization or regex calls."""
+    import ast
+    import pathlib
+
+    unitmap_path = (
+        pathlib.Path(__file__).parent.parent / "src" / "audiobook" / "unitmap.py"
+    )
+    source = unitmap_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    fn_node = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.FunctionDef) and n.name == "chunk_atoms"),
+        None,
+    )
+    assert fn_node is not None, "chunk_atoms() not found in unitmap.py"
+
+    forbidden_calls = {"atoms", "_tokens", "_CYR", "re", "finditer", "findall", "search"}
+    violations = []
+    for node in ast.walk(fn_node):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if name in forbidden_calls:
+            violations.append(f"line {node.lineno}: forbidden call .{name}() in chunk_atoms()")
+
+    assert not violations, "\n".join(violations)
+
+
+# ── #31: map_chunks() == list(map_section(...).spans) ────────────────────────
+
+def test_31_map_chunks_equals_map_section_spans():
+    """map_chunks() elements and order equal map_section(...).spans."""
+    units = [{"text": "а б в г"}, {"text": "д е"}]
+    chunks = [
+        {"id": "0001", "n": 1, "text": "а б"},
+        {"id": "0002", "n": 2, "text": "в г"},
+        {"id": "0003", "n": 3, "text": "д е"},
+    ]
+    result_map_chunks = map_chunks(units, chunks, section="ch01")
+    sm = map_section(units, chunks, section="ch01")
+    assert result_map_chunks == list(sm.spans)
+
+
+def test_31_map_chunks_equals_map_section_single():
+    """Single-chunk case: map_chunks == list(map_section.spans)."""
+    units = [{"text": "слово"}]
+    chunks = [{"id": "0001", "n": 1, "text": "слово"}]
+    assert map_chunks(units, chunks) == list(map_section(units, chunks).spans)
+
+
+# ── SectionMap structure and chunk_atoms basics ───────────────────────────────
+
+def test_sectionmap_is_frozen():
+    sm = _mk_sm(["а"], ["а"])
+    with pytest.raises((AttributeError, TypeError)):
+        sm.section = "other"  # type: ignore[misc]
+
+
+def test_sectionmap_section_field():
+    sm = _mk_sm(["а"], ["а"], section="ch03")
+    assert sm.section == "ch03"
+
+
+def test_sectionmap_stream_contains_all_atoms():
+    sm = _mk_sm(["а б"], ["а", "б"])
+    assert len(sm.stream) == 2
+    assert sm.stream[0].text == "а"
+    assert sm.stream[1].text == "б"
+
+
+def test_sectionmap_spans_count_matches_chunks():
+    sm = _mk_sm(["а б в"], ["а", "б", "в"])
+    assert len(sm.spans) == 3
+
+
+def test_source_atoms_single_implementation():
+    """source_atoms() returns all atoms in unit order."""
+    units = [{"text": "а б"}, {"text": "в"}]
+    sa = source_atoms(units)
+    assert len(sa) == 3
+    assert sa[0] == Atom("а", 0, 0, 1)
+    assert sa[1] == Atom("б", 0, 2, 3)
+    assert sa[2] == Atom("в", 1, 0, 1)
+
+
+def test_source_atoms_matches_map_section_stream():
+    """source_atoms() matches the stream stored in SectionMap."""
+    units = [{"text": "один два"}, {"text": "три"}]
+    chunks = [{"id": "0001", "n": 1, "text": "один два три"}]
+    sm = map_section(units, chunks)
+    assert sm.stream == source_atoms(units)

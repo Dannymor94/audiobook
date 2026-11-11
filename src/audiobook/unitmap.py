@@ -1,10 +1,14 @@
 """Recover source unit identity and chunk kind via Cyrillic token-index alignment.
 
 Public API:
-  Atom, ChunkSpan                                      — data structures
+  Atom, ChunkSpan, SectionMap                          — data structures
+  source_atoms(units) -> tuple[Atom, ...]              — build ordered source atom stream
   atoms(unit_text, unit_id) -> list[Atom]              — non-whitespace atom extractor
   validate_gates(chunks, units, *, section) -> list[AnnotationError]
   check_gates(chunks, units, *, section) -> None       — raises on first gate error
+  map_section(units, chunks, *, section) -> SectionMap — map chunks with full provenance
+  map_chunks(units, chunks, *, section) -> list[ChunkSpan]
+  chunk_atoms(section_map, chunk_id) -> tuple[Atom, ...]
   annotate_units(manifest_chunks, units, *, section="") -> list[dict]
   find_exact_in_unit(key, unit_text, *, orig_lb, orig_ub) -> list[tuple[int, int]]
   AnnotationError
@@ -36,7 +40,7 @@ class Atom:
 
 @dataclass(frozen=True)
 class ChunkSpan:
-    """Architect-approved view of a mapped chunk; populated by map_chunks() (future).
+    """Architect-approved view of a mapped chunk.
 
     Fields:
       chunk_id   — manifest chunk id string (e.g. "0001")
@@ -54,6 +58,24 @@ class ChunkSpan:
     unit_ids: frozenset[int]
     kind: str
     end_modes: frozenset[str] | None
+
+
+@dataclass(frozen=True)
+class SectionMap:
+    """Immutable record associating a source atom stream with its chunk spans.
+
+    May only be created by map_section().  Direct construction and
+    dataclasses.replace() outside unitmap.py are prohibited.
+
+    Fields:
+      section — section slug passed to map_section() (empty string if omitted)
+      stream  — ordered tuple of all source Atoms for the section
+      spans   — one ChunkSpan per chunk, in manifest order; atom_start/atom_end
+                index into stream
+    """
+    section: str
+    stream: tuple[Atom, ...]
+    spans: tuple[ChunkSpan, ...]
 
 
 class AnnotationError(Exception):
@@ -100,6 +122,18 @@ class AnnotationError(Exception):
 def atoms(unit_text: str, unit_id: int) -> list[Atom]:
     """Return one Atom per non-whitespace token with its original offsets."""
     return [Atom(m.group(), unit_id, m.start(), m.end()) for m in re.finditer(r"\S+", unit_text)]
+
+
+def source_atoms(units: list[dict]) -> tuple[Atom, ...]:
+    """Build the ordered source atom stream from all units.
+
+    This is the ONLY function that constructs the stream; map_section() calls it
+    and all callers that need the stream must go through here.
+    """
+    result: list[Atom] = []
+    for uid, unit in enumerate(units):
+        result.extend(atoms(unit.get("text", ""), uid))
+    return tuple(result)
 
 
 def validate_gates(
@@ -188,32 +222,29 @@ def check_gates(
         raise errors[0]
 
 
-def map_chunks(
+def map_section(
     units: list[dict],
     chunks: list[dict],
     *,
     section: str = "",
-) -> list[ChunkSpan]:
-    """Map manifest chunks to source atoms, returning one ChunkSpan per chunk.
+) -> SectionMap:
+    """Map manifest chunks to source atoms, returning a SectionMap with full provenance.
 
-    Algorithm: build an ordered atom stream from all units, then advance a
+    Algorithm: build the ordered atom stream via source_atoms(), then advance a
     single global cursor by each chunk's atom count.  Comparison is exact
     codepoint equality — no normalization, no Cyrillic filtering.
 
     Raises AnnotationError with codes:
-      ATOM_MISMATCH    — chunk atom text ≠ source atom text at cursor position
-      STREAM_EXHAUSTED — chunk needs atoms past the end of the source stream
-      TRAILING_SOURCE  — source atoms remain after all chunks are consumed
-      KIND_AMBIGUOUS   — chunk spans atoms from units with different kinds
+      ATOM_MISMATCH       — chunk atom text ≠ source atom text at cursor position
+      STREAM_EXHAUSTED    — chunk needs atoms past the end of the source stream
+      TRAILING_SOURCE     — source atoms remain after all chunks are consumed
+      KIND_AMBIGUOUS      — chunk spans atoms from units with different kinds
+      SPAN_STREAM_MISMATCH — internal invariant: built spans don't match stream slice
       (gate codes via check_gates before cursor processing)
     """
     check_gates(chunks, units, section=section)
 
-    # Build ordered source atom stream from all units.
-    source_atoms: list[Atom] = []
-    for uid, unit in enumerate(units):
-        source_atoms.extend(atoms(unit.get("text", ""), uid))
-
+    stream = source_atoms(units)
     unit_kinds = [_unit_kind(u) for u in units]
 
     result: list[ChunkSpan] = []
@@ -221,18 +252,18 @@ def map_chunks(
 
     for chunk in chunks:
         chunk_id = str(chunk.get("id", ""))
-        chunk_atoms = atoms(chunk.get("text", ""), -1)
-        n = len(chunk_atoms)
+        catoms = atoms(chunk.get("text", ""), -1)
+        n = len(catoms)
 
         seen_unit_ids: set[int] = set()
         seen_kinds: set[str] = set()
         spans_list: list[tuple[int, int]] = []
 
         for j in range(n):
-            if cursor + j >= len(source_atoms):
+            if cursor + j >= len(stream):
                 raise AnnotationError("STREAM_EXHAUSTED", section=section, chunk_id=chunk_id)
-            src = source_atoms[cursor + j]
-            if src.text != chunk_atoms[j].text:
+            src = stream[cursor + j]
+            if src.text != catoms[j].text:
                 raise AnnotationError("ATOM_MISMATCH", section=section, chunk_id=chunk_id)
             seen_unit_ids.add(src.unit_id)
             seen_kinds.add(unit_kinds[src.unit_id])
@@ -241,7 +272,7 @@ def map_chunks(
         if len(seen_kinds) > 1:
             raise AnnotationError("KIND_AMBIGUOUS", section=section, chunk_id=chunk_id)
 
-        result.append(ChunkSpan(
+        cs = ChunkSpan(
             chunk_id=chunk_id,
             atom_start=cursor,
             atom_end=cursor + n,
@@ -249,13 +280,49 @@ def map_chunks(
             unit_ids=frozenset(seen_unit_ids),
             kind=next(iter(seen_kinds)),
             end_modes=None,
-        ))
+        )
+
+        # Defensive invariant: built spans must match stream slice.
+        for j, (s, e) in enumerate(cs.spans):
+            atom = stream[cs.atom_start + j]
+            if atom.start != s or atom.end != e:
+                raise AnnotationError("SPAN_STREAM_MISMATCH", section=section, chunk_id=chunk_id)
+
+        result.append(cs)
         cursor += n
 
-    if cursor < len(source_atoms):
+    if cursor < len(stream):
         raise AnnotationError("TRAILING_SOURCE", section=section)
 
-    return result
+    return SectionMap(section=section, stream=stream, spans=tuple(result))
+
+
+def map_chunks(
+    units: list[dict],
+    chunks: list[dict],
+    *,
+    section: str = "",
+) -> list[ChunkSpan]:
+    """Map manifest chunks to source atoms, returning one ChunkSpan per chunk.
+
+    Delegates to map_section(); preserves all existing cursor semantics, gates,
+    error precedence and diagnostic privacy.
+    """
+    return list(map_section(units, chunks, section=section).spans)
+
+
+def chunk_atoms(section_map: SectionMap, chunk_id: str) -> tuple[Atom, ...]:
+    """Return the exact stored atom slice for a known chunk_id.
+
+    Looks up chunk_id in section_map.spans and slices section_map.stream.
+    Does not tokenize, search, realign or access chunk text.
+
+    Raises AnnotationError("UNKNOWN_CHUNK") for an unrecognised chunk_id.
+    """
+    for cs in section_map.spans:
+        if cs.chunk_id == chunk_id:
+            return section_map.stream[cs.atom_start:cs.atom_end]
+    raise AnnotationError("UNKNOWN_CHUNK", section=section_map.section, chunk_id=chunk_id)
 
 
 def _tokens(text: str) -> list[str]:
