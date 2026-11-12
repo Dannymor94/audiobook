@@ -1,6 +1,6 @@
 # T15-7 — Execution Plan: Capability-Sized Work Packages
 
-**Status:** COORDINATOR PLAN; pending a narrow update to the final ADR's per-task review rule before batching replaces that rule.  
+**Status:** APPROVED OPERATIONAL PLAN — owner-authorized risk-based Sol review is now reflected in the Final ADR §§12–13.  
 **Date:** 2026-11-12  
 **Repository:** `Dannymor94/audiobook`  
 **Branch:** `task/T15`  
@@ -20,10 +20,10 @@
 - **Production 6C11, TD-1–TD-4:** CLOSED. Do not re-audit.
 - **Final T15-7 ADR:** approved after independent acceptance.
 - **T15-7.0b (ignore local gold files):** independent Sol PASS on `7cb8688589f81992c8c4e50cb04e9996e7c2b533`; task metadata still says `review`; synchronize to `done` before 7.1a.
-- **T15-7.0d:** read-only scouting assigned to Sol via `tasks/T15-7.0d-SCOUT.md`; report pending.
+- **T15-7.0d:** independent read-only scouting PASS (D1–D6); 56/56 mapped, 4,624 units, 5,127 chunks, 77,998/77,998 consumed atoms, 1293 passed and 5 skipped; no blockers. Sol report received 2026-11-12.
 - **T15-7.0c / B1:** offline RUAccent probes reported; their pinned reproducibility evidence still needs independent acceptance for dependent tasks.
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
-- **T15-7.1a onward:** not yet authorized.
+- **T15-7 WP-1 (7.1a + 7.2):** coordinator preparing bounded Sonnet execution after reconciling task metadata; other packages remain unauthorized.
 
 ## Workload and review strategy
 
@@ -37,7 +37,7 @@ Package work into approximately two adjacent implementation tasks (up to three i
 
 Use an immediate extra Sol review only for a reproducible regression, a privacy/hash/cache invariant failure, conflicting source evidence, or nontrivial contract change. Pure documentation/status updates with an exact, auditable diff do not automatically require another full test/review cycle. Synthetic and offline tests are still required even if an independent review is deferred.
 
-**Normative process conflict:** The approved ADR §12/§13 currently requires `Sol review at a pinned SHA before the next task`. Before authorizing execution across original task boundaries without intervening Sol review, obtain a narrowly scoped procedural correction to this one rule (owner-approved risk gates above) and verify it does not weaken any technical acceptance or STOP condition. No revised implementation permissions are implied until then.
+**Process alignment:** The Final ADR §§12–13 has been updated to permit owner-authorized, risk-based Sol reviews at work-package boundaries. All original technical contracts, per-subtask tests, STOP conditions and privacy/cache gates remain mandatory. Each package still requires explicit coordinator execution authorization.
 
 ## Work packages
 
@@ -46,7 +46,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Components:** 7.0b PASS, 7.0d assigned, 7.0c evidence / B1, 7.0e snapshot evidence / B2.  
 **Lead:** Sol for read-only checks; Coordinator for gate decisions.  
 **Output:** stable input contracts for WP-1 and explicit residual blockers.  
-**Exit:** 7.0b status synchronized; 7.0d PASS or exact bounded blocker; approved ADR unchanged.
+**Exit:** 7.0b Sol PASS; 7.0d PASS; current technical ADR contracts unchanged (only review cadence amended by owner direction). Synchronize stale 7.0b task metadata during the next authorized write, then execute WP-1.
 
 ### WP-1 — Reproduce and trace the existing TTS input
 
