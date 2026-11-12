@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP2-FIX
 title: Correct SU fragment provenance, stress facts, fingerprints and TSV validation
-status: review
+status: done
 owner: codex-gpt-6
 agent: claude-code
 branch: task/T15
