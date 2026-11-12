@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP2-WP3-TRANSITION
 title: Record completed Sol WP-2 acceptance and verify RUAccent offline gate B1
-status: todo
+status: done
 owner:
 agent: codex
 branch: task/T15
