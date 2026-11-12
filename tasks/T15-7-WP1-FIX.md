@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP1-FIX
 title: Repair enum equivalence and config dependency enforcement in WP-1
-status: todo
+status: review
 owner:
 agent: claude-code
 branch: task/T15
@@ -134,3 +134,57 @@ NEXT_WORK_PACKAGE_STARTED: NO
 ```
 
 **STOP after reporting. WP-2 remains HOLD until independent Sol acceptance.**
+
+---
+
+## Delivery Report
+
+```text
+TASK: T15-7-WP1-FIX
+STATUS: PASS
+BASE_SHA: cc8d0706ba2cdd3da3196c5bdffdfc44a527dfb9
+FINAL_REMOTE_SHA: aee1150d4ba866e53db2a560ac5635b89a8873eb
+R1_SINGLETON_ENUM: FIXED — trace_section branches on len(frags)==1 to use
+  row["text"] / row_leadin(row) / open_end directly, mirroring production.
+  Regression: test_r1_singleton_enum_uses_row_text confirms row_text ≠ frags[0][0]
+  and that trace final_sha256 matches production, not frag path.
+R2_MULTI_FRAGMENT_BASELINE: FIXED — _capture_section now calls chunk_fragments
+  and branches singleton vs multi-fragment identically to production.
+  For current config (enum_pause_ms=0) all rows are singleton → D unchanged.
+  Regression: test_r2_enum_fake_engine_oracle (independent fake-engine oracle,
+  3 fragments), test_r2_fixture_capture_matches_oracle, test_r2_singleton_fixture_uses_row_text.
+R3_NESTED_CONFIG_GUARD: FIXED — _KeyRecordingConfig replaced by _DeepRecordingConfig:
+  pure wrapper, nested dict access returns new wrapper sharing _accessed set,
+  records full dotted paths (e.g. "text_prep.strip_quotes", "pauses_ms.enum_pause_ms").
+  cfg passed to chunk_fragments. Allowlist DECLARED_CONFIG_PATHS updated to dotted paths.
+  Regressions: test_r3_nested_path_recorded, test_r3_nested_unknown_fails_closed,
+  test_r3_pauses_ms_recorded, test_r3_full_trace_no_unexpected, test_r3_unexpected_key_raises.
+BASELINE_D_MATCH: 0346b71f7b3f3c2078a144b56a8374a8998bf6b722d25af1fe0ce2a07ec1a5d6
+  Verified by test_baseline_d_matches_accepted (skipped when S2 absent).
+ALL_56_SECTIONS_SU_MATCH: Covered by test_sutrace_matches_baseline_all_sections
+  (skipped when S2 absent; enforces 5127 SUs, 0 non-ok).
+ENUM_FAKE_ENGINE_ORACLE: PASS — test_r2_enum_fake_engine_oracle independently
+  calls _synth_one_chunk with FakeEngine, verifies 3 engine.calls match oracle
+  final/phrase sha256.
+NONE_VS_EMPTY: Covered by test_phrase_none_vs_empty (pre-existing, unmodified).
+NON_OK_STATUSES: 0 non-ok in synthetic tests; full corpus gate in N1 test.
+TESTS_ADDED: 13 new tests (R1×1, R2×3, R3×5, N1×2 + baseline_d alias)
+TEST_ARITHMETIC: 1316 passed, 5 skipped (prev: 1303 passed, 5 skipped)
+FOCUSED_PYTEST: uv run pytest tests/test_sutrace.py -q → 23 passed
+FULL_PYTEST: uv run pytest -q → 1316 passed, 5 skipped
+DETERMINISM: All synthetic tests are deterministic (no model/random dependency)
+P1_P4_PRIVACY: P4 staged set = {sutrace.py, t15_7_fixture.py, test_sutrace.py} only.
+  No corpus text, hashes, audio or S2 paths. P1 guard unchanged in fixture.
+PRODUCTION_IMPORT_GUARD: test_ast_no_import_of_sutrace passes (unchanged).
+GIT_DIFF_CHECK: clean
+CHANGED_TRACKED_FILES:
+  src/audiobook/sutrace.py
+  tests/helpers/t15_7_fixture.py
+  tests/test_sutrace.py
+  tasks/T15-7-WP1-FIX.md (status + this report)
+COMMIT_SHA: aee1150d4ba866e53db2a560ac5635b89a8873eb
+PUSH_CONFIRMED: YES — cc8d070..aee1150 task/T15 -> task/T15
+BLOCKERS: none
+SOL_REVIEW_REQUIRED: YES — ONE TARGETED REVIEW
+NEXT_WORK_PACKAGE_STARTED: NO
+```
