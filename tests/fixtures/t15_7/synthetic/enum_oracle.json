@@ -1,0 +1,56 @@
+{
+  "description": "Synthetic enum oracle for T15-7 test; no manuscript text",
+  "config": {
+    "text_prep": {
+      "strip_quotes": false,
+      "ensure_terminal": false
+    },
+    "render": {
+      "leadin": {
+        "phrase": "Carry.",
+        "max_chars": 20
+      }
+    },
+    "pauses_ms": {
+      "enum_pause_ms": 100,
+      "sentence": 200
+    },
+    "model": {
+      "name": "test",
+      "sentinel": " ."
+    }
+  },
+  "text": "Alpha, bravo, charlie?",
+  "fragments": [
+    {
+      "fragment": 0,
+      "frag_text": "Alpha",
+      "final": "Carry. Alpha .",
+      "phrase": "Carry.",
+      "final_sha256": "712c167d9c04d723380404538011f50a5397d6394e20cdd60630ee60f7314e1c",
+      "phrase_sha256": "63d771bbd063fe92bd41f9ca467e3006d47ef72b9ba493eda46259cc5b758590",
+      "pause_ms": 100,
+      "is_enum": true
+    },
+    {
+      "fragment": 1,
+      "frag_text": "bravo",
+      "final": "Carry. bravo .",
+      "phrase": "Carry.",
+      "final_sha256": "38e898d47065097f4db3159a4487757763d29bf0432398797807d2814ebf5731",
+      "phrase_sha256": "63d771bbd063fe92bd41f9ca467e3006d47ef72b9ba493eda46259cc5b758590",
+      "pause_ms": 100,
+      "is_enum": true
+    },
+    {
+      "fragment": 2,
+      "frag_text": "charlie",
+      "final": "Carry. charlie .",
+      "phrase": "Carry.",
+      "final_sha256": "2e30cd75efe82637d1699683b219916a5359ecc7f72082ec4054f5359a09580e",
+      "phrase_sha256": "63d771bbd063fe92bd41f9ca467e3006d47ef72b9ba493eda46259cc5b758590",
+      "pause_ms": 0,
+      "is_enum": true
+    }
+  ]
+}
