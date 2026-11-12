@@ -504,9 +504,15 @@ Rules:
 ══════════════════════════════════════════════════════════════
 12. IMPLEMENTATION TASKS
 ══════════════════════════════════════════════════════════════
-Every implementation task: test arithmetic «base N + added M (+ modified K) =
+Every implementation subtask: test arithmetic «base N + added M (+ modified K) =
 total», exact pytest command and result on the SHA, P4 privacy check, C2-a where
-code changes, Sol review at a pinned SHA before the next task.
+code changes. Per explicit owner authorization (2026-11-12), adjacent subtasks
+may run within one approved work package after their local acceptance and STOP
+gates pass. Independent Sol review is required at the pinned work-package exit
+SHA, before the NEXT work package, not automatically between its internal steps.
+The approved package boundaries and risk-triggered earlier review conditions are
+in tasks/T15-7-EXECUTION-PLAN.md. Critical failures stop immediately; batching
+does not waive any per-subtask acceptance, privacy, fingerprint or cache gate.
 
 T15-7.0b  Class: WRITE (repo), needs explicit authorization + Sol review
   Deps: none. Files: .gitignore.
@@ -629,10 +635,11 @@ T15-7.9  Class: REPO READ-ONLY; score/report outputs written only under ignored
 H04  Owner labels the todo (~320 rows) and runs merge. Deps: 7.7.
 
 ══════════════════════════════════════════════════════════════
-13. INDEPENDENT QA (Sol, per task at a pinned SHA)
+13. INDEPENDENT QA (Sol at approved work-package exits, pinned SHA)
 ══════════════════════════════════════════════════════════════
-- Regenerate S2 at baseline (--check), compare D and counts; C2-a identical after
-  each task; impact == baseline value.
+- Sonnet verifies S2 at baseline (--check), D, counts and C2-a after EACH internal
+  task; Sol independently regenerates and verifies at the pinned work-package exit
+  SHA. Impact remains equal to the frozen baseline value.
 - Mutation tests for every fingerprint domain, including status-only invariance.
 - Key-recording guard on the real corpus.
 - S1 literal oracle for links and round trip; one test per §9 row.
