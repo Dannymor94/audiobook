@@ -41,18 +41,10 @@ def _make_trace(chunk_id, prep_text, pad_len=0, matches=None, status="ok"):
     )
 
 
-def _run(units, chunks, traces_by_unit=None, section="01_test"):
-    """build_section_provenance returns list[WordOcc]."""
-    from audiobook.wordprov import build_section_provenance
-    return build_section_provenance(section, units, chunks, traces_by_unit)
-
-
-def _ana_text(units, occs):
-    """Reconstruct analysis text from occ form_analysis values."""
-    from audiobook.wordprov import build_analysis_text
-    fm = {(int(o.unit_id), o.norm_start, o.norm_end): o.form_analysis for o in occs}
-    ana, _ = build_analysis_text(units, fm)
-    return ana
+def _run(units, chunks, traces=None, section="01_test"):
+    """process_section_occs returns (occs, ana_text, offset_map)."""
+    from audiobook.wordprov import process_section_occs
+    return process_section_occs(section, units, chunks, traces)
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +58,10 @@ def test_check_source_marks_clean():
 
 
 def test_check_source_marks_found():
-    from audiobook.wordprov import check_source_marks, SourceMarkError
+    from audiobook.wordprov import check_source_marks
+    from audiobook.unitmap import AnnotationError
     units = [_make_unit("Приве́т")]  # U+0301 stress mark
-    with pytest.raises(SourceMarkError):
+    with pytest.raises(AnnotationError):
         check_source_marks(units, section="01_test")
 
 
@@ -79,7 +72,7 @@ def test_check_source_marks_found():
 def test_la_link():
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
-    occs = _run(units, chunks)
+    occs, _, _ = _run(units, chunks)
     assert len(occs) == 2
     for occ in occs:
         uid = int(occ.unit_id)
@@ -87,10 +80,9 @@ def test_la_link():
 
 
 def test_la_link_nonalpha_prefix():
-    """«Мир has word at offset inside atom; L-a still holds."""
     units = [_make_unit("«Мир добра»")]
     chunks = [_make_chunk(1, "«Мир добра»")]
-    occs = _run(units, chunks)
+    occs, _, _ = _run(units, chunks)
     for occ in occs:
         uid = int(occ.unit_id)
         assert units[uid]["text"][occ.norm_start:occ.norm_end] == occ.form_source
@@ -104,7 +96,7 @@ def test_lb_link():
     from audiobook.unitmap import map_section
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
-    occs = _run(units, chunks)
+    occs, _, _ = _run(units, chunks)
     sm = map_section(units, chunks, section="01_test")
     for occ in occs:
         atom_text = sm.stream[occ.atom_index].text
@@ -118,7 +110,6 @@ def test_lb_link():
 def test_lc_link():
     from audiobook.wordprov import build_analysis_text
     units = [_make_unit("Привет мир"), _make_unit("Снова привет")]
-    # build_analysis_text with no substitutions puts all words in offset_map
     ana_text, offset_map = build_analysis_text(units, {})
     assert "\n" in ana_text
     import re
@@ -141,12 +132,10 @@ def test_lc_link_with_substitution():
 
 
 def test_lc_link_via_provenance():
-    """build_section_provenance fills ana_start/ana_end correctly (L-c)."""
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
     trace = _make_trace("0001", "Привет мир")
-    occs = _run(units, chunks, {0: [trace]})
-    ana_text = _ana_text(units, occs)
+    occs, ana_text, _ = _run(units, chunks, [trace])
     for occ in occs:
         assert ana_text[occ.ana_start:occ.ana_end] == occ.form_analysis
 
@@ -160,8 +149,8 @@ def test_source_key_stability_under_manifest_change():
     chunks_v1 = [_make_chunk(1, "Тест слово")]
     chunks_v2 = [_make_chunk(1, "Тест слово", pause_after_ms=500)]
 
-    occs1 = _run(units, chunks_v1)
-    occs2 = _run(units, chunks_v2)
+    occs1, _, _ = _run(units, chunks_v1)
+    occs2, _, _ = _run(units, chunks_v2)
     for o1, o2 in zip(occs1, occs2):
         assert o1.source_key == o2.source_key
 
@@ -169,12 +158,12 @@ def test_source_key_stability_under_manifest_change():
 def test_source_key_format():
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
-    occs = _run(units, chunks)
+    occs, _, _ = _run(units, chunks)
     for occ in occs:
         parts = occ.source_key.split("|")
         assert len(parts) == 3
         assert parts[0] == "01_test"
-        assert parts[1] == str(int(parts[1]))  # decimal string of int
+        assert parts[1] == str(int(parts[1]))
 
 
 # ---------------------------------------------------------------------------
@@ -191,9 +180,8 @@ def test_source_fp_stable():
 
 def test_source_fp_changes_on_unit_text():
     from audiobook.wordprov import source_fp
-    units_a = [_make_unit("Привет мир")]
-    units_b = [_make_unit("Привет свет")]
-    assert source_fp({"01_test": units_a}) != source_fp({"01_test": units_b})
+    assert source_fp({"01_test": [_make_unit("Привет мир")]}) != \
+           source_fp({"01_test": [_make_unit("Привет свет")]})
 
 
 def test_source_fp_changes_on_excluded_sections():
@@ -206,19 +194,15 @@ def test_source_fp_changes_on_excluded_sections():
 
 def test_source_fp_stable_across_section_order():
     from audiobook.wordprov import source_fp
-    units_a = [_make_unit("Раз")]
-    units_b = [_make_unit("Два")]
-    fp1 = source_fp({"01_a": units_a, "02_b": units_b})
-    fp2 = source_fp({"02_b": units_b, "01_a": units_a})
+    fp1 = source_fp({"01_a": [_make_unit("Раз")], "02_b": [_make_unit("Два")]})
+    fp2 = source_fp({"02_b": [_make_unit("Два")], "01_a": [_make_unit("Раз")]})
     assert fp1 == fp2
 
 
 def test_source_fp_does_not_include_manifest():
     from audiobook.wordprov import source_fp
     units = [_make_unit("Слово")]
-    fp1 = source_fp({"01_a": units})
-    fp2 = source_fp({"01_a": units})
-    assert fp1 == fp2
+    assert source_fp({"01_a": units}) == source_fp({"01_a": units})
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +260,6 @@ def test_gold_identity_neighbor_stale():
 
 
 def test_gold_identity_distant_stable():
-    """Adding a unit beyond the context window does not change context_sha256."""
     from audiobook.wordprov import gold_identity
     units_a = [_make_unit("Начало"), _make_unit("Привет мир"), _make_unit("Конец")]
     units_b = [_make_unit("Начало"), _make_unit("Привет мир"), _make_unit("Конец"), _make_unit("Дополнительно")]
@@ -287,10 +270,8 @@ def test_gold_identity_distant_stable():
 
 def test_gold_identity_context_changes_on_text_edit():
     from audiobook.wordprov import gold_identity
-    units_a = [_make_unit("Привет мир")]
-    units_b = [_make_unit("Привет свет")]
-    gi_a = gold_identity("01_test", units_a, unit_id=0, unit_token_index=0)
-    gi_b = gold_identity("01_test", units_b, unit_id=0, unit_token_index=0)
+    gi_a = gold_identity("01_test", [_make_unit("Привет мир")], 0, 0)
+    gi_b = gold_identity("01_test", [_make_unit("Привет свет")], 0, 0)
     assert gi_a["context_sha256"] != gi_b["context_sha256"]
 
 
@@ -302,7 +283,7 @@ def test_alignment_exact():
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
     trace = _make_trace("0001", "Привет мир")
-    occs = _run(units, chunks, {0: [trace]})
+    occs, _, _ = _run(units, chunks, [trace])
     for occ in occs:
         assert occ.alignment_status == "aligned"
         assert occ.su_chunk_id == "0001"
@@ -313,7 +294,7 @@ def test_alignment_fold_yo():
     units = [_make_unit("Идет")]
     chunks = [_make_chunk(1, "Идет")]
     trace = _make_trace("0001", "Идёт")
-    occs = _run(units, chunks, {0: [trace]})
+    occs, _, _ = _run(units, chunks, [trace])
     assert occs[0].alignment_status == "aligned"
     assert occs[0].form_synth == "Идёт"
     assert occs[0].form_analysis == "Идёт"
@@ -322,29 +303,35 @@ def test_alignment_fold_yo():
 def test_alignment_no_trace_unsupported():
     units = [_make_unit("Привет")]
     chunks = [_make_chunk(1, "Привет")]
-    occs = _run(units, chunks, traces_by_unit=None)
+    occs, _, _ = _run(units, chunks, traces=None)
     assert occs[0].alignment_status == "trace_unsupported"
     assert occs[0].su_chunk_id is None
 
 
-def test_alignment_mismatch():
-    """Non-matching token → trace_mismatch."""
+def test_alignment_fragment_mismatch():
+    units = [_make_unit("Привет мир")]
+    chunks = [_make_chunk(1, "Привет мир")]
+    trace = _make_trace("0001", "Привет")  # one word instead of two
+    occs, _, _ = _run(units, chunks, [trace])
+    for occ in occs:
+        assert occ.alignment_status == "fragment_mismatch"
+        assert occ.su_chunk_id is None
+
+
+def test_alignment_prep_token_mismatch():
     units = [_make_unit("Привет")]
     chunks = [_make_chunk(1, "Привет")]
-    trace = _make_trace("0001", "Пока")
-    occs = _run(units, chunks, {0: [trace]})
-    assert occs[0].alignment_status == "trace_mismatch"
-    assert occs[0].su_chunk_id is None
+    trace = _make_trace("0001", "Пока")  # different word
+    occs, _, _ = _run(units, chunks, [trace])
+    assert occs[0].alignment_status == "prep_token_mismatch"
 
 
 def test_alignment_unaligned_uses_form_source():
     units = [_make_unit("Привет")]
     chunks = [_make_chunk(1, "Привет")]
     trace = _make_trace("0001", "Пока")
-    occs = _run(units, chunks, {0: [trace]})
+    occs, ana_text, _ = _run(units, chunks, [trace])
     assert occs[0].form_analysis == "Привет"
-    # L-c on unaligned
-    ana_text = _ana_text(units, occs)
     assert ana_text[occs[0].ana_start:occs[0].ana_end] == "Привет"
 
 
@@ -374,8 +361,7 @@ def test_ana_text_multi_unit_lc():
     chunks = [_make_chunk(1, "Первый"), _make_chunk(2, "Второй")]
     t1 = _make_trace("0001", "Первый")
     t2 = _make_trace("0002", "Второй")
-    occs = _run(units, chunks, {0: [t1], 1: [t2]})
-    ana_text = _ana_text(units, occs)
+    occs, ana_text, _ = _run(units, chunks, [t1, t2])
     assert "\n" in ana_text
     for occ in occs:
         assert ana_text[occ.ana_start:occ.ana_end] == occ.form_analysis
@@ -390,7 +376,7 @@ def test_round_trip_tsv():
     units = [_make_unit("Привет мир")]
     chunks = [_make_chunk(1, "Привет мир")]
     trace = _make_trace("0001", "Привет мир")
-    occs = _run(units, chunks, {0: [trace]})
+    occs, _, _ = _run(units, chunks, [trace])
     for occ in occs:
         row_str = serialize_occ(occ)
         parsed = parse_occ_row(row_str)
@@ -408,7 +394,7 @@ def test_round_trip_null_fields():
     units = [_make_unit("Привет")]
     chunks = [_make_chunk(1, "Привет")]
     trace = _make_trace("0001", "Пока")
-    occs = _run(units, chunks, {0: [trace]})
+    occs, _, _ = _run(units, chunks, [trace])
     occ = occs[0]
     assert occ.su_chunk_id is None
     parsed = parse_occ_row(serialize_occ(occ))
@@ -420,7 +406,7 @@ def test_round_trip_full_serialize():
     from audiobook.wordprov import serialize_tsv, parse_tsv
     units = [_make_unit("Тест")]
     chunks = [_make_chunk(1, "Тест")]
-    occs = _run(units, chunks)
+    occs, _, _ = _run(units, chunks)
     text = serialize_tsv(occs)
     restored = parse_tsv(text)
     assert len(restored) == len(occs)
