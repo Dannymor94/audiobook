@@ -19,5 +19,8 @@ out/
 # (chNN.txt/.norm/.acc, read_rules.yaml, pronounce.yaml) is committed.
 text/*.docx
 
+# T15-7 gold/todo/archive/transaction files (S4): local only, never tracked
+/text/stress_gold*.tsv
+
 # macOS cruft
 .DS_Store
