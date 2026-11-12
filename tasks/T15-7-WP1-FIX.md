@@ -6,7 +6,7 @@ owner:
 agent: claude-code
 branch: task/T15
 order: 9
-depends_on: [T15-7-WP1]
+depends_on: []  # corrective task for WP-1 while WP-1 is in review
 ---
 
 # T15-7 WP-1 FIX — Close Independent Findings R1–R3
