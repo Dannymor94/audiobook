@@ -4,6 +4,10 @@ Public API consumed by T17 (stress-sheet):
   INVENTORY_ALGO_VERSION  — bump when output format or classification logic changes
   stress_params(cfg)      — extract typed stress config from full config dict
   load_current(stress_dir) — read current.json, verify SHA, return summary dict
+
+T15-7.3 additions (re-exported from wordprov):
+  source_fp   — §5 SHA-256 of canonical source units representation
+  manifest_fp — §5 SHA-256 of canonical analytic manifest fields
 """
 from __future__ import annotations
 
@@ -56,3 +60,7 @@ def load_current(stress_dir: Path) -> dict | None:
             f"  actual:   {actual_sha}"
         )
     return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
+# T15-7.3: fingerprint functions — implemented in wordprov, re-exported here.
+from audiobook.wordprov import source_fp, manifest_fp  # noqa: E402, F401
