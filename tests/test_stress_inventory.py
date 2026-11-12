@@ -18,6 +18,19 @@ import pytest
 from unittest.mock import patch
 
 
+@pytest.fixture(autouse=True)
+def isolate_new_advisory_layer(monkeypatch):
+    """Keep legacy TSV/recovery tests model-free; v5 integration has its own suite."""
+    from audiobook import stress_inventory, stress_fp
+    from audiobook.wordprov import serialize_tsv
+    monkeypatch.setattr(stress_fp, "private_output_guard", lambda _: None)
+    monkeypatch.setattr(stress_inventory, "_require_readonly_inputs", lambda: None)
+    monkeypatch.setattr(stress_inventory, "_verify_historical_bytes", lambda _: None)
+    monkeypatch.setattr(stress_inventory, "_occurrence_payload", lambda _: {
+        "tsv": serialize_tsv([]), "source_fp": "synthetic", "manifest_fp": "synthetic", "analysis_fp": "synthetic",
+        "counts": {"occurrences": 0, "aligned": 0, "unresolved_by_reason": {}}, "f6_status_counts": {}})
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _make_env(tmp_path: Path, norm_texts: dict[str, str],
@@ -692,6 +705,12 @@ def test_risk_tsv_deterministic_across_hashseeds(tmp_path):
         f"p.OUT=__import__('pathlib').Path(r'{root}/out');"
         "from unittest.mock import patch;"
         "from audiobook.stress_inventory import run;"
+        "from audiobook import stress_inventory as si,stress_fp as sf;"
+        "from audiobook.wordprov import serialize_tsv;"
+        "sf.private_output_guard=lambda _:None;si._require_readonly_inputs=lambda:None;"
+        "si._verify_historical_bytes=lambda _:None;"
+        "si._occurrence_payload=lambda _:{'tsv':serialize_tsv([]),'source_fp':'synthetic','manifest_fp':'synthetic',"
+        "'analysis_fp':'synthetic','counts':{'occurrences':0,'aligned':0,'unresolved_by_reason':{}},'f6_status_counts':{}};"
         "_p=patch('audiobook.stress_inventory._try_accentizer',return_value=None);_p.start();"
         "run({'stress':{'top_n':5}});_p.stop();"
         "import hashlib;"
@@ -1188,13 +1207,13 @@ def test_fingerprint_has_algo_version(tmp_path):
     assert summary["algo_version"] == INVENTORY_ALGO_VERSION
 
 
-def test_algo_version_is_4():
-    """Version 4 uses exact atom provenance and adjoining multi-unit boundaries.
+def test_algo_version_is_5():
+    """Version 5 adds advisory occurrences while retaining v4 historical bytes.
 
     Bump this test when the version is intentionally raised again.
     """
     from audiobook.stress_fp import INVENTORY_ALGO_VERSION
-    assert INVENTORY_ALGO_VERSION == 4
+    assert INVENTORY_ALGO_VERSION == 5
 
 
 def test_gen_dir_created_with_current_json(tmp_path):

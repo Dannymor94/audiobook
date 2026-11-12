@@ -486,6 +486,13 @@ def _atomic_publish_inventory(
     old_dir = stress_dir / "inventory.old"
     gen_dir = stress_dir / "gen" / gen_id
 
+    from audiobook.stress_fp import private_output_guard
+    private_output_guard(tmp_dir)
+    private_output_guard(gen_dir)
+    if gen_dir.exists():
+        from audiobook.unitmap import AnnotationError
+        raise AnnotationError("GENERATION_EXISTS")
+
     # Write current.json (summary SHA already computed by caller)
     summary_sha = hashlib.sha256(
         (tmp_dir / "summary.json").read_bytes()
@@ -497,8 +504,6 @@ def _atomic_publish_inventory(
 
     # Archive to gen/<gen_id>/ before the rename (so it survives a crash)
     gen_dir.parent.mkdir(parents=True, exist_ok=True)
-    if gen_dir.exists():
-        shutil.rmtree(gen_dir)
     shutil.copytree(tmp_dir, gen_dir)
 
     # Atomic swap
@@ -513,10 +518,10 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
+def _atomic_write_text(path: Path, content: str, *, newline=None) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as f:
             f.write(content)
         os.replace(tmp, path)
     except BaseException:
@@ -556,6 +561,27 @@ def _input_fingerprint(omograph_path: Path, pronounce_p: Path,
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def _require_readonly_inputs() -> None:
+    from audiobook.ruaccent_adv import ruaccent_content_identity
+    from audiobook.unitmap import AnnotationError
+    for name in ("stress_inventory_exclude.yaml", "stress_verified.yaml", "stress_watch.yaml", "pronounce.yaml"):
+        if not (paths.TEXT / name).is_file():
+            raise AnnotationError("READ_ONLY_INPUT_MISSING")
+    ruaccent_content_identity()
+
+
+def _occurrence_payload(config):
+    from audiobook.ruaccent_adv import build_payload
+    return build_payload(config)
+
+
+def _verify_historical_bytes(tmp_dir):
+    from audiobook.stress_fp import check_historical_tsv, historical_input_identity
+    baseline = paths.ROOT / "out" / "t15_7" / "baseline" / "tsv"
+    files = {name: (tmp_dir / name).read_bytes() for name in ("risk.tsv", "omographs.tsv")}
+    check_historical_tsv(baseline, files, historical_input_identity())
+
+
 def run(config: dict) -> int:  # noqa: C901
     params = stress_params(config)
     top_n = params["top_n"]
@@ -563,8 +589,11 @@ def run(config: dict) -> int:  # noqa: C901
 
     # Recover any interrupted atomic publish BEFORE failure-prone loaders.
     stress_dir = paths.OUT / "stress"
+    from audiobook.stress_fp import private_output_guard
+    private_output_guard(stress_dir)
     stress_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = _prepare_tmp_dir(stress_dir)
+    _require_readonly_inputs()
 
     exclude_p = paths.TEXT / "stress_inventory_exclude.yaml"
     omographs = _omograph_dict()
@@ -824,6 +853,11 @@ def run(config: dict) -> int:  # noqa: C901
                 f"ожидалось {expected_rows}, фактически {len(lines) - 1}"
             )
 
+    # Preserve original historical bytes before the additional advisory calls.
+    _verify_historical_bytes(tmp_dir)
+    payload = _occurrence_payload(config)
+    _atomic_write_text(tmp_dir / "occurrences.tsv", payload["tsv"], newline="")
+
     # --- summary.json (written last before publish) ---------------------------
     by_reason: Counter[str] = Counter()
     occ_by_reason: Counter[str] = Counter()
@@ -837,7 +871,7 @@ def run(config: dict) -> int:  # noqa: C901
     risk_token_count = sum(form_count[f] for f in all_risk if f in form_count)
     risk_coverage = round(risk_token_count / total_tokens, 4) if total_tokens else 0.0
 
-    gen_id = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    gen_id = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
 
     summary = {
         "schema_version": 1,
@@ -891,6 +925,17 @@ def run(config: dict) -> int:  # noqa: C901
             "zero_token_chunks": all_zero_token_chunks,
         },
     }
+    for name, schema in (("risk.tsv", "risk/1"), ("omographs.tsv", "omographs/1")):
+        summary["files"][name].update(bytes=(tmp_dir / name).stat().st_size, schema=schema)
+    from audiobook.wordprov import parse_tsv
+    parsed = parse_tsv(payload["tsv"])
+    summary["files"]["occurrences.tsv"] = {
+        "sha256": _file_sha256(tmp_dir / "occurrences.tsv"),
+        "bytes": (tmp_dir / "occurrences.tsv").stat().st_size,
+        "rows": len(parsed), "schema": "occurrences/1",
+    }
+    summary.update({key: payload[key] for key in ("source_fp", "manifest_fp", "analysis_fp", "counts")})
+    summary["diagnostics"]["f6_status_counts"] = payload["f6_status_counts"]
     (tmp_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",

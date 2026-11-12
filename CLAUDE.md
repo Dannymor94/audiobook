@@ -99,6 +99,7 @@ These rules are enforced by AST guard tests in `tests/test_unitmap_spans.py`.
 - v1 — baseline.
 - v2 — first unit-based classification (I1/I2/I3).
 - v3 (T15) — классификация границ параграфов использует идентичность source unit и kind чанков (`is_within_para`), а не только длительность паузы; 29 граней корпуса теперь классифицируются иначе. Zero-token чанки требуют строгого I2′-матчинга (M1/M2 по NFC+ws). Добавлено поле `zero_token_chunks` в `summary.diagnostics`.
+- v5 (T15-7 WP-3) — добавлены advisory `occurrences.tsv`, fingerprints и проверка целого поколения; исторические TSV сохраняют байты v4.
 
 При повышении обновить константу в `stress_fp.py` и дописать в коммит-сообщение `algo_version: N → N+1`.
 
