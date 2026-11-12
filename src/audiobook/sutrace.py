@@ -11,28 +11,76 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-# Config keys accessed by voicecfg.prepare_text and leadin.fires/pad.
-DECLARED_TOP_LEVEL_CONFIG_KEYS = frozenset({"text_prep", "render"})
+# Full dotted-path allowlist of config keys accessed by voicecfg.prepare_text,
+# leadin.carrier/fires, and synth.chunk_fragments.  Derived from source inspection
+# (T15-7.0d, D2).  Any access outside this set means an unexpected dependency has
+# been introduced — fail closed rather than silently ignore it.
+DECLARED_CONFIG_PATHS = frozenset({
+    # voicecfg.prepare_text
+    "text_prep",
+    "text_prep.yo_restore",
+    "text_prep.strip_quotes",
+    "text_prep.open_end",
+    "text_prep.ensure_terminal",
+    # leadin.carrier / leadin.fires
+    "render",
+    "render.leadin",
+    "render.leadin.phrase",
+    "render.leadin.max_chars",
+    # synth.chunk_fragments
+    "pauses_ms",
+    "pauses_ms.enum_pause_ms",
+    "pauses_ms.sentence",
+})
+
+# Backward-compatible alias kept so existing tests that import the old name continue.
+DECLARED_TOP_LEVEL_CONFIG_KEYS = DECLARED_CONFIG_PATHS
 
 
-class _KeyRecordingConfig(dict):
-    """Wraps a config dict and records every top-level key read."""
+class _DeepRecordingConfig:
+    """Wraps a config dict and records every mapping access as a full dotted path.
 
-    def __init__(self, inner: dict) -> None:
-        super().__init__(inner)
-        self._accessed: set[str] = set()
+    Nested dict values returned by .get() / [] are themselves wrapped so that
+    access to e.g. config["text_prep"]["strip_quotes"] records the path
+    "text_prep.strip_quotes".  Non-dict values (ints, bools, strings) are
+    returned as-is.  Production helpers never check isinstance(config, dict), so
+    this pure wrapper is safe to pass in place of a plain dict.
+    """
+
+    def __init__(self, inner: dict, prefix: str = "",
+                 accessed: set[str] | None = None) -> None:
+        self._inner = inner
+        self._prefix = prefix
+        self._accessed: set[str] = accessed if accessed is not None else set()
+
+    def _path(self, key: str) -> str:
+        return f"{self._prefix}.{key}" if self._prefix else str(key)
+
+    def _wrap(self, value, key: str):
+        if isinstance(value, dict):
+            return _DeepRecordingConfig(value, self._path(key), self._accessed)
+        return value
 
     def get(self, key, default=None):  # type: ignore[override]
-        self._accessed.add(key)
-        return super().get(key, default)
+        self._accessed.add(self._path(key))
+        value = self._inner.get(key, default)
+        return self._wrap(value, key)
 
     def __getitem__(self, key):
-        self._accessed.add(key)
-        return super().__getitem__(key)
+        self._accessed.add(self._path(key))
+        value = self._inner[key]
+        return self._wrap(value, key)
 
     def __contains__(self, key):  # type: ignore[override]
-        self._accessed.add(key)
-        return super().__contains__(key)
+        self._accessed.add(self._path(key))
+        return key in self._inner
+
+    def __bool__(self) -> bool:
+        return bool(self._inner)
+
+
+# Backward-compatible alias.
+_KeyRecordingConfig = _DeepRecordingConfig
 
 
 @dataclass
@@ -45,7 +93,7 @@ class SUTrace:
     matches: list[dict]      # respell hits in post_pad: [{start,end,key,value}]
     final_sha256: str        # sha256(prep_text.encode())
     phrase_sha256: str | None  # sha256(phrase.encode()) or None
-    status: str              # "ok" | "trace_mismatch"
+    status: str              # "ok" | "trace_mismatch" | "trace_unsupported"
 
 
 def _sha256(s: str) -> str:
@@ -70,7 +118,7 @@ def _reconstruct(post_pad: str, matches: list[dict]) -> str:
 
 def _trace_su(section: str, chunk_id: str, fragment: int | None,
               text: str, open_end: bool,
-              cfg: _KeyRecordingConfig, phrase_stored,
+              cfg: _DeepRecordingConfig, phrase_stored,
               table: dict, sentinel: str) -> SUTrace:
     """Build one SUTrace record for a single text fragment."""
     from audiobook import leadin as leadin_mod
@@ -123,42 +171,54 @@ def _trace_su(section: str, chunk_id: str, fragment: int | None,
 
 
 def trace_section(section: str, config: dict, table: dict, sentinel: str) -> list[SUTrace]:
-    """Trace all SUs for one section. Raises ValueError on trace_mismatch or unexpected config keys."""
+    """Trace all SUs for one section.
+
+    Raises ValueError on trace_mismatch or unexpected config keys accessed.
+    Mirrors production synth._synth_one_chunk exactly:
+      - len(frags)==1  → use row["text"], row_leadin(row), open_end  (fragment=None)
+      - len(frags)>1   → per-fragment text with question-mark trim, AUTO phrase,
+                         open_end=False, integer fragment indexes.
+    """
     from audiobook import paths
     from audiobook import leadin as leadin_mod
     from audiobook.synth import chunk_fragments, row_leadin
 
-    cfg = _KeyRecordingConfig(config)
+    # Single tracking wrapper shared for the whole section so the guard sees the
+    # union of all keys accessed during this call.
+    cfg = _DeepRecordingConfig(config)
     rows = _read_manifest(paths.OUT / "sections" / section / "manifest.jsonl")
-    enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
     results: list[SUTrace] = []
 
     for row in rows:
         phrase_arg = row_leadin(row)   # leadin.AUTO if "leadin" absent in row
         open_end = row.get("open_end", False)
 
-        if enum_pause_ms:
-            frags = chunk_fragments(row["text"], config)
-        else:
-            frags = [(row["text"], 0, False)]
+        # Pass cfg so chunk_fragments' pauses_ms.* accesses are tracked.
+        frags = chunk_fragments(row["text"], cfg)
 
-        for fi, (frag_text, _pause, is_enum) in enumerate(frags):
-            fragment = fi if len(frags) > 1 else None
-            # strip trailing ? from enum items — production behaviour in _synth_one_chunk
-            text = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
-            # enum fragments always use AUTO phrase and open_end=False (production default args)
-            eff_phrase = leadin_mod.AUTO if len(frags) > 1 else phrase_arg
-            eff_open_end = False if len(frags) > 1 else open_end
-
-            t = _trace_su(section, row["id"], fragment, text, eff_open_end,
-                          cfg, eff_phrase, table, sentinel)
+        if len(frags) == 1:
+            # Production _synth_one_chunk: len(frags)==1 → prepare on row["text"]
+            # with the row's stored phrase and open_end flag.
+            t = _trace_su(section, row["id"], None, row["text"], open_end,
+                          cfg, phrase_arg, table, sentinel)
             if t.status == "trace_mismatch":
                 raise ValueError(
-                    f"trace_mismatch: section={section} chunk={row['id']} fragment={fragment}"
+                    f"trace_mismatch: section={section} chunk={row['id']}"
                 )
             results.append(t)
+        else:
+            # Production _synth_one_chunk: multi-fragment enum split.
+            for fi, (frag_text, _pause, is_enum) in enumerate(frags):
+                frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+                t = _trace_su(section, row["id"], fi, frag, False,
+                              cfg, leadin_mod.AUTO, table, sentinel)
+                if t.status == "trace_mismatch":
+                    raise ValueError(
+                        f"trace_mismatch: section={section} chunk={row['id']} frag={fi}"
+                    )
+                results.append(t)
 
-    unexpected = cfg._accessed - DECLARED_TOP_LEVEL_CONFIG_KEYS
+    unexpected = cfg._accessed - DECLARED_CONFIG_PATHS
     if unexpected:
         raise ValueError(f"Unexpected config keys accessed: {unexpected}")
 

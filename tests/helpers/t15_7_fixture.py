@@ -46,39 +46,54 @@ def _p1_guard(path: str) -> None:
 
 
 def _capture_section(section: str, config: dict, table: dict, sentinel: str) -> list[dict]:
-    from audiobook import leadin as leadin_mod
     from audiobook import paths
-    from audiobook.synth import prepare_synth_text, row_leadin
+    from audiobook.synth import prepare_synth_text, row_leadin, chunk_fragments
 
     rows = _read_manifest(paths.OUT / "sections" / section / "manifest.jsonl")
     records: list[dict] = []
     for row in rows:
         phrase_arg = row_leadin(row)
         open_end = row.get("open_end", False)
-        final, phrase = prepare_synth_text(
-            row["text"], config, table, sentinel, phrase_arg, open_end
-        )
-        final_sha256 = _sha256(final)
-        if phrase is None:
-            phrase_sha256 = None
+        analytic = {
+            "n": row["n"],
+            "id": row["id"],
+            "text_sha256": _sha256(row["text"]),
+            "pause_after_ms": row.get("pause_after_ms"),
+            "open_end": row.get("open_end", False),
+            "leadin": row.get("leadin"),
+        }
+
+        frags = chunk_fragments(row["text"], config)
+
+        if len(frags) == 1:
+            # Singleton — mirrors production _synth_one_chunk len(frags)==1 branch:
+            # use row["text"] directly with the row's phrase and open_end.
+            final, phrase = prepare_synth_text(
+                row["text"], config, table, sentinel, phrase_arg, open_end
+            )
+            records.append({
+                "section": section,
+                "chunk_id": row["id"],
+                "fragment": None,
+                "final_sha256": _sha256(final),
+                "phrase_sha256": _sha256(phrase) if phrase is not None else None,
+                "stored_hash": row["hash"],
+                "analytic": analytic,
+            })
         else:
-            phrase_sha256 = _sha256(phrase)  # "" yields e3b0c44…, distinct from None
-        records.append({
-            "section": section,
-            "chunk_id": row["id"],
-            "fragment": None,
-            "final_sha256": final_sha256,
-            "phrase_sha256": phrase_sha256,
-            "stored_hash": row["hash"],
-            "analytic": {
-                "n": row["n"],
-                "id": row["id"],
-                "text_sha256": _sha256(row["text"]),
-                "pause_after_ms": row.get("pause_after_ms"),
-                "open_end": row.get("open_end", False),
-                "leadin": row.get("leadin"),
-            },
-        })
+            # Multi-fragment enum split — mirrors production per-fragment branch.
+            for fi, (frag_text, _pause, is_enum) in enumerate(frags):
+                frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+                final, phrase = prepare_synth_text(frag, config, table, sentinel)
+                records.append({
+                    "section": section,
+                    "chunk_id": row["id"],
+                    "fragment": fi,
+                    "final_sha256": _sha256(final),
+                    "phrase_sha256": _sha256(phrase) if phrase is not None else None,
+                    "stored_hash": row["hash"],
+                    "analytic": analytic,
+                })
     return records
 
 
