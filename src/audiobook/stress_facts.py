@@ -71,6 +71,73 @@ def _load_verified_safe(p: Path) -> set[str]:
 # F1: classify via SUTrace matches (ADR U4)
 # ---------------------------------------------------------------------------
 
+def trace_coordinates(trace: SUTrace) -> tuple[str, int]:
+    """Validate a pre-respell coordinate view and the final body boundary.
+
+    Each recorded original start plus the cumulative length delta must contain
+    the exact recorded replacement in the observed engine input. Restore keys
+    there, copying every unchanged gap and the final suffix verbatim. The
+    sentinel suffix stays in this view: it follows respell and cannot affect any
+    recorded match coordinate. No search or stress-position inference is used.
+
+    Token counts at every substitution seam prove positional correspondence;
+    ambiguous token changes fail closed instead of attaching a shifted rule.
+    """
+    from audiobook.unitmap import AnnotationError
+
+    def fail():
+        raise AnnotationError("F1_COORDINATES_UNPROVEN")
+
+    if trace.status != "ok" or type(trace.pad_len) is not int or trace.pad_len < 0:
+        fail()
+    final = trace.prep_text
+    parts = []
+    cursor = previous_end = delta = 0
+    final_pad = trace.pad_len
+    seams = []
+    for match in trace.matches:
+        start, end = match["start"], match["end"]
+        key, value = match["key"], match["value"]
+        if (type(start) is not int or type(end) is not int
+                or not isinstance(key, str) or not isinstance(value, str)
+                or start < previous_end or end <= start or len(key) != end - start):
+            fail()
+        fs, fe = start + delta, start + delta + len(value)
+        if fs < cursor or fe > len(final) or final[fs:fe] != value:
+            fail()
+        if start < trace.pad_len < end:
+            fail()
+        if end <= trace.pad_len:
+            final_pad += len(value) - len(key)
+        parts.extend((final[cursor:fs], key))
+        seams.extend(((start, fs), (end, fe)))
+        cursor, previous_end = fe, end
+        delta += len(value) - len(key)
+    parts.append(final[cursor:])
+    pre = "".join(parts)
+    if not 0 <= trace.pad_len <= len(pre) or not 0 <= final_pad <= len(final):
+        fail()
+    rebuilt = []
+    pos = 0
+    for match in trace.matches:
+        if pre[match["start"]:match["end"]] != match["key"]:
+            fail()
+        rebuilt.extend((pre[pos:match["start"]], match["value"]))
+        pos = match["end"]
+    rebuilt.append(pre[pos:])
+    if "".join(rebuilt) != final:
+        fail()
+    before = list(_WORD.finditer(pre))
+    after = list(_WORD.finditer(final))
+    if len(before) != len(after):
+        fail()
+    for old, new in [*seams, (trace.pad_len, final_pad)]:
+        if (sum(w.start() < old for w in before) != sum(w.start() < new for w in after)
+                or sum(w.end() <= old for w in before) != sum(w.end() <= new for w in after)):
+            fail()
+    return pre, final_pad
+
+
 def _classify_f1(
     trace: SUTrace | None,
     su_token_index: int,
@@ -81,19 +148,20 @@ def _classify_f1(
     token or fully covers it while also partially overlapping another token.
     Returns (None, False, "none") when trace is None or no match found.
     """
-    if trace is None:
+    if trace is None or trace.status != "ok":
         return None, False, "none"
 
     if not trace.matches:
         return None, False, "none"
 
-    post_pad = trace.prep_text[trace.pad_len:]
+    pre, _ = trace_coordinates(trace)
+    post_pad = pre[trace.pad_len:]
     words = list(_WORD.finditer(post_pad))
-    if su_token_index >= len(words):
+    if not 0 <= su_token_index < len(words):
         return None, False, "none"
 
     target = words[su_token_index]
-    # Absolute coordinates in prep_text
+    # Absolute coordinates in the validated pre-respell view
     abs_t_start = trace.pad_len + target.start()
     abs_t_end = trace.pad_len + target.end()
 
@@ -227,13 +295,14 @@ def classify_status(
     if f6_status in ("no_stress", "multi_stress", "invalid_mark", "tokenization_mismatch"):
         return "unresolved", f6_status
 
-    # 6. not_run → ruaccent_not_run
-    if f6_status == "not_run":
+    # 6. not_run without a valid T1 value → ruaccent_not_run
+    has_t1 = expected_source in ("decision", "source_mark") and expected_vowel is not None
+    if f6_status == "not_run" and not has_t1:
         return "unresolved", "ruaccent_not_run"
 
     # 7. ok — collect informational reasons
     info: list[str] = []
-    if expected_source in ("ruaccent", "decision", "source_mark") and expected_vowel is not None:
+    if has_t1:
         if f6_vowel is not None and f6_vowel != expected_vowel:
             info.append("ruaccent_disagreement")
             if f3_verified:
@@ -311,6 +380,10 @@ def apply_facts(
     verified_forms: set[str] | None = None,
 ) -> WordOcc:
     """Return a new WordOcc with stress-facts fields 22-35 populated."""
+    if trace is not None and occ.alignment_status == "aligned":
+        from audiobook.unitmap import AnnotationError
+        if (trace.status != "ok" or (trace.chunk_id, trace.fragment) != (occ.su_chunk_id, occ.su_fragment)):
+            raise AnnotationError("FACT_TRACE_ASSOCIATION")
     facts = compute_facts(
         trace=trace,
         su_token_index=occ.su_token_index,
@@ -318,20 +391,4 @@ def apply_facts(
         form_analysis=occ.form_analysis,
         verified_forms=verified_forms,
     )
-    return dataclasses.replace(
-        occ,
-        f1_rule=facts.f1_rule,
-        f1_phrase=facts.f1_phrase,
-        f1_flag=facts.f1_flag,
-        f2_approval=facts.f2_approval,
-        f2_vowel=facts.f2_vowel,
-        f3_verified=facts.f3_verified,
-        f5_vowel=facts.f5_vowel,
-        f5_status=facts.f5_status,
-        f6_vowel=facts.f6_vowel,
-        f6_status=facts.f6_status,
-        expected_source=facts.expected_source,
-        expected_vowel=facts.expected_vowel,
-        status=facts.status,
-        reason=facts.reason,
-    )
+    return type(occ)(**(dataclasses.asdict(occ) | dataclasses.asdict(facts)))

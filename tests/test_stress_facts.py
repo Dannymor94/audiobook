@@ -100,9 +100,9 @@ def test_f1_full_coverage():
     """Single match covering 'тест' fully → f1_rule set, f1_flag='none'."""
     # "тест" is at positions 0-4 in prep_text "тест"
     # In absolute prep_text coords (pad_len=0): start=0, end=4
-    t = _make_trace("тест", matches=[{"start": 0, "end": 4, "key": "rule_a", "value": "тест"}])
+    t = _make_trace("тест", matches=[{"start": 0, "end": 4, "key": "тест", "value": "тест"}])
     f = _facts(trace=t)
-    assert f.f1_rule == "rule_a"
+    assert f.f1_rule == "тест"
     assert f.f1_flag == "none"
     assert f.f1_phrase is False  # single-word match
 
@@ -110,16 +110,16 @@ def test_f1_full_coverage():
 def test_f1_phrase_match():
     """Match covering 2+ words → f1_phrase=True."""
     # "два слова": два at 0-3, слова at 4-9
-    t = _make_trace("два слова", matches=[{"start": 0, "end": 9, "key": "phrase_rule", "value": "два слова"}])
+    t = _make_trace("два слова", matches=[{"start": 0, "end": 9, "key": "два слова", "value": "два слова"}])
     f = _facts(trace=t, form_analysis="два")
-    assert f.f1_rule == "phrase_rule"
+    assert f.f1_rule == "два слова"
     assert f.f1_phrase is True
 
 
 def test_f1_partial_overlap_span_ambiguous():
     """Match partially overlapping the token → span_ambiguous."""
     # "тест" at 0-4; match covers only 0-2 (partial)
-    t = _make_trace("тест", matches=[{"start": 0, "end": 2, "key": "partial", "value": "те"}])
+    t = _make_trace("тест", matches=[{"start": 0, "end": 2, "key": "те", "value": "те"}])
     f = _facts(trace=t)
     assert f.f1_flag == "span_ambiguous"
 
@@ -131,7 +131,7 @@ def test_f1_match_in_pad_ignored():
     prep = "вводный тест"
     pad_len = len("вводный ")  # 8
     t = _make_trace(prep, pad_len=pad_len,
-                    matches=[{"start": 0, "end": 7, "key": "pad_rule", "value": "вводный"}])
+                    matches=[{"start": 0, "end": 7, "key": "вводный", "value": "вводный"}])
     f = _facts(trace=t)
     assert f.f1_rule is None
 
@@ -141,7 +141,7 @@ def test_f1_match_in_pad_ignored():
 # ---------------------------------------------------------------------------
 
 def test_f2_unknown_when_f1_present():
-    t = _make_trace("тест", matches=[{"start": 0, "end": 4, "key": "r", "value": "тест"}])
+    t = _make_trace("тест", matches=[{"start": 0, "end": 4, "key": "тест", "value": "тест"}])
     f = _facts(trace=t)
     assert f.f2_approval == "unknown"
     assert f.f2_vowel is None
@@ -308,7 +308,7 @@ def test_matrix_ok_no_info():
 def test_matrix_ok_ruaccent_disagreement():
     """ok status with ruaccent disagreement informational reason."""
     status, reason = _classify(
-        f6_status="resolved", expected_source="ruaccent",
+        f6_status="resolved", expected_source="decision",
         expected_vowel=3, f6_vowel=5,  # disagree
     )
     assert status == "ok"
@@ -318,7 +318,7 @@ def test_matrix_ok_ruaccent_disagreement():
 def test_matrix_ok_verified_disagreement():
     """ok status with both disagreements → semicolon-separated."""
     status, reason = _classify(
-        f6_status="resolved", expected_source="ruaccent",
+        f6_status="resolved", expected_source="decision",
         expected_vowel=3, f6_vowel=5,
         f3_verified=True,
     )
@@ -384,3 +384,63 @@ def test_ast_no_gold_lookup_in_stress_facts():
     source = p.read_text(encoding="utf-8")
     for forbidden in ("gold", "f4_", "F4", "gold_identity", "gold_ledger"):
         assert forbidden not in source, f"Found {forbidden!r} in stress_facts.py"
+
+
+def test_fix_r3_length_changing_rules_literal_oracle():
+    from audiobook import leadin
+    from audiobook.sutrace import _trace_su, _DeepRecordingConfig
+    from audiobook.stress_facts import _classify_f1
+    # All strings synthetic. Prefix/suffix punctuation changes byte positions
+    # without changing Cyrillic tokens; rule values never supply stress positions.
+    table = {"Альфа": "+++Альфа", "бета": "бета++", "гамма": "++++гамма",
+             "Ввод": "++++Ввод"}
+    trace = _trace_su("01_test", "0001", None, "Альфа бета гамма", False,
+                      _DeepRecordingConfig({"text_prep": {"ensure_terminal": False}}),
+                      "Ввод", table, " .")
+    assert trace.prep_text == "++++Ввод +++Альфа бета++ ++++гамма ."
+    assert [_classify_f1(trace, i) for i in range(3)] == [
+        ("Альфа", False, "none"), ("бета", False, "none"), ("гамма", False, "none")]
+
+
+@pytest.mark.parametrize("source", ["decision", "source_mark"])
+def test_fix_r6_t1_with_f6_not_run(source):
+    assert _classify(expected_source=source, expected_vowel=0, f6_status="not_run") == ("ok", "")
+
+
+def test_fix_r3_phrase_and_partial_literal_oracles():
+    from audiobook.sutrace import _trace_su, _DeepRecordingConfig
+    from audiobook.stress_facts import _classify_f1
+    cfg = _DeepRecordingConfig({"text_prep": {"ensure_terminal": False}})
+    trace = _trace_su("01_test", "0001", None, "Альфа бета. Гамма", False,
+                      cfg, None, {"Альфа бета": "+Альфа бета++"}, " .")
+    assert [_classify_f1(trace, i) for i in range(3)] == [
+        ("Альфа бета", True, "none"), ("Альфа бета", True, "none"), (None, False, "none")]
+    # Synthetic partial span: the same match covers a whole neighboring word.
+    trace = _make_trace("альфа бета", matches=[
+        {"start": 0, "end": 7, "key": "альфа б", "value": "альфа б"}])
+    assert [_classify_f1(trace, i) for i in range(2)] == [
+        (None, False, "span_ambiguous"), (None, False, "span_ambiguous")]
+
+
+@pytest.mark.parametrize("mutation", ["value", "start", "end", "token_count"])
+def test_fix_r3_unproven_coordinates_fail_closed(mutation):
+    from audiobook.unitmap import AnnotationError
+    from audiobook.stress_facts import _classify_f1
+    match = {"start": 0, "end": 5, "key": "альфа", "value": "альфа"}
+    text = "альфа"
+    if mutation == "token_count":
+        text, match["value"] = "два слова", "два слова"
+    else:
+        match[mutation] = {"value": "иначе", "start": 1, "end": 6}[mutation]
+    trace = _make_trace(text, matches=[match])
+    with pytest.raises(AnnotationError, match="F1_COORDINATES_UNPROVEN"):
+        _classify_f1(trace, 0)
+
+
+def test_fix_r6_t1_conflict_and_higher_priorities():
+    assert _classify(expected_source="conflict", f6_status="not_run") == ("unresolved", "conflict")
+    assert _classify(expected_source="decision", expected_vowel=None) == ("unresolved", "ruaccent_not_run")
+    assert _classify(expected_source="decision", expected_vowel=0,
+                     f6_status="invalid_mark") == ("unresolved", "invalid_mark")
+    assert _classify(expected_source="decision", expected_vowel=0,
+                     f1_flag="span_ambiguous", f1_rule="альфа") == ("unresolved", "override_span_ambiguous")

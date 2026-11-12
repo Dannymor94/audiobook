@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, fields as dc_fields
 from typing import TYPE_CHECKING
 
@@ -45,7 +46,7 @@ def _sha256_str(s: str) -> str:
 # WordOcc — 35 fields per ADR §6
 # ---------------------------------------------------------------------------
 
-@dataclass  # NOT frozen — apply_facts uses dataclasses.replace()
+@dataclass
 class WordOcc:
     source_key: str           # 1
     section: str              # 2
@@ -104,44 +105,135 @@ def tsv_header() -> str:
     return "\t".join(_FIELD_NAMES)
 
 
+_DECIMAL = re.compile(r"(?:0|[1-9][0-9]*)", re.ASCII)
+_ENUM_FIELDS = {
+    "alignment_status": frozenset("aligned prep_token_mismatch fragment_mismatch trace_unsupported trace_mismatch".split()),
+    "f1_flag": frozenset(("none", "span_ambiguous")),
+    "f2_approval": frozenset(("approved", "unknown", "none")),
+    "f5_status": frozenset(("none",)),
+    "f6_status": frozenset("resolved no_stress multi_stress invalid_mark tokenization_mismatch not_run".split()),
+    "expected_source": frozenset("decision source_mark conflict ruaccent none".split()),
+    "status": frozenset(("ok", "covered_by_override", "unresolved")),
+}
+_UNRESOLVED_REASONS = frozenset(
+    "prep_token_mismatch fragment_mismatch trace_unsupported trace_mismatch "
+    "override_span_ambiguous conflict no_stress multi_stress invalid_mark "
+    "tokenization_mismatch ruaccent_not_run".split()
+)
+_INFO_REASONS = ("", "ruaccent_disagreement", "verified_disagreement",
+                 "ruaccent_disagreement;verified_disagreement")
+
+
+def _invalid_tsv():
+    from audiobook.unitmap import AnnotationError
+    raise AnnotationError("TSV_INVALID") from None
+
+
+def _validate_cells(cells: list[str]) -> dict:
+    """Shared complete wire grammar. Diagnostics never retain cell values."""
+    from audiobook.unitmap import _section_violation
+    if len(cells) != len(_FIELD_NAMES):
+        _invalid_tsv()
+    result = {}
+    for name, raw in zip(_FIELD_NAMES, cells):
+        if type(raw) is not str:
+            _invalid_tsv()
+        # UTF-8 scalar text; no separators, control characters or surrogates.
+        if any(unicodedata.category(c) in ("Cc", "Cs", "Zl", "Zp") for c in raw):
+            _invalid_tsv()
+        nullable = name in _NULLABLE_INT_FIELDS or name in _NULLABLE_STR_FIELDS
+        if not raw and not nullable and name != "reason":
+            _invalid_tsv()
+        if name in _BOOL_FIELDS:
+            if raw not in ("0", "1"):
+                _invalid_tsv()
+            result[name] = raw == "1"
+        elif name in _INT_FIELDS or name in _NULLABLE_INT_FIELDS:
+            if raw == "" and nullable:
+                result[name] = None
+            else:
+                if not _DECIMAL.fullmatch(raw):
+                    _invalid_tsv()
+                try:
+                    result[name] = int(raw)
+                except ValueError:
+                    _invalid_tsv()
+        elif name in _NULLABLE_STR_FIELDS:
+            result[name] = raw or None
+        else:
+            if name in _ENUM_FIELDS and raw not in _ENUM_FIELDS[name]:
+                _invalid_tsv()
+            result[name] = raw
+    if _section_violation(result["section"]) is not None:
+        _invalid_tsv()
+    if not _DECIMAL.fullmatch(result["unit_id"]):
+        _invalid_tsv()
+    if result["source_key"] != f'{result["section"]}|{result["unit_id"]}|{result["unit_token_index"]}':
+        _invalid_tsv()
+    status, reason = result["status"], result["reason"]
+    if ((status == "unresolved" and reason not in _UNRESOLVED_REASONS)
+            or (status == "ok" and reason not in _INFO_REASONS)
+            or (status == "covered_by_override" and reason != "")):
+        _invalid_tsv()
+    return result
+
+
 def to_tsv_row(occ: WordOcc) -> str:
-    cells: list[str] = []
+    cells = []
     for name in _FIELD_NAMES:
-        v = getattr(occ, name)
-        if v is None:
+        value = getattr(occ, name)
+        if value is None:
+            if name not in _NULLABLE_INT_FIELDS and name not in _NULLABLE_STR_FIELDS:
+                _invalid_tsv()
             cells.append("")
         elif name in _BOOL_FIELDS:
-            cells.append("1" if v else "0")
+            if type(value) is not bool:
+                _invalid_tsv()
+            cells.append("1" if value else "0")
+        elif name in _INT_FIELDS or name in _NULLABLE_INT_FIELDS:
+            if type(value) is not int or value < 0:
+                _invalid_tsv()
+            cells.append(str(value))
         else:
-            cells.append(str(v))
+            if type(value) is not str:
+                _invalid_tsv()
+            if name in _NULLABLE_STR_FIELDS and value == "":
+                _invalid_tsv()  # Empty wire strings mean null, never empty str.
+            cells.append(value)
+    _validate_cells(cells)
     return "\t".join(cells)
 
 
 def from_tsv_row(cells: list[str]) -> WordOcc:
-    if len(cells) != len(_FIELD_NAMES):
-        raise ValueError(f"Expected {len(_FIELD_NAMES)} columns, got {len(cells)}")
-    kwargs: dict = {}
-    for name, raw in zip(_FIELD_NAMES, cells):
-        if name in _BOOL_FIELDS:
-            kwargs[name] = raw == "1"
-        elif name in _INT_FIELDS:
-            kwargs[name] = int(raw)
-        elif name in _NULLABLE_INT_FIELDS:
-            kwargs[name] = int(raw) if raw != "" else None
-        elif name in _NULLABLE_STR_FIELDS:
-            kwargs[name] = raw if raw != "" else None
-        else:
-            kwargs[name] = raw
-    return WordOcc(**kwargs)
+    return WordOcc(**_validate_cells(cells))
 
 
 def serialize_tsv(occs: list[WordOcc]) -> str:
-    return "\n".join([tsv_header()] + [to_tsv_row(o) for o in occs])
+    """Canonical documents always end in exactly one LF, including header-only."""
+    _validate_order(occs)
+    return "\n".join([tsv_header()] + [to_tsv_row(o) for o in occs]) + "\n"
+
+
+def _validate_order(occs: list[WordOcc]) -> None:
+    previous = None
+    for occ in occs:
+        to_tsv_row(occ)
+        key = (occ.section, occ.chunk_n, occ.chunk_word_index)
+        if previous is not None and key <= previous:
+            _invalid_tsv()
+        previous = key
 
 
 def parse_tsv(text: str) -> list[WordOcc]:
-    lines = text.splitlines()
-    return [from_tsv_row(ln.split("\t")) for ln in lines[1:] if ln]
+    """Accept only canonical LF-terminated documents; no ignored blank rows."""
+    if type(text) is not str or not text.endswith("\n"):
+        _invalid_tsv()
+    lines = text[:-1].split("\n")
+    if not lines or lines[0] != tsv_header():
+        _invalid_tsv()
+    occs = [from_tsv_row(line.split("\t")) for line in lines[1:]]
+    _validate_order(occs)
+    return occs
 
 
 def serialize_occ(occ: WordOcc) -> str:
@@ -150,23 +242,10 @@ def serialize_occ(occ: WordOcc) -> str:
 
 
 def parse_occ_row(text: str) -> dict:
-    """TSV row string → dict (compat)."""
-    cells = text.split("\t")
-    if len(cells) < len(_FIELD_NAMES):
-        raise ValueError(f"Too few columns: {len(cells)}")
-    result: dict = {}
-    for name, raw in zip(_FIELD_NAMES, cells[:len(_FIELD_NAMES)]):
-        if name in _BOOL_FIELDS:
-            result[name] = raw == "1"
-        elif name in _INT_FIELDS:
-            result[name] = int(raw)
-        elif name in _NULLABLE_INT_FIELDS:
-            result[name] = int(raw) if raw != "" else None
-        elif name in _NULLABLE_STR_FIELDS:
-            result[name] = raw if raw != "" else None
-        else:
-            result[name] = raw
-    return result
+    """Single row without a line terminator, using the same strict grammar."""
+    if type(text) is not str:
+        _invalid_tsv()
+    return _validate_cells(text.split("\t"))
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +275,7 @@ def source_fp(
             ],
         }
         for sec, units in sorted(sections_units.items())
+        if sec not in excluded_sections
     ]
     obj = {
         "algo": "source/1",
@@ -211,8 +291,10 @@ def manifest_fp(sections_rows: dict[str, list[dict]]) -> str:
     def _row(row: dict) -> dict:
         entry: dict = {}
         for field in MANIFEST_FP_FIELDS:
-            v = row.get(field)
-            if field == "text" and v is not None:
+            # Membership is a real SU dependency: absent leadin means AUTO,
+            # whereas explicit null disables the carrier. Keep it distinct.
+            v = row[field] if field in row else {"absent": True}
+            if field == "text" and field in row and v is not None:
                 entry["text_sha256"] = _sha256_str(str(v))
             else:
                 entry[field] = v
@@ -328,6 +410,92 @@ def build_analysis_text(
 # Full provenance pipeline
 # ---------------------------------------------------------------------------
 
+class RecordingManifestRow(dict):
+    """Read-only row compatible with 6C11's dict structural checks.
+
+    Reject undeclared dependencies at the actual read, including absent keys.
+    Never include a manifest value in diagnostics.
+    """
+
+    def __init__(self, row, accessed=None):
+        super().__init__(row)
+        self.accessed = accessed if accessed is not None else set()
+
+    def _record(self, key):
+        from audiobook.unitmap import AnnotationError
+        self.accessed.add(key)
+        if key not in MANIFEST_FP_FIELDS:
+            raise AnnotationError("MANIFEST_ACCESS_UNDECLARED")
+
+    def __getitem__(self, key):
+        self._record(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self._record(key)
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        self._record(key)
+        return super().__contains__(key)
+
+    def __iter__(self):
+        for key in super().__iter__():
+            self._record(key)
+            yield key
+
+    def keys(self):
+        return tuple(iter(self))
+
+    def items(self):
+        return tuple((key, self[key]) for key in self)
+
+    def values(self):
+        return tuple(self[key] for key in self)
+
+    def _readonly(self, *args, **kwargs):
+        from audiobook.unitmap import AnnotationError
+        raise AnnotationError("MANIFEST_READ_ONLY")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _readonly
+
+
+def validate_manifest_accesses(rows, config, table, sentinel) -> frozenset[str]:
+    """Guard actual SU readers without synthesis; analysis is guarded separately.
+
+    Run production row_leadin, fragment and preparation callees under row and
+    config guards. Existing WP-1 config-path enforcement remains in force.
+    """
+    from audiobook import leadin, synth
+    from audiobook.sutrace import _DeepRecordingConfig, DECLARED_CONFIG_PATHS
+    from audiobook.unitmap import AnnotationError
+
+    accessed = set()
+    cfg = _DeepRecordingConfig(config)
+    for raw in rows:
+        row = RecordingManifestRow(raw, accessed)
+        phrase = synth.row_leadin(row)
+        open_end = row.get("open_end", False)
+        frags = synth.chunk_fragments(row["text"], cfg)
+        row["n"], row["id"], row.get("pause_after_ms")
+        if len(frags) == 1:
+            synth.prepare_synth_text(row["text"], cfg, table, sentinel, phrase, open_end)
+        else:
+            for text, _, is_enum in frags:
+                text = text.rstrip("?") if is_enum and text.endswith("?") else text
+                synth.prepare_synth_text(text, cfg, table, sentinel, leadin.AUTO, False)
+    if cfg._accessed - DECLARED_CONFIG_PATHS:
+        raise AnnotationError("CONFIG_ACCESS_UNDECLARED")
+    return frozenset(accessed)
+
+
+def _final_pad_len(trace) -> int:
+    if trace.status != "ok":
+        return trace.pad_len
+    from audiobook.stress_facts import trace_coordinates
+    return trace_coordinates(trace)[1]
+
+
 def process_section_occs(
     section: str,
     units: list[dict],
@@ -342,23 +510,33 @@ def process_section_occs(
     from audiobook.unitmap import map_section
 
     check_source_marks(units, section)
+    chunks = [RecordingManifestRow(c) for c in chunks]
 
     if traces is None:
         traces = []
 
-    # Map chunk_id → trace
-    chunk_to_trace: dict[str, object] = {}
+    # Keep engine invocation order and each fragment's local token index.
+    chunk_traces: dict[str, list] = {}
     for tr in traces:
-        cid = getattr(tr, "chunk_id", None)
-        if cid is not None:
-            chunk_to_trace[cid] = tr
+        chunk_traces.setdefault(tr.chunk_id, []).append(tr)
 
-    # Pre-build per-chunk trace word lists
-    chunk_trace_words: dict[str, list[tuple[str, str]]] = {}
-    for cid, tr in chunk_to_trace.items():
-        post_pad = tr.prep_text[tr.pad_len:]  # type: ignore[union-attr]
+    chunk_trace_words: dict[str, list[tuple[str, str, int | None, int]]] = {}
+    chunk_trace_status: dict[str, str] = {}
+    for cid, contributing in chunk_traces.items():
+        statuses = {tr.status for tr in contributing}
+        fragments = [tr.fragment for tr in contributing]
+        if "trace_mismatch" in statuses:
+            chunk_trace_status[cid] = "trace_mismatch"
+        elif statuses != {"ok"}:
+            chunk_trace_status[cid] = "trace_unsupported"
+        elif fragments != [None] and fragments != list(range(len(contributing))):
+            chunk_trace_status[cid] = "fragment_mismatch"
+        else:
+            chunk_trace_status[cid] = "word_match"
         chunk_trace_words[cid] = [
-            (_fold(m.group()), m.group()) for m in _WORD.finditer(post_pad)
+            (_fold(m.group()), m.group(), tr.fragment, ti)
+            for tr in contributing
+            for ti, m in enumerate(_WORD.finditer(tr.prep_text[_final_pad_len(tr):]))
         ]
 
     # Build SectionMap
@@ -384,8 +562,9 @@ def process_section_occs(
     # "trace_unsupported" | "fragment_mismatch" | "word_match"
     chunk_align_mode: dict[str, str] = {}
     for cid in chunk_word_total:
-        if cid not in chunk_to_trace:
-            chunk_align_mode[cid] = "trace_unsupported"
+        mode = chunk_trace_status.get(cid, "trace_unsupported")
+        if mode != "word_match":
+            chunk_align_mode[cid] = mode
         elif chunk_word_total[cid] != len(chunk_trace_words.get(cid, [])):
             chunk_align_mode[cid] = "fragment_mismatch"
         else:
@@ -402,7 +581,6 @@ def process_section_occs(
     for ai, atom in enumerate(sm.stream):
         cid, chunk_n = atom_to_chunk.get(ai, ("", 0))
         uid = atom.unit_id
-        trace = chunk_to_trace.get(cid)
 
         for m in _WORD.finditer(atom.text):
             norm_start = atom.start + m.start()
@@ -417,27 +595,21 @@ def process_section_occs(
             chunk_word_counter[cid] = cwi + 1
 
             mode = chunk_align_mode.get(cid, "trace_unsupported")
-            if mode == "trace_unsupported":
-                alignment_status = "trace_unsupported"
+            if mode != "word_match":
+                alignment_status = mode
                 su_cid = None
                 su_frag: int | None = None
                 su_tok_idx: int | None = None
                 form_synth: str | None = None
-            elif mode == "fragment_mismatch":
-                alignment_status = "fragment_mismatch"
-                su_cid = None
-                su_frag = None
-                su_tok_idx = None
-                form_synth = None
             else:  # word_match: compare 1:1 within chunk
                 tw_list = chunk_trace_words.get(cid, [])
                 if cwi < len(tw_list):
-                    fold_tw, orig_tw = tw_list[cwi]
+                    fold_tw, orig_tw, fragment, token_index = tw_list[cwi]
                     if _fold(form_source) == fold_tw:
                         alignment_status = "aligned"
                         su_cid = cid
-                        su_frag = getattr(trace, "fragment", None) if trace else None
-                        su_tok_idx = cwi
+                        su_frag = fragment
+                        su_tok_idx = token_index
                         form_synth = orig_tw
                     else:
                         alignment_status = "prep_token_mismatch"

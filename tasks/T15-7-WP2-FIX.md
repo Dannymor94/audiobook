@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP2-FIX
 title: Correct SU fragment provenance, stress facts, fingerprints and TSV validation
-status: doing
+status: review
 owner: codex-gpt-6
 agent: claude-code
 branch: task/T15
@@ -165,3 +165,92 @@ WP3_STARTED: NO
 ```
 
 **STOP after WP-2-FIX. WP-3 remains HOLD until independent Sol acceptance and coordinator GO.**
+
+
+## Corrective package delivery report
+
+Executor: Codex, explicitly assigned by the owner for this package despite the
+historical Claude Code executor field. Independent package-exit Sol review is
+requested against the actual final pushed SHA, including this report.
+
+```text
+TASK: T15-7-WP2-FIX
+STATUS: PASS
+INITIAL_REMOTE_SHA: e82990cd7929f3c580b8ea78ebc49a8d15dc20d1
+FINAL_REMOTE_SHA: commit containing this report; exact pinned SHA supplied in handoff
+MILESTONE_A_R1_MULTIFRAGMENT: PASS; literal 3-fragment fake-engine oracle, fragment-local indices, facts association
+MILESTONE_A_R2_TRACE_FAILURES: PASS; unsupported/empty, unsupported/matching, mismatch/matching, mixed fragments fail closed
+MILESTONE_B_R3_F1_PRE_RESPELL: PASS; validated positional translation, length changes, carrier changes, phrase/partial ambiguity, sentinel and negative probes
+MILESTONE_B_R4_EXCLUDED_SOURCE: PASS; excluded payload filtered, policy identity retained, included changes sensitive, deterministic order
+MILESTONE_B_R5_MANIFEST_ACCESS_GUARD: PASS; actual trace and analysis readers guarded for indexing/get/membership; six fields only; missing leadin differs from null
+MILESTONE_B_R6_T1_NOT_RUN: PASS; valid decision/source_mark survives not_run; conflict and higher priorities preserved
+MILESTONE_C_R7_STRICT_TSV: PASS; all 35 fields share validation, safe AnnotationError, canonical final LF, literal byte round-trip
+CONDITIONAL_SUTRACE_MODIFICATION: NO; recorded keys/values and cumulative length deltas permit exact positional translation without additional observation
+REAL_CORPUS_56_SECTIONS_AND_76036_OCCURRENCES: PASS; 4624 units, 77998 atoms; every source word and SU association checked
+SOURCE_LINK_LA_LB_LC_ERRORS: 0
+ALIGNMENT_STATUS_COUNTS: aligned=76033; prep_token_mismatch=3; fully aligned chunks=5124; mismatched chunks=3
+SUTRACE_SU_COUNTS_AND_HASH_PARITY: PASS; 5127 SUs; ordered section/chunk/fragment identities, final/phrase input hashes equal accepted S2
+BASELINE_D_CHECK: PASS; stored and fresh D=0346b71f7b3f3c2078a144b56a8374a8998bf6b722d25af1fe0ce2a07ec1a5d6
+P1_P4_PRIVACY: PASS; ignored/untracked S2-S4; no restricted per-item hashes or corpus passages introduced; 1240 protected files unchanged during regression
+TESTS_ADDED_OR_MODIFIED: 88 added cases; 7 existing synthetic fact tests corrected to valid match keys/T1 informational evidence; test_wordprov.py and test_stress_facts.py
+TEST_ARITHMETIC: 1391 prior passed + 88 added = 1479 passed; 5 skipped; focused 98 prior + 88 = 186
+FOCUSED_TESTS: A 105 passed; B 127 passed; final 186 passed in 16.26s; with unchanged 6C11 guard suite 579 passed before final three trace probes
+FULL_PYTEST: 1479 passed, 5 skipped in 45.34s
+PYTHONHASHSEED_1_2_3: each 186 passed in 32.85s; full three focused modules; bytecode-disabled/offline, cacheprovider disabled
+GIT_DIFF_CHECK: PASS
+TRACKED_CHANGED_FILES: src/audiobook/wordprov.py; src/audiobook/stress_facts.py; tests/test_wordprov.py; tests/test_stress_facts.py; tasks/T15-7-WP2-FIX.md
+COMMITS: f1f42d3 claim; corrective delivery commit containing this report
+PUSH_CONFIRMED: checked and exact SHA supplied in final handoff
+BLOCKERS: none in local gates; independent Sol acceptance remains the package-exit gate
+SOL_REVIEW_REQUIRED: ONE TARGETED PACKAGE-EXIT REVIEW
+WP3_STARTED: NO
+```
+
+Validation pipeline: `process_section_occs` wraps all analytic rows. The explicit
+`validate_manifest_accesses` observes the production SU preparation helpers under
+row and accepted config-path guards. The real-snapshot regression additionally
+supplies recording rows to the actual unchanged `sutrace.trace_section` reader;
+synthetic added reads through indexing, get and membership must raise. No extra
+analytic fields were admitted. Because absence is observed by `row_leadin`,
+`manifest_fp` encodes absent fields separately from JSON null.
+
+F1 translation restores recorded keys only at their recorded positions, validates
+replacement bytes and complete forward reconstruction, and checks token counts
+at every substitution seam and the translated pad boundary. The untouched final
+suffix includes the sentinel. Unprovable attribution raises a safe error. No
+vowel position is derived from these strings. SUTrace's nine fields, WP-1 config
+guarding, accepted 6C11, gold identity and the v4 stress_fp API remain unchanged.
+
+Canonical TSV documents require exactly one final LF, including header-only
+files; row helpers accept a single row without its line terminator. A missing LF,
+blank line, extra column, wrong header/order, malformed value or out-of-order row
+is rejected. No occurrences inventory was published.
+
+Exact final validation commands (environment for all runs:
+`PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`):
+
+```text
+uv run pytest -q -p no:cacheprovider tests/test_wordprov.py tests/test_stress_facts.py tests/test_sutrace.py
+186 passed in 16.26s
+uv run pytest -q -p no:cacheprovider
+1479 passed, 5 skipped in 45.34s
+PYTHONHASHSEED=1 uv run pytest -q -p no:cacheprovider tests/test_wordprov.py tests/test_stress_facts.py tests/test_sutrace.py
+186 passed in 32.85s
+PYTHONHASHSEED=2 uv run pytest -q -p no:cacheprovider tests/test_wordprov.py tests/test_stress_facts.py tests/test_sutrace.py
+186 passed in 32.85s
+PYTHONHASHSEED=3 uv run pytest -q -p no:cacheprovider tests/test_wordprov.py tests/test_stress_facts.py tests/test_sutrace.py
+186 passed in 32.85s
+uv run python tests/helpers/t15_7_fixture.py check
+BASELINE_CHECK: PASS
+STORED_D: 0346b71f7b3f3c2078a144b56a8374a8998bf6b722d25af1fe0ce2a07ec1a5d6
+FRESH_D:  0346b71f7b3f3c2078a144b56a8374a8998bf6b722d25af1fe0ce2a07ec1a5d6
+SU_COUNT: 5127
+```
+
+All seven defects were independently reproduced against reference behavior using
+new synthetic probes (including an undeclared actual analytic read accepted by
+the reference pipeline), then closed. An initial full run caught the existing
+6C11 AST guard against dataclasses.replace in unitmap importers; record creation
+was corrected without weakening the guard. Production synthesis, manuscripts,
+manifests, configuration, audio, cache, S2 baseline and publisher were not changed.
+No RUAccent, synthesis, inventory publication, gold scoring or WP-3 was started.
