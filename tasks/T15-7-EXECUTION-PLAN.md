@@ -19,11 +19,12 @@
 
 - **Production 6C11, TD-1–TD-4:** CLOSED. Do not re-audit.
 - **Final T15-7 ADR:** approved after independent acceptance.
-- **T15-7.0b (ignore local gold files):** independent Sol PASS on `7cb8688589f81992c8c4e50cb04e9996e7c2b533`; task metadata still says `review`; synchronize to `done` before 7.1a.
+- **T15-7.0b (ignore local gold files):** independent Sol PASS on `7cb8688589f81992c8c4e50cb04e9996e7c2b533`; task metadata `done`.
 - **T15-7.0d:** independent read-only scouting PASS (D1–D6); 56/56 mapped, 4,624 units, 5,127 chunks, 77,998/77,998 consumed atoms, 1293 passed and 5 skipped; no blockers. Sol report received 2026-11-12.
 - **T15-7.0c / B1:** offline RUAccent probes reported; their pinned reproducibility evidence still needs independent acceptance for dependent tasks.
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
-- **T15-7 WP-1 (7.1a + 7.2):** coordinator preparing bounded Sonnet execution after reconciling task metadata; other packages remain unauthorized.
+- **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
+- **CURRENT: WP-2 (7.3 + 7.4):** GO — Sonnet word provenance, fingerprints and F1–F5 facts, scoped in `tasks/T15-7-WP2.md`. One Sol review at package exit. WP-3+ remain HOLD until dependencies.
 
 ## Workload and review strategy
 
@@ -55,7 +56,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Scope:** synthetic and local S2 baseline fixtures; SU trace, enumeration path, `phrase=None` vs empty carrier, exact input bytes.  
 **Required local gates:** baseline D reproduced in `--check`; output equals current TTS input for every SU; synthesis/hash/cache/config untouched; source data remain ignored; full pytest and P4 privacy.  
 **Independent QA gate:** Sol checks baseline reproducibility and non-regression at one pinned package SHA.  
-**Start:** after WP-0, ADR/process gating, and explicit coordinator authorization.
+**Status:** DONE; Sol independent PASS after R1–R3 corrections. Accepted source input baseline unchanged.
 
 ### WP-2 — Locate source words and record pronunciation facts
 
@@ -64,7 +65,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Scope:** `WordOcc` fields 1–35 (F6 = not_run), exact source offsets and provenance, `source_fp`, `manifest_fp`, F1–F5 classification and precedence.  
 **Required local gates:** round trip from source and analysis offsets, synthetic ambiguous/partial matches, fixed deterministic serialization, token- and context-change sensitivity, `PYTHONHASHSEED` tests, baseline non-regression, full pytest.  
 **Independent QA gate:** Sol verifies provenance/fingerprints/precedence once for combined package.  
-**Start:** WP-1 PASS.
+**Status:** GO to Sonnet. Task `tasks/T15-7-WP2.md`; do not start WP-3.
 
 ### WP-3 — Advise with RUAccent and publish verified inventory
 
