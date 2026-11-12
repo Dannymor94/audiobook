@@ -24,7 +24,7 @@
 - **T15-7.0c / B1:** offline RUAccent probes reported; their pinned reproducibility evidence still needs independent acceptance for dependent tasks.
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
 - **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
-- **CURRENT: WP-2 (7.3 + 7.4):** CHANGES_REQUIRED — Sol independently reviewed code SHA `48ff16bd3f9d170561a65bc1f195f6f39c6e91ca` and reproduced seven blockers R1–R7. One combined Sonnet corrective task `tasks/T15-7-WP2-FIX.md` is GO. WP-3+ remain HOLD until a single targeted Sol re-review and coordinator acceptance.
+- **CURRENT: WP-2 (7.3 + 7.4):** correction R1–R7 delivered at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a` with developer-reported Sol PASS; independently attributable Sol review evidence is not yet present in the task file. Request to record prior Sol verdict without redundant rerun and to verify separate RUAccent B1 gate is `tasks/T15-7-WP2-WP3-TRANSITION.md`. WP-2 awaits review-evidence reconciliation; WP-3 remains HOLD until WP-2 coordinator acceptance and B1 independent PASS.
 
 ## Workload and review strategy
 
