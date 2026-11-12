@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP1-FIX
 title: Repair enum equivalence and config dependency enforcement in WP-1
-status: review
+status: done
 owner:
 agent: claude-code
 branch: task/T15
