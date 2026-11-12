@@ -21,10 +21,11 @@
 - **Final T15-7 ADR:** approved after independent acceptance.
 - **T15-7.0b (ignore local gold files):** independent Sol PASS on `7cb8688589f81992c8c4e50cb04e9996e7c2b533`; task metadata `done`.
 - **T15-7.0d:** independent read-only scouting PASS (D1–D6); 56/56 mapped, 4,624 units, 5,127 chunks, 77,998/77,998 consumed atoms, 1293 passed and 5 skipped; no blockers. Sol report received 2026-11-12.
-- **T15-7.0c / B1:** offline RUAccent probes reported; their pinned reproducibility evidence still needs independent acceptance for dependent tasks.
+- **T15-7.0c / B1:** **CLOSED** after independent Sol PASS: 3 synthetic offline probes repeated byte-identically in 2 processes with pinned RUAccent runtime/content identity. Interface validation only, no stress-accuracy claim; evidence in `tasks/T15-7-WP2-ACCEPTANCE.md`.
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
 - **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
-- **CURRENT: WP-2 (7.3 + 7.4):** correction R1–R7 delivered at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a` with developer-reported Sol PASS; independently attributable Sol review evidence is not yet present in the task file. Request to record prior Sol verdict without redundant rerun and to verify separate RUAccent B1 gate is `tasks/T15-7-WP2-WP3-TRANSITION.md`. WP-2 awaits review-evidence reconciliation; WP-3 remains HOLD until WP-2 coordinator acceptance and B1 independent PASS.
+- **T15-7 WP-2 (7.3 + 7.4): DONE**; independent Sol PASS authenticated against original session evidence at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a`. All seven R1–R7 corrections closed, 1,479 passed / 5 skipped, 56 sections, 76,036 occurrences, WP-1 D unchanged. Acceptance recorded in `tasks/T15-7-WP2-ACCEPTANCE.md`.
+- **CURRENT: WP-3 (7.1b + 7.5 + 7.6): GO to Sonnet** as a single bounded package in `tasks/T15-7-WP3.md`. Internal STOP at historical v4 TSV bytes, offline F6/analysis identity, and publisher crash consistency; one independent Sol review at complete package exit. WP-4 remains HOLD.
 
 ## Workload and review strategy
 
@@ -75,7 +76,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Required local gates:** B1 independently closed; historical TSV digest byte-identical; no changes to TTS input; all fingerprint mutation invariants; publication integrity, crash injection, reader refusal of mixed/stale generations; full pytest.  
 **Independent QA gate:** Sol reviews offline RUAccent interface consistency, content fingerprinting and crash-safe publishing at the combined package SHA.  
 **STOP before publication changes if the v4 historical baseline cannot be reproduced.**  
-**Start:** WP-2 PASS and B1 closed.
+**Status:** GO after independently accepted WP-2 and B1. Full authorized scope is `tasks/T15-7-WP3.md`; the historical v4 digest/byte gate is hard before publication changes.
 
 ### WP-4 — Human gold review workflow and quality metrics
 
