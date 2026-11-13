@@ -98,3 +98,24 @@ def test_no_normalization_guessing():
 def test_no_silent_punctuation_lead_in_word_inclusion():
     with pytest.raises(UnsupportedWitness, match="FRAGMENT_STREAM_NOT_EXACT_SOURCE"):
         witness(["Елепа"], ["Другая фраза. Елепа"], 0, "Елепа")
+
+
+def test_real_wordprov_and_chunk_fragments_source_key_witness_if_installed():
+    """In audiobook env, prove chunk ordinal to actual production fragments."""
+    synth = pytest.importorskip("audiobook.synth")
+    from test_stress_eval_sample import context_for
+    for raw, cfg in (
+        ("Елепа, елепа.", {"pauses_ms": {"enum_pause_ms": 250, "sentence": 350}}),
+        ("Елепа елепа.", {}),
+    ):
+        ctx = context_for([{"type": "text", "text": raw}])
+        rows = sorted(ctx.rows, key=lambda r: r.chunk_word_index)
+        chunk_source_words = [row.form_source for row in rows]
+        frags = synth.chunk_fragments(raw, cfg)
+        raw_fragments = [frag.rstrip("?") if is_enum and frag.endswith("?") else frag
+                         for frag, _, is_enum in frags]
+        assert [row.chunk_word_index for row in rows] == list(range(len(rows)))
+        for row in rows:
+            proof = witness(chunk_source_words, raw_fragments,
+                            row.chunk_word_index, row.form_source)
+            assert proof.form_source == row.form_source
