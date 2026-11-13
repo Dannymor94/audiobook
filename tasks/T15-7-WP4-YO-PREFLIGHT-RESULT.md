@@ -11,6 +11,23 @@ actual_active_h: unknown
 
 # T15-7 WP-4 — G0 pre-respell feasibility probe, not GO
 
+## G0 latest test retry — one false-positive privacy assertion; coordinator correction
+
+Owner relayed offline read-only results for exact SHA `d1f89a39ec86e1c558ba6496a251aea7b88f5f17` in an isolated audiobook worktree with local S2 baseline:
+
+- Four focused G0 modules: **51 passed, 1 failed, 0 skipped** (`1 failed, 51 passed in 1.40s`).
+- Full pytest `-rs`: **1,849 passed, 1 failed, 6 skipped** (`1 failed, 1849 passed, 6 skipped in 39.12s`).
+- Both preceding zero-count KeyErrors are **fixed**; schema-stability regression passed.
+- Remaining failure at `tests/test_stress_yo_g0_readonly.py:63`: test required substring `"source_key" not in payload`, but `unsupported_source_key` is an intentional **aggregate counter name**, not a source_key value.
+- Six baseline-independent SKIPs: three gated by `RUN_SLOW=1`, two by available torch quantization engine, one by explicit pinned offline smoke. Five additional baseline tests passed after providing the owner's local S2 baseline.
+- Protected-file parity: 416 unchanged, 0 added/deleted; sample, gold/archive and production untouched.
+
+**Self-executed coordinator correction:** commit `7b8cae8cb26047d92992b50e37b7f44e0bf9a5a2` changes **only a test**. It replaces the substring-level ban with an exact allowlist of top-level aggregate JSON fields, integer-valued counts, a ban on row-level sensitive values, and explicit protection against the invented synthetic source_key/text. The aggregate counter `unsupported_source_key` remains permitted by design. This is not an authorization to emit real per-word keys.
+
+**Gate:** the new commit **has not yet been run in actual audiobook .venv**. No targeted or full-suite PASS is claimed for it. Run four focused G0 modules and full regression once at pinned new PR head, with owner-local S2 baseline. Do not modify production/ADR/gold or merge PR #3.
+
+**Technical G0 state:** mapping coverage **PASS** at the measured unchanged source snapshot; test gate **pending retest**; overall G0 **BLOCKED** by unapproved semantics for sample/2 and historical YO/C3 evidence. Even if focused tests pass, `g0_closed=false` must remain until the contract decision.
+
 ## G0 full-corpus run on SHA 52bcb9a — coverage PASS, test schema FAIL (reported)
 
 Owner relayed Sonnet's **offline real-.venv, exclusive worktree** verification at PR #3 SHA
