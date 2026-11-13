@@ -60,7 +60,24 @@ def test_synthetic_current_sample_coverage_is_aggregate_only(tmp_path, monkeypat
         assert m["g0_closed"] is False
         payload = json.dumps(m, ensure_ascii=False)
         assert "Елепа" not in payload and "01_test" not in payload
-        assert "source_key" not in payload
+        # Privacy applies to row-level keys/values, not to the safe name of
+        # the aggregate counter "selected_unsupported_source_key".
+        # Lock the payload shape so new source text / per-row identities
+        # cannot silently enter the exported JSON.
+        assert set(m) == {
+            "status", "policy", "source_fp", "analysis_fp", "sample_fp",
+            "yo_map_sha256", "norm_content_sha256",
+            "prep_config_sha256", "counts", "selected_by_stratum",
+            "g0_closed", "no_data_written",
+        }
+        assert all(type(value) is int for value in m["counts"].values())
+        assert all(
+            type(value) is int
+            for stratum in m["selected_by_stratum"].values()
+            for value in stratum.values()
+        )
+        assert "source_key" not in m and "labeler" not in m
+        assert "01_test|0|0" not in payload
         assert "labeler" not in payload
     finally:
         yo._book_map.cache_clear()
