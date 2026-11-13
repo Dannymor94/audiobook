@@ -41,6 +41,30 @@ python -B tests/stress_yo_g0_readonly.py
 
 Use the *actual new isolated worktree path* for `PYTHONPATH`; the old cab5339 path is an example, not a correct path for later commits. Report only `status`, aggregate `counts`, `selected_by_stratum`, `yo_map_sha256`, `norm_content_sha256`, `prep_config_sha256`, `sample_fp` and a privacy/baseline statement. Do NOT transmit real source words, source keys, fragment strings, paths containing book text, per-token hashes, labels or the owner's S4 files.
 
+### Additional source-only fingerprint oracle
+
+`tests/test_stress_yo_sample_policy_collision.py` demonstrates a **current `sample/1` collision** with two invented words: swap which word belongs to `omograph` while preserving the exact selected keys, stratum counts, source_fp, analysis_fp and current policy targets. The resulting `sample_fp` is identical even though `strata_by_key` differs. A proposed, sorted **assignment digest** would distinguish the states. This is a characterization test of the existing code, **not an approved `sample/2` algorithm**, and was added after Sonnet's original 43 PASS run.
+
+### Exact minimal new-worktree commands
+
+```bash
+# Run from an isolated worktree checked out to PR #3's latest head.
+export UV_NO_SYNC=1
+export UV_PROJECT_ENVIRONMENT=/Users/danny/Documents/audiobook/.venv
+export PYTHONPATH="$PWD/src"
+export PYTHONDONTWRITEBYTECODE=1
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+uv run pytest -q -p no:cacheprovider \
+  tests/test_stress_yo_prerespell_proof.py \
+  tests/test_stress_yo_fragment_witness.py \
+  tests/test_stress_yo_g0_readonly.py \
+  tests/test_stress_yo_sample_policy_collision.py
+uv run python -B tests/stress_yo_g0_readonly.py
+```
+
+**No new-test results are claimed at this head.** The collector must return `G0_COVERAGE_MEASURED` or `G0_UNSUPPORTED_PRESENT`, with only aggregate counts and global fingerprints. `ERROR` is an explicit preflight failure, not a zero-restoration result. The command does not write the sample or owner S4 gold/todo/archive and must not be modified to do so. Following the run, check all protected S4 file digests against their before snapshot locally without posting their contents. Owner Option B/B′ approval remains pending.
+
 If any audit preflight fails, returns `ERROR` or yields `G0_UNSUPPORTED_PRESENT`, keep B′ BLOCKED and return only aggregate error codes/counts; no heuristic fallback. This script is a **measurement tool**, not the approved restoration observer or an auto-fix. Current production code remains unmodified.
 
 
