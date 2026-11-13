@@ -25,7 +25,8 @@
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
 - **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
 - **T15-7 WP-2 (7.3 + 7.4): DONE**; independent Sol PASS authenticated against original session evidence at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a`. All seven R1–R7 corrections closed, 1,479 passed / 5 skipped, 56 sections, 76,036 occurrences, WP-1 D unchanged. Acceptance recorded in `tasks/T15-7-WP2-ACCEPTANCE.md`.
-- **CURRENT: WP-3 (7.1b + 7.5 + 7.6): GO to Sonnet** as a single bounded package in `tasks/T15-7-WP3.md`. Internal STOP at historical v4 TSV bytes, offline F6/analysis identity, and publisher crash consistency; one independent Sol review at complete package exit. WP-4 remains HOLD.
+- **T15-7 WP-3 (7.1b + 7.5 + 7.6): DELIVERED** at `205485b9eade65ca55af141f246703b7aaa71f0e`. Developer handoff reports the final independent Sol review PASS (no blockers); its independently authored output is not yet recorded in the GitHub task report. v5 published locally, v3 archive preserved, 1,602 passed / 6 skipped, S2 D and historical D_tsv unchanged. Treat as QA-reported PASS; reconcile review record before setting task metadata `done`.
+- **CURRENT: WP-4 (7.7 + 7.8): HOLD** pending coordinator GO and evidence reconciliation. B2 remains an owner-controlled gate for T16/T17 and full rendering, not for offline inventory and metrics.
 
 ## Workload and review strategy
 
@@ -43,7 +44,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 
 ## Work packages
 
-### WP-0 — Readiness scouting and privacy (current)
+### WP-0 — Readiness scouting and privacy
 
 **Components:** 7.0b PASS, 7.0d assigned, 7.0c evidence / B1, 7.0e snapshot evidence / B2.  
 **Lead:** Sol for read-only checks; Coordinator for gate decisions.  
@@ -66,7 +67,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Scope:** `WordOcc` fields 1–35 (F6 = not_run), exact source offsets and provenance, `source_fp`, `manifest_fp`, F1–F5 classification and precedence.  
 **Required local gates:** round trip from source and analysis offsets, synthetic ambiguous/partial matches, fixed deterministic serialization, token- and context-change sensitivity, `PYTHONHASHSEED` tests, baseline non-regression, full pytest.  
 **Independent QA gate:** Sol verifies provenance/fingerprints/precedence once for combined package.  
-**Status:** GO to Sonnet. Task `tasks/T15-7-WP2.md`; do not start WP-3.
+**Status:** DONE. R1–R7 corrected and independently accepted at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a`; WP-2 acceptance recorded.
 
 ### WP-3 — Advise with RUAccent and publish verified inventory
 
@@ -76,7 +77,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Required local gates:** B1 independently closed; historical TSV digest byte-identical; no changes to TTS input; all fingerprint mutation invariants; publication integrity, crash injection, reader refusal of mixed/stale generations; full pytest.  
 **Independent QA gate:** Sol reviews offline RUAccent interface consistency, content fingerprinting and crash-safe publishing at the combined package SHA.  
 **STOP before publication changes if the v4 historical baseline cannot be reproduced.**  
-**Status:** GO after independently accepted WP-2 and B1. Full authorized scope is `tasks/T15-7-WP3.md`; the historical v4 digest/byte gate is hard before publication changes.
+**Status:** DELIVERED at `205485b9eade65ca55af141f246703b7aaa71f0e`; independent Sol PASS reported in owner handoff, reviewer evidence to be attached. v5 inventory published locally, D and D_tsv preserved. WP-4 not yet authorized.
 
 ### WP-4 — Human gold review workflow and quality metrics
 
@@ -94,6 +95,49 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Output:** aggregate stress-quality metrics, Wilson gates, risk decision, authorized short audio tests when appropriate. No full render without owner authorization.  
 **Start:** WP-4 accepted, owner labeling completed.
 
+## Effort estimates and time tracking (owner request, added 2026-11-13)
+
+**Units:** approximate **active work-hours** for the named executor (development, debugging and local gates), not wall-clock elapsed time or a completion promise. The time for independent QA, the owner's labeling and queue delays is tracked **separately**. These ranges are planning estimates, **not observed history**; do not retrospectively label completed tasks as having actually taken the estimate. Source/model availability, contention for gamebox, queueing, hard STOP conditions and correction cycles can increase calendar duration significantly.
+
+**Rule for future task decomposition:** every new `tasks/T*.md` / `tasks/G*.md` / `tasks/H*.md` and each work package must specify `estimate_active_h: <min>-<max>`, executor, dependencies, QA estimate and the time of the next blocking gate. On completion, record `actual_active_h` and `actual_elapsed_h` only when measured (otherwise `unknown`); update the estimate after a material scope change. Estimate and actual are never acceptance evidence. For asynchronous agent runs, measure active execution separately from approval/wait/owner time.
+
+### Decomposed tasks — active effort, excluding independent QA
+
+| Package | Task | Responsible | Estimated active h | Current status |
+|---|---|---|---:|---|
+| WP-0 | 7.0b — local S2/S4 ignore protection | Sonnet | 0.5–1.5 | DONE |
+| WP-0 | 7.0c — offline RUAccent interface probes / B1 | Sol | 1–3 | DONE |
+| WP-0 | 7.0d — manifest, units, 6C11 and status reconnaissance | Sol | 1–3 | DONE |
+| WP-0 | 7.0e — snapshot disagreement analysis / B2 | Sol / coordinator | 1–2 | Investigation done; owner decision OPEN |
+| WP-1 | 7.1a — frozen TTS input baseline and enum oracle | Sonnet | 2–4 | DONE |
+| WP-1 | 7.2 — observational SUTrace and equivalence checks | Sonnet | 3–7 | DONE |
+| WP-2 | 7.3 — WordOcc provenance, source/manifest FP, links | Sonnet | 5–10 | DONE |
+| WP-2 | 7.4 — facts F1–F5, F6=not_run, §9 precedence | Sonnet | 3–6 | DONE |
+| WP-3 | 7.1b — isolated historical v4 TSV byte baseline | Sonnet | 2–5 | DELIVERED |
+| WP-3 | 7.5 — RUAccent F6 and analysis_fp | Sonnet | 5–10 | DELIVERED |
+| WP-3 | 7.6 — v5 publisher, stale/tamper/crash-safe reader | Sonnet | 8–16 | DELIVERED |
+| WP-4 | 7.7 — deterministic sampling and local gold merge | Sonnet | 6–12 | WAITING for GO |
+| WP-4 | 7.8 — metrics, Wilson, COMPLETE/INCOMPLETE/ERROR | Sonnet | 4–8 | WAITING for 7.7 |
+| WP-5 | H04 — owner listens and labels ~320 selected items | Owner | 4–10* | WAITING for 7.7 |
+| WP-5 | 7.9 — final aggregate quality-gate report | Sol / coordinator | 1–3 | WAITING for 7.8 + H04 |
+
+*H04 is deliberately a broad estimate based on short clips and familiar review workflow; it is highly sensitive to clip availability, ambiguous words, number of relabels and owner pace. Actual human effort must be measured; no automatic acceptance of sound quality.
+
+### Package totals, including one independent QA at each exit
+
+| Package | Implementation / owner h | Sol independent exit QA h | Total active h (non-calendar) | Status |
+|---|---:|---:|---:|---|
+| WP-0 | 3.5–9.5 | 1–2 | 4.5–11.5 | DONE (B2 owner choice open) |
+| WP-1 | 5–11 | 1–3 | 6–14 | DONE |
+| WP-2 | 8–16 | 2–4 | 10–20 | DONE |
+| WP-3 | 15–31 | 3–6 | 18–37 | DELIVERED; Sol PASS reported |
+| **WP-4** | **10–20** | **2–4** | **12–24** | **NEXT** |
+| **WP-5** | **5–13** | **1–2** | **6–15** | WAITING |
+
+**Remaining planning baseline (WP-4 + WP-5): 18–39 active h**, before any change requests, waiting for the owner, offline model availability or source/audio prerequisites. Plan a **25–40% rework contingency** separately for these remaining packages (~5–16 additional h). Some owner H04 labeling can start after 7.7 and overlap with development of 7.8, so total active hours should **not** be presented as elapsed calendar hours.
+
+**Operational tracking in each coordinator update:** show task ID, executor, `estimate_active_h`, `actual_active_h` if known, progress/status, blocking dependency, QA estimate, and next allowed action. Re-estimate remaining hours after each package-exit PASS or material defect.
+
 ## Other work outside T15-7
 
 - T16/T17 playback/word-times compatibility remains separately gated and depends on snapshot authority and its own acceptance.
@@ -108,5 +152,6 @@ For every update show:
 3. Substeps with `PASS / IN PROGRESS / WAITING / BLOCKED / PLANNED`.
 4. Assigned executor.
 5. Single next action and exact blocking condition.
+6. Estimated remaining active hours for the decomposed work (owner + agent + Sol separated), and measured actual time only if available.
 
 This document is an execution and reporting plan, not an independent permission to bypass ADR requirements.
