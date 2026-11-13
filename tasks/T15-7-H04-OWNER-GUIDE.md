@@ -1,9 +1,9 @@
 # H04 — Local Owner Gold-Labeling Guide (T15-7)
 
-**Type:** operator instructions; no source text, voice, gold labels, or audio in Git.  
-**Status:** PREPARATION. Real H04 begins only after Sonnet's `stress-eval sample` creates the actual ignored sample/todo and the coordinator authorizes owner labeling.  
-**Expected size:** up to 320 selected occurrences across six strata, often fewer if a stratum is small.  
-**Estimated owner active effort:** 4–10 hours as an initial planning range; actual time depends on listening needs and ambiguity.  
+**Type:** operator instructions; no source text, voice, gold labels, or audio in Git.
+**Status:** READY. Milestone A was accepted at `928bb6e`; the local sample/todo contains 320 blank annotation rows and owner labeling may begin. Keep those rows on the local device.
+**Expected size:** up to 320 selected occurrences across six strata, often fewer if a stratum is small.
+**Estimated owner active effort:** 4–10 hours as an initial planning range; actual time depends on listening needs and ambiguity.
 **Authority:** `tasks/T15-7-FINAL-ADR.md` §10, particularly the C3 version-ledger and U5 grammar.
 
 ## What the owner actually does

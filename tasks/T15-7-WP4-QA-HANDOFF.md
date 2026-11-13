@@ -1,9 +1,9 @@
 # T15-7 WP-4 — One Independent Sol Package-Exit Review
 
-**Status:** PREPARED, not started. Use only after Sonnet delivers the combined **7.7 + 7.8** WP-4 at the final pinned SHA.  
-**Review duration estimate:** 2–4 active hours; revise if blocking defects require another correction.  
-**Target:** `task/T15`, not this partial metrics branch.  
-**Normative authority:** `tasks/T15-7-FINAL-ADR.md` §5, §10 C3/U5, §11 P1–P6, §12 7.7/7.8; `tasks/T15-7-WP4.md`.  
+**Status:** PREPARED, not started. Use only after Sonnet delivers the combined **7.7 + 7.8** WP-4 at the final pinned SHA.
+**Review duration estimate:** 2–4 active hours; revise if blocking defects require another correction.
+**Target:** `task/T15`, not this partial metrics branch.
+**Normative authority:** `tasks/T15-7-FINAL-ADR.md` §5, §10 C3/U5, §11 P1–P6, §12 7.7/7.8; `tasks/T15-7-WP4.md`.
 **Review cadence:** ONE Sol exit review, not separate 7.7 and 7.8 reviews. The metrics-core PR is not the complete package.
 
 ## Independently verify

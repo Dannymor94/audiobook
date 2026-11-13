@@ -10,10 +10,10 @@
 
 # WP-4 (T15-7.8) — Pure Metrics Core Integration Contract
 
-**Status:** PROPOSED, isolated PR; not yet integrated into `task/T15`.  
-**Executor:** ChatGPT, parallel to Sonnet's WP-4 milestone A.  
-**Code:** `src/audiobook/stress_metrics.py`  
-**Tests:** `tests/test_stress_metrics.py` (43) + `tests/test_stress_metrics_contract.py` (38) = **81 passed** independently with `PYTHONHASHSEED=1,2,3`, `PYTHONDONTWRITEBYTECODE=1`, `pytest -q -p no:cacheprovider`, `PYTHONPATH=src`; full audiobook suite NOT run here. The additional oracles use independent high-precision Decimal arithmetic, complementary Wilson identities, precise gate thresholds, and permutations.  
+**Status:** INTEGRATED into `task/T15` by normal merge `6e90d6a`; score adapter and end-to-end tests implemented. Combined WP-4 exit review remains required.
+**Executor:** ChatGPT, parallel to Sonnet's WP-4 milestone A.
+**Code:** `src/audiobook/stress_metrics.py`
+**Tests:** `tests/test_stress_metrics.py` (43) + `tests/test_stress_metrics_contract.py` (38) = **81 passed** independently with `PYTHONHASHSEED=1,2,3`, `PYTHONDONTWRITEBYTECODE=1`, `pytest -q -p no:cacheprovider`, `PYTHONPATH=src`; full audiobook suite NOT run here. The additional oracles use independent high-precision Decimal arithmetic, complementary Wilson identities, precise gate thresholds, and permutations.
 **Effort estimate:** ~4–8 h for complete 7.8 integration, this core only is a subset; do not mark 7.8 DONE.
 
 ## Scope split / no conflicts

@@ -2,7 +2,7 @@
 
 The current inventory is read only through its validated v5 reader. Gold is an
 evaluation ledger; nothing here changes synthesis or supplies machine labels.
-Statistical scoring belongs to the separately confirmed integration contract.
+Statistical scoring uses the independently supplied pure metrics core.
 """
 from __future__ import annotations
 
@@ -520,23 +520,115 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
             "duplicates": updated_state.duplicates}
 
 
+def _accepted_vowels(gold, occ):
+    """Translate validated human stress labels; never infer truth from F6."""
+    label = validate_gold(gold, occ)["gold_vowel"]
+    if label in ("ambiguous", "unknown_name"):
+        return frozenset()
+    if label == "yo":
+        spelling = gold["form_source"].lower()
+        if spelling.count("ё") != 1:
+            spelling = occ.form_synth.lower()
+        return frozenset([vowel_count(spelling[:spelling.index("ё")])])
+    return frozenset(map(int, label.removeprefix("variants:").split("|")))
+
+
+def _present(value):
+    """Round report values only, after all decisions use full precision."""
+    if isinstance(value, dict):
+        return {key: _present(item) for key, item in value.items()}
+    if type(value) is float:
+        return round(value, 4)
+    return value
+
+
+def score(config):
+    """Validate the current sample and ledger, then publish only aggregates.
+
+    Incomplete samples expose counts, with no partial metrics or passing gates.
+    Gold and its archive are read-only; the archive is never an input.
+    """
+    from audiobook.stress_metrics import Observation, calculate_metrics
+    context = _load_context(config)
+    selection = _selection(context)
+    record = selection.record
+    sample_path = _sample_path(record)
+    _verify_sample(record, sample_path)
+    gold_path = paths.TEXT / "stress_gold.tsv"
+    ledger, gold_before = _read_ledger(gold_path)
+    state = inspect_ledger(ledger, context)
+    keys = record["keys"]
+    missing = sum(key not in state.active for key in keys)
+    counts = {"selected": len(keys), "active_labels": len(keys) - missing,
+              "missing_labels": missing, "stale_gold": len(state.stale),
+              "duplicates": state.duplicates, "one_vowel_aligned": selection.one_vowel_aligned,
+              "by_stratum": {name: {"N": record["strata"][name]["N"],
+                                      "selected": record["strata"][name]["n"]} for name, _ in STRATA}}
+    result = {"source_fp": context.source_fp, "analysis_fp": context.analysis_fp,
+              "sample_fp": record["sample_fp"],
+              "gold_sha256": hashlib.sha256(gold_before).hexdigest() if gold_before is not None else None,
+              "counts": counts, "metrics": None, "wilson": None, "gates": None,
+              "status": "INCOMPLETE" if missing else "COMPLETE"}
+    if not missing:
+        by_key = {occ.source_key: occ for occ in context.rows}
+        observations = []
+        for key in keys:
+            occ = by_key[key]
+            gold = state.active[key]
+            accepted = _accepted_vowels(gold, occ)
+            resolved = occ.f6_status == "resolved"
+            observations.append(Observation(
+                stratum=selection.strata_by_key[key],
+                eligible=occ.alignment_status == "aligned" and vowel_count(occ.form_analysis) >= 2,
+                resolved=resolved, usable_gold=bool(accepted),
+                correct=resolved and bool(accepted) and occ.f6_vowel in accepted,
+                yo_changed=yo_changed(occ), yo_correct=gold["yo_correct"],
+                covered_by_override=occ.status == "covered_by_override"))
+        calculated = calculate_metrics(observations, {name: record["strata"][name]["N"] for name, _ in STRATA})
+        counts.update(calculated["counts"])
+        counts["usable_gold"] = sum(row.usable_gold for row in observations)
+        metrics = calculated["metrics"]
+        bounds = lambda rates: {name: {bound: rate[bound] for bound in ("lower", "upper")}
+                                for name, rate in rates.items()}
+        result.update(metrics=_present(metrics), gates=calculated["gates"], wilson=_present({
+            "overall": bounds(metrics["overall"]),
+            "by_stratum": {name: bounds(rates) for name, rates in metrics["by_stratum"].items()}}))
+    target = paths.OUT / "stress" / "eval" / "score" / (record["sample_fp"][:16] + ".json")
+    plan = _plan(target, _canonical(result).decode("utf-8") + "\n", _optional_bytes(target))
+    _assert_current(context, config)
+    _verify_sample(record, sample_path)
+    if _optional_bytes(gold_path) != gold_before:
+        _error("GOLD_OUTPUT_CHANGED")
+    _apply(plan)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="stress-eval", description="Локальная выборка и журнал ручной разметки ударений")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("sample", help="Создать детерминированную выборку и todo")
+    commands.add_parser("score", help="Проверить разметку и сохранить агрегированную оценку")
     merge_parser = commands.add_parser("merge", help="Проверить и объединить ручную разметку")
     merge_parser.add_argument("file", type=Path, help="Локальный TSV с разметкой")
     merge_parser.add_argument("--sample", type=Path, help="Запись текущей выборки JSON")
     args = parser.parse_args(argv)
     from audiobook.__main__ import load_config
     try:
-        result = sample(load_config()) if args.command == "sample" else merge(load_config(), args.file, args.sample)
+        config = load_config()
+        if args.command == "sample":
+            result = sample(config)
+        elif args.command == "score":
+            result = score(config)
+        else:
+            result = merge(config, args.file, args.sample)
     except (AnnotationError, OSError, ValueError) as error:
         code = error.code if isinstance(error, AnnotationError) else "EVALUATION_INPUT_ERROR"
-        print("stress-eval: ошибка " + code)
+        print("stress-eval: ERROR (ошибка " + code + ")")
         return 1
-    print("stress-eval: " + json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    displayed = ({key: result[key] for key in ("status", "counts", "gates")}
+                 if args.command == "score" else result)
+    print("stress-eval: " + json.dumps(displayed, ensure_ascii=False, sort_keys=True))
+    return 2 if result.get("status") == "INCOMPLETE" else 0
 
 
 if __name__ == "__main__":
