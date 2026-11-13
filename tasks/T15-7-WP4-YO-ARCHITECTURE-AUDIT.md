@@ -36,6 +36,14 @@ Option B's core split is necessary: **immutable human source-vowel stress truth*
 
 A lower-scope fallback **C-stage** is described below if pre-respell provenance cannot be proven without protected synthesis changes. It requires its own explicit ADR approval and must not falsely claim full WP4/YO acceptance.
 
+## G0 preflight status — partial synthetic proof (2026-11-13)
+
+The coordinator self-implemented a **test-only** strict observation prototype in `tests/test_stress_yo_prerespell_proof.py` and an exact chunk-ordinal/fragment witness in `tests/test_stress_yo_fragment_witness.py`. Local synthetic prototypes: **26 passed / 2 skipped** plus **14 passed**, at each `PYTHONHASHSEED=1,2,3`. The two skips require the actual installed audiobook package. Source code/test-only additions are in this draft PR and no production or owner-S4 files were changed.
+
+**Important distinction:** The tests show that the candidate token can be checked against the prepared **pre-respell** fragment *given a proven source fragment ordinal*. The second witness derives a local fragment ordinal from `chunk_word_index` only if an externally grounded, ordered source chunk token stream is exactly identical to the concatenated raw fragment token stream. They do **not** yet prove that every selected real `WordOcc.source_key` has that grounded stream/index correspondence, nor that local `yo.book_map` cannot change between reads. Thus **G0 remains OPEN**, and Option B/B′ remains unapproved.
+
+See `tasks/T15-7-WP4-YO-PREFLIGHT-RESULT.md` for the remaining offline integration proof, mapping-content pinning and fail-closed requirements. Do not infer restoration evidence from `WordOcc.form_synth`, apply token search, or transform existing S4 data.
+
 ## Grounded implementation facts (read-only source inspection)
 
 1. `wordprov.process_section_occs` sets `WordOcc.form_synth` from aligned tokens in `SUTrace.prep_text`. `SUTrace.prep_text` is the **final string sent to the engine**, after respell and sentinel/pad handling; it is **not** an immutable independent pre-respell restoration observation.
