@@ -114,7 +114,7 @@ def audit_local(config: dict) -> dict:
     # The local manifest belongs to the validated original source generation.
     # Never scan names and infer matches by spelling or edit distance.
     seen_manifest_chunks: set[tuple[str, str]] = set()
-    observed_selection: set[str] = set()
+    observed_selection = {row.source_key for row in eligible if row.source_key in selected}
     for section in sorted(by_section):
         manifest = paths.OUT / "sections" / section / "manifest.jsonl"
         try:
@@ -175,13 +175,12 @@ def audit_local(config: dict) -> dict:
 
             prepared = [voicecfg.prepare_text(fragment, config, opened)
                         for fragment, opened in zip(raw_fragments, opens, strict=True)]
-            direct = [(yo.restore(fragment, mapping) if config.get("text_prep", {}).get("yo_restore") else fragment)
+            direct = [(yo.restore(fragment, mapping) if (config.get("text_prep") or {}).get("yo_restore") else fragment)
                       for fragment in raw_fragments]
             for row in checked:
                 # SourceIndex.resolve is the independent source_key/identity witness
                 # for selected rows; unit/token coordinates must agree exactly.
                 if row.source_key in selected:
-                    observed_selection.add(row.source_key)
                     try:
                         src = context.sources.resolve(row.source_key)
                         if src is None:
