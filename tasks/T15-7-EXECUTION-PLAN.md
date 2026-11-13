@@ -10,10 +10,18 @@
 ## Roles and workflow
 
 - **Owner:** approves sound quality, snapshot authority, external compute, and any full-book render or merge.
-- **ChatGPT Coordinator:** prioritizes and scopes work packages, tracks dependencies, chooses QA gates, and accepts scoped deliverables based on evidence.
+- **ChatGPT Coordinator + direct contributor:** prioritizes and scopes work packages, but **self-executes every safely separable task within available tools before delegating** (source-free pure code, synthetic tests, minimal documentation, GitHub branches/PRs, reproducible static review and evidence). Delegates only work requiring local protected corpus/model/device, unavailable runtime, an architectural decision, owner human judgment, or independent Sol acceptance. For parallel code, use an exclusive branch/worktree and draft PR, avoid Sonnet-owned files, prove local tests when available, and explicitly separate tests personally run from agent reports. Do not merge into an active shared branch, touch protected data, bypass STOP gates, or self-approve independent QA.
 - **Claude Chat Architect:** resolves actual contract contradictions; no architecture reopen without new evidence.
 - **Claude Code Sonnet 4.6:** implements bounded work packages, runs local tests after each internal milestone, commits to assigned branch/worktree, and STOPs at gates.
 - **Codex Sol:** scouts evidence and independently reviews only at specified high-risk integration gates or on reproducible failures.
+
+## Self-execution-first rule (owner directive, 2026-11-13)
+
+Before giving an implementation task to another agent, the coordinator checks: **Can I complete this safely and prove it directly with my available tools?** If yes, perform it now, commit to an isolated branch or authorized docs-only plan, run the applicable local tests and report the exact SHA; do not spend a Sonnet task slot on that work. If only part is independently implementable, do that part first and hand over a narrow integration contract and PR; keep one independent Sol review at the final risk boundary. If there is a hard blocker, work on non-invasive synthetic reproducers and verification scaffolding instead of bypassing it.
+
+**Must delegate/escalate rather than self-implement:** changes to normative ADR without architect/owner decision; any synthesis, full render, human truth/labeling; code requiring private model/manuscript/audio access not available to the coordinator; independent acceptance of one's own work. Keep existing P1–P6, production 6C11, WP1/WP3 baselines, protected code/data and main branch untouched. No background action is implied; each execution occurs when requested and available.
+
+**Active example:** WP-4 historical ё semantics remain BLOCKED until a signed architect ADR decision. Coordinator may independently prepare isolated synthetic regression tests and a failure-characterization PR, but may not decide semantic migration or rewrite gold labels. See `tasks/T15-7-WP4-YO-ADR-ESCALATION.md`.
 
 ## Current position
 
