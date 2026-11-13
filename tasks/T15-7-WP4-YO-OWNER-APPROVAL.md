@@ -18,7 +18,7 @@ actual_elapsed_h: unknown
 **Received:** 2026-11-13 as owner-supplied full architect response, headed `TASK: T15-7-WP4-YO-ADR`, **STATUS: BLOCKED — OWNER APPROVAL REQUIRED**.  
 **Code:** `f4a8dea2026fb35b104e81d396672bd96d9b0c59`; blocked report `tasks/T15-7-WP4.md`.  
 **Gate:** This file is a **proposal/decision register**, NOT acceptance, not a final ADR addendum, and NOT permission to change production semantics or owner gold files.  
-**Owner approval:** **NOT YET RECORDED**.
+**Owner approval:** **NOT APPROVED**. On 2026-11-13 the owner explicitly declined to approve Option B pending deeper architectural risk analysis. This file remains an unapproved proposal, not a GO. Review findings will be prepared separately; no production/gold/ADR semantics may be changed.
 
 ## Three explicit owner-approved semantic decisions required together
 
@@ -52,9 +52,9 @@ Third check: existing `.gitignore` pattern `/text/stress_gold*.tsv` already cove
 ## Decision state
 
 ```text
-OWNER_APPROVES_SOURCE_ONLY_STRESS_TRUTH: PENDING
-OWNER_APPROVES_SEPARATE_RESTORATION_TRUTH: PENDING
-OWNER_APPROVES_PRIVATE_S4_YO_EVIDENCE_AND_MERGE_YO: PENDING
+OWNER_APPROVES_SOURCE_ONLY_STRESS_TRUTH: NOT_APPROVED_PENDING_REVIEW
+OWNER_APPROVES_SEPARATE_RESTORATION_TRUTH: NOT_APPROVED_PENDING_REVIEW
+OWNER_APPROVES_PRIVATE_S4_YO_EVIDENCE_AND_MERGE_YO: NOT_APPROVED_PENDING_REVIEW
 PRE_RESPELL_EVIDENCE_PROVEN_ACCESSIBLE: UNVERIFIED
 WP4_CODE_FIX_AUTHORIZED: NO
 WP4_STATUS: BLOCKED
