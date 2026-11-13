@@ -11,6 +11,49 @@ actual_active_h: unknown
 
 # T15-7 WP-4 — G0 pre-respell feasibility probe, not GO
 
+## G0 full-corpus run on SHA 52bcb9a — coverage PASS, test schema FAIL (reported)
+
+Owner relayed Sonnet's **offline real-.venv, exclusive worktree** verification at PR #3 SHA
+`52bcb9a1aea556df76c67b4b4f9bd2b20330b6ed`:
+
+| Evidence | Reported result |
+|---|---|
+| Four targeted test modules | **49 passed, 2 failed, 0 skipped** |
+| Full pytest with `-rs` | **1842 passed, 2 failed, 11 skipped** |
+| Additional five baseline-dependent tests | **5 passed, 0 failed** after attaching local S2 baseline |
+| Private read-only CLI audit | `G0_COVERAGE_MEASURED`, exit 0, `g0_closed=false` |
+| Eligible source→fragment→pre-respell mapping | **51,629 verified / 51,629 eligible**, 0 unsupported |
+| Selected source-key identity and mapping | **320 verified / 320 selected**, 0 unsupported |
+| Inventory | 76,036 rows, 56 sections, 5,121 chunks with eligible occurrences |
+| Verified pre-restored | **223 eligible**, **40 selected** |
+| Selected pre=0/post=0 | **280** |
+| Selected pre=1/post=1 | **40** |
+| Selected pre/post mismatches | **0** |
+| Source/conf/metadata files changed | **0/416**; no added/deleted files |
+
+The **two failures were output-schema bugs in this test-only collector**, not mapping failures:
+`test_synthetic_current_sample_coverage_is_aggregate_only` raised `KeyError: selected_pre_restored` in a zero-restoration fixture; `test_bad_fragment_is_reported_as_unsupported_not_no_restoration` raised `KeyError: selected_verified` in an unsupported fixture. The `Counter` returned `0` when indexed but the final JSON iterated only present keys, omitting zero buckets.
+
+**Coordinator self-fix:** updated `tests/stress_yo_g0_readonly.py` to initialize all six eligible/selected observation buckets, four pre/post cells and both pre-restored counters to explicit 0; each stratum also emits a stable six-status shape. Added a new regression test comparing full schemas between supported/unsupported fixtures plus zero-key assertions in existing tests. Commits `10672830` and `43c0749b`. A stdlib-only isolated `Counter` schema smoke passed (18 fixed keys). **These new changes have NOT yet run in the actual audiobook `.venv`; the two prior failures remain OPEN until a fresh focused pytest PASS on the final PR SHA.**
+
+The five additional baseline-dependent SKIPs were individually resolved: four in `test_sutrace.py`, one in `test_wordprov.py`. The other six SKIPs have documented gating: three `RUN_SLOW=1`, two absent torch quantization engine, one optional pinned offline smoke. The 11 original SKIPs therefore do not, by themselves, indicate an execution regression.
+
+### Global fingerprints (counts and global fingerprints only; no private word/row data)
+
+```text
+source_fp          e0f552b20a178b2fbf6257a4db04ed4160acc085b191162e2c73b3c8520e44a1
+analysis_fp        bfd3b9857820017dc2e5d1924e80cfbac70e758628e1c0dfbd648922d2e3f010
+sample_fp          4440c58699ea22de8b53eb96587ff4b72f5d426247e5a731c6de91cdd41f0986
+yo_map_sha256      da007a0acfcdff347138aeb70a9ea2fd4e99a81f896ba4cc47898ce988923e74
+norm_content_sha256 fcc0cc79f878fe135173b7ae9435262c72f4023b19237a59fbbf2dfc688bf112
+prep_config_sha256 b7e75ac564e7da04b1ba1edceeb713df5cca3703dc1f1321c09e0421a371d18a
+```
+
+**Interpretation:** The complete-current-snapshot **mapping-coverage subgate** is empirically PASS. This does **not** approve Option B/B′, bind future per-label historical YO evidence, or resolve sample/1→sample/2 or C3/YO completeness. Broader G0 / WP-4 remains BLOCKED and `g0_closed=false`.
+
+**Narrow follow-up:** rerun the four PR #3 modules after the zero-counter fix in the actual installed offline audiobook `.venv`, recording the final SHA. Optionally run the full suite once with unchanged S2 baseline. Do NOT rerun real sample/merge/score, edit gold, change production code or merge the draft PR without a separate owner/architecture decision.
+
+
 ## G0 installed-runtime feedback from Sonnet (reported for pinned SHA cab53397)
 
 The owner supplied Sonnet's read-only result for **PR #3 SHA `cab53397dc551ac894e539ef51dfdae043b0adcb`** in the real audiobook `.venv`:
