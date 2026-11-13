@@ -20,9 +20,9 @@ from test_stress_eval_sample import context_for
 @pytest.mark.parametrize(
     "source,old_synth,new_synth",
     [
-        ("Елена.", "Ёлена.", "Елёна."),
-        ("Елена.", "Елёна.", "Ёлена."),
-        ("Еремея.", "Еремёя.", "Ёремея."),
+        ("Елепа.", "Ёлепа.", "Елёпа."),
+        ("Елепа.", "Елёпа.", "Ёлепа."),
+        ("Еребея.", "Еребёя.", "Ёребея."),
     ],
 )
 @pytest.mark.xfail(
@@ -73,10 +73,10 @@ def test_gold_yo_never_silently_moves_to_new_stress_vowel(
 
 
 def test_source_only_identity_is_unchanged_by_yo_analysis_move() -> None:
-    source = "Елена."
+    source = "Елепа."
     units = [{"type": "text", "text": source}]
-    before = context_for(units, synth={source: "Ёлена."})
-    after = context_for(units, synth={source: "Елёна."})
+    before = context_for(units, synth={source: "Ёлепа."})
+    after = context_for(units, synth={source: "Елёпа."})
     a = evaluation._todo_row(before.rows[0], before.sources)
     b = evaluation._todo_row(after.rows[0], after.sources)
     assert before.source_fp == after.source_fp
