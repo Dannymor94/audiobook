@@ -11,6 +11,39 @@ actual_active_h: unknown
 
 # T15-7 WP-4 — G0 pre-respell feasibility probe, not GO
 
+## G0 installed-runtime feedback from Sonnet (reported for pinned SHA cab53397)
+
+The owner supplied Sonnet's read-only result for **PR #3 SHA `cab53397dc551ac894e539ef51dfdae043b0adcb`** in the real audiobook `.venv`:
+
+- Focused `test_stress_yo_prerespell_proof.py` + `test_stress_yo_fragment_witness.py`: **43 passed / 0 failed / 0 skipped in 0.94 s**; all four previously skipped installed-module tests ran.
+- Full worktree regression: **1,836 passed / 11 skipped in 28.11 s**.
+- Real-module source_key→chunk ordinal→fragment test: four synthetic occurrences across single/two fragments PASS.
+- `voicecfg.prepare_text` before respell agrees with direct `yo.restore` on the synthetic controlled map; phrase-respell 2→1 token explicitly excluded; `yo_restore=False` does not inherit respell's ё; stale `yo.book_map` at fixed maximum mtime reproduced.
+- Owner reports no protected-file mutation, no real sample regeneration and no merge.
+
+These are **reported Sonnet results**, not a separate coordinator-run independent Sol review, not evidence of real-corpus coverage, and not test results for the later commits of PR #3. **G0 remains PARTIAL / OPEN.**
+
+## Next self-executed deliverable — local read-only aggregate coverage script
+
+The coordinator added `tests/stress_yo_g0_readonly.py` and synthetic `tests/test_stress_yo_g0_readonly.py` to PR #3. The script reads the *validated current* v5 inventory and existing local section manifests, proves exact source_key/chunk-word/raw-fragment positions, checks pre-respell token with direct pinned-map restoration, and reports only counts and **global** source/map/config/sample hashes. It rejects an mtime-stale `yo.book_map` and checks source bytes, map and config again before reporting; it never writes ledgers, inventory, manifests, score JSON, audio or model files. G0 remains false even on zero-unsupported coverage.
+
+**These two newly authored files have not yet been executed in the actual audiobook `.venv`; do not infer PASS from the earlier 43-test report.** Run only in an isolated, offline worktree with local private data available; do not commit/copy its private inputs or row identities. Aggregate JSON only.
+
+```bash
+export UV_NO_SYNC=1
+export UV_PROJECT_ENVIRONMENT=/Users/danny/Documents/audiobook/.venv
+export PYTHONPATH=/tmp/audiobook-wp4-g0-cab5339/src  # update to the NEW worktree src
+export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
+uv run pytest -q -p no:cacheprovider tests/test_stress_yo_g0_readonly.py
+python -B tests/stress_yo_g0_readonly.py
+```
+
+Use the *actual new isolated worktree path* for `PYTHONPATH`; the old cab5339 path is an example, not a correct path for later commits. Report only `status`, aggregate `counts`, `selected_by_stratum`, `yo_map_sha256`, `norm_content_sha256`, `prep_config_sha256`, `sample_fp` and a privacy/baseline statement. Do NOT transmit real source words, source keys, fragment strings, paths containing book text, per-token hashes, labels or the owner's S4 files.
+
+If any audit preflight fails, returns `ERROR` or yields `G0_UNSUPPORTED_PRESENT`, keep B′ BLOCKED and return only aggregate error codes/counts; no heuristic fallback. This script is a **measurement tool**, not the approved restoration observer or an auto-fix. Current production code remains unmodified.
+
+
 **Date:** 2026-11-13. **Decision:** `PARTIAL_PROOF / G0_NOT_CLOSED`. **Owner:** B and B′ remain unapproved. No source/production/ADR/gold changes, no model/voice/manuscript uploads, no render.
 
 ## Source-verified pipeline facts
