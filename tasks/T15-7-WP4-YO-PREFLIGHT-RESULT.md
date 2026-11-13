@@ -17,6 +17,7 @@ The owner supplied Sonnet's read-only result for **PR #3 SHA `cab53397dc551ac894
 
 - Focused `test_stress_yo_prerespell_proof.py` + `test_stress_yo_fragment_witness.py`: **43 passed / 0 failed / 0 skipped in 0.94 s**; all four previously skipped installed-module tests ran.
 - Full worktree regression: **1,836 passed / 11 skipped in 28.11 s**.
+- **Regression arithmetic cross-check:** prior WP-4 report had 1,798 passed / 6 skipped (1,804 collected); this G0 run reports 1,836 passed / 11 skipped (1,847 collected). Delta = **+43 collected, +38 passed, +5 skipped**. Since the 43 focused G0 tests all PASS, this may indicate five formerly passing unrelated tests were skipped under a different machine/environment. **Require `uv run pytest -q -rs` skip reasons and compare test node IDs before any final QA acceptance.** Do not infer a regression solely from counts, and do not claim parity without the evidence.
 - Real-module source_key→chunk ordinal→fragment test: four synthetic occurrences across single/two fragments PASS.
 - `voicecfg.prepare_text` before respell agrees with direct `yo.restore` on the synthetic controlled map; phrase-respell 2→1 token explicitly excluded; `yo_restore=False` does not inherit respell's ё; stale `yo.book_map` at fixed maximum mtime reproduced.
 - Owner reports no protected-file mutation, no real sample regeneration and no merge.
