@@ -3,13 +3,13 @@
 **Status:** PROPOSED, isolated PR; not yet integrated into `task/T15`.  
 **Executor:** ChatGPT, parallel to Sonnet's WP-4 milestone A.  
 **Code:** `src/audiobook/stress_metrics.py`  
-**Tests:** `tests/test_stress_metrics.py` — 43 passed independently with `PYTHONHASHSEED=1,2,3` using `PYTHONPATH=src`; full audiobook suite NOT run here.  
+**Tests:** `tests/test_stress_metrics.py` (43) + `tests/test_stress_metrics_contract.py` (38) = **81 passed** independently with `PYTHONHASHSEED=1,2,3`, `PYTHONDONTWRITEBYTECODE=1`, `pytest -q -p no:cacheprovider`, `PYTHONPATH=src`; full audiobook suite NOT run here. The additional oracles use independent high-precision Decimal arithmetic, complementary Wilson identities, precise gate thresholds, and permutations.  
 **Effort estimate:** ~4–8 h for complete 7.8 integration, this core only is a subset; do not mark 7.8 DONE.
 
 ## Scope split / no conflicts
 
 - **Sonnet 7.7:** `src/audiobook/stress_eval.py` (sampler, ledger, merge), `run.sh` routing, local S3/S4 state, corresponding tests. Do not overwrite these with this PR.
-- **This PR:** pure mathematics of ADR §10, no disk I/O, no source data, no ledger reads, no calls to RUAccent, no build-system changes. It modifies only `stress_metrics.py`, `test_stress_metrics.py` and this handoff.
+- **This PR:** pure mathematics of ADR §10, no disk I/O, no source data, no ledger reads, no calls to RUAccent, no build-system changes. It adds `stress_metrics.py`, the two standalone synthetic test modules, this handoff, a source-free H04 owner guide and a future Sol QA checklist.
 - **Sonnet 7.8 integration:** after A local gates pass, merge/cherry-pick this PR into the WP-4 task branch and add an adapter in `stress_eval.py` and scorer-level end-to-end tests. Resolve changes against current head; do not merge directly into `main`.
 
 ## Adapter mapping
