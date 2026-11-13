@@ -119,3 +119,26 @@ def test_real_wordprov_and_chunk_fragments_source_key_witness_if_installed():
             proof = witness(chunk_source_words, raw_fragments,
                             row.chunk_word_index, row.form_source)
             assert proof.form_source == row.form_source
+
+
+def test_yo_book_map_cache_mtime_is_not_immutable_content_identity_if_installed(tmp_path, monkeypatch):
+    """Demonstrate why the exact dictionary/content digest must be captured."""
+    import os
+    yo = pytest.importorskip("audiobook.yo")
+    from audiobook import paths
+    monkeypatch.setattr(paths, "TEXT", tmp_path)
+    source = tmp_path / "synthetic.norm.txt"
+    source.write_text("Ёлепа. Елепа.", encoding="utf-8")
+    yo._book_map.cache_clear()
+    try:
+        first = dict(yo.book_map())
+        assert first.get("елепа") == "ёлепа"
+        st = source.stat()
+        source.write_text("Ёлепа.", encoding="utf-8")
+        os.utime(source, ns=(st.st_atime_ns, st.st_mtime_ns))
+        # Same path+max mtime is a cache HIT, although content changed.
+        cached = yo.book_map()
+        fresh = yo.build_map([source.read_text(encoding="utf-8")])
+        assert cached == first and fresh != first
+    finally:
+        yo._book_map.cache_clear()
