@@ -3,14 +3,14 @@
 **Status:** PREPARED / ADR BLOCKED. This is NOT an approved normative correction.  
 **Owner rule:** coordinator self-executes safely separable work; architecture decision stays with Claude Chat + owner.  
 **Base:** `task/T15`, current blocked WP-4 code.  
-**Only functional addition:** `tests/test_stress_eval_yo_adr_oracles.py`.  
+**Only functional additions (both test-only):** `tests/test_stress_eval_yo_adr_oracles.py` (3 strict-XFAIL relocation probes + 1 positive identity oracle) and `tests/test_stress_eval_yo_adr_pending_cases.py` (3 strict-XFAIL disappearance/appearance/native-ё probes + 1 positive source-identity oracle). No production changes.  
 **Planning:** targeted correction estimated 2–5 Sonnet active hours + 1–2 Sol targeted QA hours, subject to architect-approved persistence/migration design. These are *new planning estimates*, not actual measured time.
 
 ## What was independently prepared
 
 Three original **synthetic** restored-ё moves against an unchanged source/context identity are encoded as `pytest.mark.xfail(strict=True)` cases. A fourth positive test verifies the five-part source gold identity does not change when only synthesized spelling differs. Synthetic strings only; no production text, audio, hashes or manifests.
 
-The three strict xfails specifically prohibit this silent failure:
+The additional draft-only cases cover an existing synth-only `yo` when restoration disappears, numeric gold with historical `yo_correct=na` when restoration appears, and source-native `ё` under analysis-only changes. All are marked strict-XFAIL until the owner approves the architectural option and Sonnet pins the contract's expected outcomes. The three original strict xfails specifically prohibit this silent failure:
 
 1. Historical `gold_vowel=yo` was attached to one vowel under an earlier restoration.
 2. Source-only five-part identity remains equal, but the current synthetic restoration moves ё to another vowel.
@@ -27,7 +27,7 @@ The test accepts **either** a preserved original stress index or an explicitly s
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-  uv run pytest -q -p no:cacheprovider tests/test_stress_eval_yo_adr_oracles.py
+  uv run pytest -q -p no:cacheprovider tests/test_stress_eval_yo_adr_oracles.py tests/test_stress_eval_yo_adr_pending_cases.py
 ```
 
 - Add the other original Sol cases (removal of a restored ё, introduction of restored ё with numeric gold and `yo_correct=na`) as **ADR-specific** PASS oracles, including deterministic stale/restore and collision behavior. Do not predeclare how legacy labels should migrate while design is undecided.
