@@ -25,8 +25,8 @@
 - **T15-7.0e / B2:** snapshot discrepancy investigated; owner has not authorized a future rendering snapshot.
 - **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
 - **T15-7 WP-2 (7.3 + 7.4): DONE**; independent Sol PASS authenticated against original session evidence at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a`. All seven R1–R7 corrections closed, 1,479 passed / 5 skipped, 56 sections, 76,036 occurrences, WP-1 D unchanged. Acceptance recorded in `tasks/T15-7-WP2-ACCEPTANCE.md`.
-- **T15-7 WP-3 (7.1b + 7.5 + 7.6): DELIVERED** at `205485b9eade65ca55af141f246703b7aaa71f0e`. Developer handoff reports the final independent Sol review PASS (no blockers); its independently authored output is not yet recorded in the GitHub task report. v5 published locally, v3 archive preserved, 1,602 passed / 6 skipped, S2 D and historical D_tsv unchanged. Treat as QA-reported PASS; reconcile review record before setting task metadata `done`.
-- **CURRENT: WP-4 (7.7 + 7.8): HOLD** pending coordinator GO and evidence reconciliation. B2 remains an owner-controlled gate for T16/T17 and full rendering, not for offline inventory and metrics.
+- **T15-7 WP-3 (7.1b + 7.5 + 7.6): DONE** after owner-supplied final independent Sol PASS at `205485b9eade65ca55af141f246703b7aaa71f0e`; task status is `done`. v5 published locally, v3 archive preserved, 1,602 passed / 6 skipped, S2 D and v4 D_tsv unchanged. A separately archived original Sol verdict is still useful for audit but is not a technical re-review requirement.
+- **CURRENT: WP-4 (7.7 + 7.8): GO to Sonnet** under `tasks/T15-7-WP4.md`; 10–20 active h estimated + 2–4 h independent exit QA. H04 owner labeling can begin only after real sample/todo exists and no agent supplies gold labels. WP-5 and T16/T17/full rendering remain HOLD.
 
 ## Workload and review strategy
 
@@ -77,7 +77,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Required local gates:** B1 independently closed; historical TSV digest byte-identical; no changes to TTS input; all fingerprint mutation invariants; publication integrity, crash injection, reader refusal of mixed/stale generations; full pytest.  
 **Independent QA gate:** Sol reviews offline RUAccent interface consistency, content fingerprinting and crash-safe publishing at the combined package SHA.  
 **STOP before publication changes if the v4 historical baseline cannot be reproduced.**  
-**Status:** DELIVERED at `205485b9eade65ca55af141f246703b7aaa71f0e`; independent Sol PASS reported in owner handoff, reviewer evidence to be attached. v5 inventory published locally, D and D_tsv preserved. WP-4 not yet authorized.
+**Status:** DONE; independent Sol PASS supplied by owner at `205485b9eade65ca55af141f246703b7aaa71f0e`; WP-3 task metadata marked `done`, historical v4 bytes and S2 D preserved.
 
 ### WP-4 — Human gold review workflow and quality metrics
 
@@ -86,7 +86,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Scope:** deterministic sample, local ignored gold/todo/version ledger, stale replacement, conflict/error handling, merge, score, Wilson gates.  
 **Required local gates:** repeatable selection across hash seeds; stale→relabel→archive→active gold; byte-idempotent merge; crash-safe ledger; exact Wilson references and denominators; P4 privacy, full pytest.  
 **Independent QA gate:** Sol tests correctness, privacy and idempotence for the entire package.  
-**Start:** WP-3 PASS.
+**Status:** GO. Authorized combined task: `tasks/T15-7-WP4.md`; 7.7 + 7.8, one Sol exit review. Owner H04 labels only after local todo generation.
 
 ### WP-5 — Owner labels and real quality decision
 
@@ -113,11 +113,11 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 | WP-1 | 7.2 — observational SUTrace and equivalence checks | Sonnet | 3–7 | DONE |
 | WP-2 | 7.3 — WordOcc provenance, source/manifest FP, links | Sonnet | 5–10 | DONE |
 | WP-2 | 7.4 — facts F1–F5, F6=not_run, §9 precedence | Sonnet | 3–6 | DONE |
-| WP-3 | 7.1b — isolated historical v4 TSV byte baseline | Sonnet | 2–5 | DELIVERED |
-| WP-3 | 7.5 — RUAccent F6 and analysis_fp | Sonnet | 5–10 | DELIVERED |
-| WP-3 | 7.6 — v5 publisher, stale/tamper/crash-safe reader | Sonnet | 8–16 | DELIVERED |
-| WP-4 | 7.7 — deterministic sampling and local gold merge | Sonnet | 6–12 | WAITING for GO |
-| WP-4 | 7.8 — metrics, Wilson, COMPLETE/INCOMPLETE/ERROR | Sonnet | 4–8 | WAITING for 7.7 |
+| WP-3 | 7.1b — isolated historical v4 TSV byte baseline | Sonnet | 2–5 | DONE |
+| WP-3 | 7.5 — RUAccent F6 and analysis_fp | Sonnet | 5–10 | DONE |
+| WP-3 | 7.6 — v5 publisher, stale/tamper/crash-safe reader | Sonnet | 8–16 | DONE |
+| WP-4 | 7.7 — deterministic sampling and local gold merge | Sonnet | 6–12 | GO |
+| WP-4 | 7.8 — metrics, Wilson, COMPLETE/INCOMPLETE/ERROR | Sonnet | 4–8 | QUEUED after 7.7 |
 | WP-5 | H04 — owner listens and labels ~320 selected items | Owner | 4–10* | WAITING for 7.7 |
 | WP-5 | 7.9 — final aggregate quality-gate report | Sol / coordinator | 1–3 | WAITING for 7.8 + H04 |
 
@@ -130,8 +130,8 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 | WP-0 | 3.5–9.5 | 1–2 | 4.5–11.5 | DONE (B2 owner choice open) |
 | WP-1 | 5–11 | 1–3 | 6–14 | DONE |
 | WP-2 | 8–16 | 2–4 | 10–20 | DONE |
-| WP-3 | 15–31 | 3–6 | 18–37 | DELIVERED; Sol PASS reported |
-| **WP-4** | **10–20** | **2–4** | **12–24** | **NEXT** |
+| WP-3 | 15–31 | 3–6 | 18–37 | DONE; Sol PASS supplied |
+| **WP-4** | **10–20** | **2–4** | **12–24** | **CURRENT** |
 | **WP-5** | **5–13** | **1–2** | **6–15** | WAITING |
 
 **Remaining planning baseline (WP-4 + WP-5): 18–39 active h**, before any change requests, waiting for the owner, offline model availability or source/audio prerequisites. Plan a **25–40% rework contingency** separately for these remaining packages (~5–16 additional h). Some owner H04 labeling can start after 7.7 and overlap with development of 7.8, so total active hours should **not** be presented as elapsed calendar hours.
