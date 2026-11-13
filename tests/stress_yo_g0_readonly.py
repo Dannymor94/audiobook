@@ -24,6 +24,18 @@ from test_stress_yo_prerespell_proof import UnsupportedObservation, probe_pre_re
 
 _WORD = re.compile(r"[А-Яа-яЁё]+")
 
+# Emit zero-valued buckets explicitly. Counter() returns 0 for missing names,
+# but serialising only its existing keys creates a misleading/unstable schema.
+# Both observed and absent states must have a fixed, privacy-safe shape.
+_OBSERVATION_STATES = (
+    "verified", "unsupported_manifest", "unsupported_source_stream",
+    "unsupported_fragments", "unsupported_source_key", "unsupported_prep",
+)
+_PRE_POST_CELLS = tuple(
+    f"selected_pre_{pre}_post_{post}"
+    for pre in (0, 1) for post in (0, 1)
+)
+
 
 class AuditFailure(RuntimeError):
     pass
@@ -89,8 +101,18 @@ def audit_local(config: dict) -> dict:
     for row in eligible:
         by_section[row.section].add(row.chunk_id)
 
-    counts = Counter()
-    by_stratum = {name: Counter() for name, _ in evaluation.STRATA}
+    counts = Counter({
+        **{f"{population}_{status}": 0
+           for population in ("eligible", "selected")
+           for status in _OBSERVATION_STATES},
+        **{key: 0 for key in _PRE_POST_CELLS},
+        "eligible_pre_restored": 0,
+        "selected_pre_restored": 0,
+    })
+    by_stratum = {
+        name: Counter({status: 0 for status in _OBSERVATION_STATES})
+        for name, _ in evaluation.STRATA
+    }
     counts["inventory_rows"] = len(context.rows)
     counts["eligible"] = len(eligible)
     counts["selected"] = len(selected)
