@@ -11,6 +11,31 @@ actual_active_h: unknown
 
 # T15-7 WP-4 — G0 pre-respell feasibility probe, not GO
 
+## FINAL G0 synthetic/regression retry — tests PASS at SHA 650127b9
+
+Owner relayed Sonnet's exact, isolated offline worktree result on **2026-11-13** for SHA `650127b90199342dfe4d1e555784025e11056f2f`:
+
+| Module | PASS | FAIL | SKIP |
+|---|---:|---:|---:|
+| `test_stress_yo_g0_readonly.py` | 7 | 0 | 0 |
+| `test_stress_yo_fragment_witness.py` | 16 | 0 | 0 |
+| `test_stress_yo_prerespell_proof.py` | 27 | 0 | 0 |
+| `test_stress_yo_sample_policy_collision.py` | 2 | 0 | 0 |
+| **Focused** | **52** | **0** | **0** |
+| **Full pytest** | **1845** | **0** | **11** |
+
+Reported `git diff --stat HEAD` empty and `git status` clean. **No merge** or production/gold changes were reported. All 52 focused probes passed after the coordinator fixed the aggregate counter-schema and the overly broad `source_key` privacy assertion.
+
+**Skip accounting still conditional:** the preceding run with local S2 baseline showed `1849 pass + 1 fail + 6 skip = 1856` collected; this run has `1845 pass + 11 skip = 1856` collected. Difference is consistent with the five S2 baseline-dependent tests returning to SKIP and the one earlier failed test turning PASS. However, the latest report does **not** include `pytest -rs` node IDs or the explicit local S2-baseline mount status; do not claim that the protected baseline was exercised in this latest run. Earlier five baseline-dependent tests did independently PASS when local baseline was supplied. No new FAIL.
+
+**G0 verdict, carefully scoped:**
+- **PASS**: mapped source→fragment→pre-respell observations on the measured current real corpus (51,629/51,629 eligible; 320/320 selected), no unsupported and no pre/post mismatch; these figures were measured by the prior real-corpus audit, **not rerun in the 52-test retry**.
+- **PASS**: the four synthetic/integration G0 test modules at pinned SHA `650127b9`.
+- **STILL OPEN**: normative G1 contract on historical evidence, `sample/1→sample/2`, two-ledger consistency and C3/relabel/YO-completeness. The observer deliberately emits `g0_closed=false` and is a read-only diagnostic, not a production proof or permission to merge.
+
+**No architectural option approved:** B, B′ and C require separate owner authorization. WP4 remains BLOCKED; WP5, owner S4 merge, actual rendering and production modifications HOLD.
+
+
 ## G0 latest test retry — one false-positive privacy assertion; coordinator correction
 
 Owner relayed offline read-only results for exact SHA `d1f89a39ec86e1c558ba6496a251aea7b88f5f17` in an isolated audiobook worktree with local S2 baseline:
