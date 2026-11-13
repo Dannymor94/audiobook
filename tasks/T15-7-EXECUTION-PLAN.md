@@ -26,7 +26,7 @@
 - **T15-7 WP-1 (7.1a + 7.2):** DONE after independent Sol PASS on corrective code `aee1150d4ba866e53db2a560ac5635b89a8873eb`; report `tasks/T15-7-WP1-ACCEPTANCE.md`. All 56 sections / 5127 SU inputs match baseline, 1316 passed / 5 skipped.
 - **T15-7 WP-2 (7.3 + 7.4): DONE**; independent Sol PASS authenticated against original session evidence at code SHA `d3f51854a283b90b94e141ace35f5a62d952b00a`. All seven R1–R7 corrections closed, 1,479 passed / 5 skipped, 56 sections, 76,036 occurrences, WP-1 D unchanged. Acceptance recorded in `tasks/T15-7-WP2-ACCEPTANCE.md`.
 - **T15-7 WP-3 (7.1b + 7.5 + 7.6): DONE** after owner-supplied final independent Sol PASS at `205485b9eade65ca55af141f246703b7aaa71f0e`; task status is `done`. v5 published locally, v3 archive preserved, 1,602 passed / 6 skipped, S2 D and v4 D_tsv unchanged. A separately archived original Sol verdict is still useful for audit but is not a technical re-review requirement.
-- **CURRENT: WP-4 (7.7 + 7.8): GO to Sonnet** under `tasks/T15-7-WP4.md`; 10–20 active h estimated + 2–4 h independent exit QA. H04 owner labeling can begin only after real sample/todo exists and no agent supplies gold labels. WP-5 and T16/T17/full rendering remain HOLD.
+- **CURRENT: WP-4 (7.7 + 7.8): BLOCKED / CHANGES_REQUIRED**. Combined scorer code delivered at `f4a8dea2026fb35b104e81d396672bd96d9b0c59`; final report SHA `f07d88e41d6ab6b5a97b864eb8d063cf41bb2430`. Independent Sol found F1: unchanged `gold_vowel=yo` can silently change stress index when `form_synth` ё-restoration moves; §5 five-field gold identity conflicts with §10 restored-yo/yo_correct rules. Full suite 1,798 passed / 6 skipped but those results do NOT close F1. Narrow architect decision requested in `tasks/T15-7-WP4-YO-ADR-ESCALATION.md`. Real sample: 320 todo, zero human labels, scorer INCOMPLETE rc 2. Pause label editing/merge dependent on yo semantics until the ADR correction. All S4 data and baselines unchanged. **No WP-5, T16/T17 or rendering authorization.**
 
 ## Workload and review strategy
 
@@ -86,7 +86,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 **Scope:** deterministic sample, local ignored gold/todo/version ledger, stale replacement, conflict/error handling, merge, score, Wilson gates.  
 **Required local gates:** repeatable selection across hash seeds; stale→relabel→archive→active gold; byte-idempotent merge; crash-safe ledger; exact Wilson references and denominators; P4 privacy, full pytest.  
 **Independent QA gate:** Sol tests correctness, privacy and idempotence for the entire package.  
-**Status:** GO. Authorized combined task: `tasks/T15-7-WP4.md`; 7.7 + 7.8, one Sol exit review. Owner H04 labels only after local todo generation.
+**Status:** BLOCKED after independent Sol CHANGES_REQUIRED on historical yo label meaning. Architecture decision `tasks/T15-7-WP4-YO-ADR-ESCALATION.md` required before code correction. Existing 320 blank todo entries are preserved; suspend new yo-dependent labeling and any merge/score changes. After approved addendum and Sonnet correction, one targeted Sol re-review.
 
 ### WP-5 — Owner labels and real quality decision
 
@@ -116,8 +116,8 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 | WP-3 | 7.1b — isolated historical v4 TSV byte baseline | Sonnet | 2–5 | DONE |
 | WP-3 | 7.5 — RUAccent F6 and analysis_fp | Sonnet | 5–10 | DONE |
 | WP-3 | 7.6 — v5 publisher, stale/tamper/crash-safe reader | Sonnet | 8–16 | DONE |
-| WP-4 | 7.7 — deterministic sampling and local gold merge | Sonnet | 6–12 | GO |
-| WP-4 | 7.8 — metrics, Wilson, COMPLETE/INCOMPLETE/ERROR | Sonnet | 4–8 | QUEUED after 7.7 |
+| WP-4 | 7.7 — deterministic sampling and local gold merge | Sonnet | 6–12 | DELIVERED; WP4 blocked on F1 |
+| WP-4 | 7.8 — metrics, Wilson, COMPLETE/INCOMPLETE/ERROR | Sonnet | 4–8 | DELIVERED; independent F1 CHANGES_REQUIRED |
 | WP-5 | H04 — owner listens and labels ~320 selected items | Owner | 4–10* | WAITING for 7.7 |
 | WP-5 | 7.9 — final aggregate quality-gate report | Sol / coordinator | 1–3 | WAITING for 7.8 + H04 |
 
@@ -131,7 +131,7 @@ Use an immediate extra Sol review only for a reproducible regression, a privacy/
 | WP-1 | 5–11 | 1–3 | 6–14 | DONE |
 | WP-2 | 8–16 | 2–4 | 10–20 | DONE |
 | WP-3 | 15–31 | 3–6 | 18–37 | DONE; Sol PASS supplied |
-| **WP-4** | **10–20** | **2–4** | **12–24** | **CURRENT** |
+| **WP-4** | **10–20** | **2–4** | **12–24** | **BLOCKED — architect F1** |
 | **WP-5** | **5–13** | **1–2** | **6–15** | WAITING |
 
 **Remaining planning baseline (WP-4 + WP-5): 18–39 active h**, before any change requests, waiting for the owner, offline model availability or source/audio prerequisites. Plan a **25–40% rework contingency** separately for these remaining packages (~5–16 additional h). Some owner H04 labeling can start after 7.7 and overlap with development of 7.8, so total active hours should **not** be presented as elapsed calendar hours.
