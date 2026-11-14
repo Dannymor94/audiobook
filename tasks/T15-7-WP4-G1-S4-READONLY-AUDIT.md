@@ -18,23 +18,32 @@ branch: task/T15-7-yo-risk-audit
 
 **Local synthetic helper smoke (coordinator's separate test harness): 5 PASS / 0 FAIL** for absent file, repeated historical keys, current conflicting labels, filled unmerged todo and malformed/symlink refusal. The exact GitHub combined tests and full end-to-end private S4 audit have **not** run in the owner's audiobook .venv at this writing. Never call them project PASS.
 
-## Execution — owner-local, offline, exclusive worktree
+## Execution — owner-local, offline; separate code from protected data
 
-Run at an **exact pinned PR #3 SHA**, not in an unspecified main working tree; put the original owner's local S4 `text/` data and existing validated inventory/manifest under the appropriate local read-only access paths. Never copy private S4 to GitHub, this chat or an agent's cloud workspace. Do NOT run `stress-eval sample` or `merge` just to generate missing files.
+**Important implementation detail confirmed in source:** `audiobook.paths.ROOT = Path(__file__).resolve().parents[2]`. Thus importing `audiobook` from a clean PR worktree makes `paths.TEXT` point to that **worktree**, not necessarily the owner's local gold. The auditor deliberately treats missing gold/todo as `BLOCKED`; it MUST NOT assume zero history from an unmounted S4 directory. It also refuses symlinked S4 files as an unsafe substitute.
+
+**Recommended layout:** leave the owner-local audiobook worktree and S4 physically where they are. Fetch **PR #3 pinned audit SHA** into a separate code-only worktree, but run its `tests/*.py` audit using the **owner-local original `src`** first in `PYTHONPATH`. This makes `audiobook.paths.TEXT` and `OUT` resolve to the owner-local data without copying/symlinking/editing S4. PR #3 contains no `src/` changes compared to `task/T15`; independently verify this in the local worktree before run.
 
 ```bash
+# Replace with the actual existing paths. Do not print actual S4 files.
+export OWNER_ROOT=/Users/danny/Documents/audiobook
+export PR3_WT=/tmp/audiobook-s4-audit-pr3    # pinned PR #3 code-only worktree
 export UV_NO_SYNC=1
-export UV_PROJECT_ENVIRONMENT=/Users/danny/Documents/audiobook/.venv
-export PYTHONPATH="$PWD/src"
+export UV_PROJECT_ENVIRONMENT="$OWNER_ROOT/.venv"
+export PYTHONPATH="$OWNER_ROOT/src:$PR3_WT/tests"
 export PYTHONDONTWRITEBYTECODE=1
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
+cd "$OWNER_ROOT"
 
-uv run pytest -q -p no:cacheprovider tests/test_stress_s4_c3_readonly.py
-uv run python -B tests/stress_s4_c3_readonly.py
+# Confirm the exact pinned script SHA locally before execution.
+uv run pytest -q -p no:cacheprovider "$PR3_WT/tests/test_stress_s4_c3_readonly.py"
+uv run python -B "$PR3_WT/tests/stress_s4_c3_readonly.py"
 ```
 
-The local runner must independently check the 416-file protected parity (if that is still the scoped file set), using only pre/post checksums locally; report **counts only**, never file contents or individual per-row checksums. Command status `PASS` means only **census succeeded**, not G1.6 approval or WP4 acceptance. A `BLOCKED` reason is a reason to inspect locally, not to bypass guards.
+The scanner checks that **both** local `stress_gold.tsv` and `stress_gold.todo.tsv` physically exist, plus the current saved sample fingerprint. Missing any required input => BLOCKED (not zero historical rows). Archive can be absent because under current C3 it is derived/non-authoritative; present archive rows are always counted. No command creates or rewrites S4, score, samples or inventory.
+
+The local runner must independently check the owner-defined protected-file pre/post parity (previously 416 files), with checksums retained locally and **only aggregate change counts** reported. A command status `PASS` means the **census succeeded**, not G1.6 approval or WP4 acceptance. Any `BLOCKED` means STOP, not permission to repair, create sample, merge or infer.
 
 ## Count definitions
 
