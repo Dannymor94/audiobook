@@ -304,7 +304,11 @@ def audit_local(config):
         reason_codes.append("ARCHIVE_ORPHAN_ROWS")
     if archive_invalid:
         reason_codes.append("ARCHIVE_INVALID_ROWS")
+    # Any human edits, even only in todo, merit the history-first recommendation.
+    # "No historical versions" is not the same as "no owner data to preserve".
     history_exists = (
+        gold["human_labeled_rows"] > 0 or todo["filled_rows"] > 0 or
+        todo["partially_filled_rows"] > 0 or
         gold["extra_historical_identities"] > 0 or
         gold["currently_stale_rows"] > 0 or len(archive_rows) > 0 or
         gold["source_keys_repeated"] > 0
