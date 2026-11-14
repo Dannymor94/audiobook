@@ -59,6 +59,14 @@ Owner forwarded Sonnet's **aggregate-only** read-only owner-local census at PR #
 
 **Coordinator recommendation, pending explicit owner choice:** **retain existing C3 authoritative stress version-ledger with a derived non-authoritative archive**; there is no local historic human data to justify changing archive authority and no migration benefit. Document the known same-source human label correction limitation as a separate later decision, never pick by date. G1.1–G1.5 approved **in principle only**; G1.6 still **DEFERRED_NOT_APPROVED** until owner explicitly confirms `RETAIN_CURRENT_C3_VERSION_LEDGER` or chooses an alternative. No normative ADR/code authority, H04, S4 edit, PR #3 merge, WP5/T16/T17 or render.
 
+### Final C3 owner decision and unified WP-4 G1 ADR proposal (2026-11-14)
+
+Owner **approved retaining existing C3 authoritative version-ledger** in `text/stress_gold.tsv`; `stress_gold.archive.tsv` remains derived, non-authoritative. Owner explicitly **rejected** one-active-physical-row / authoritative archive and **did not authorize S4 migration**. Separate YO evidence follows G1.1–G1.5 architectural approval in principle only. Conflicting human label correction requires a later explicit history-preserving owner decision; no newest-date auto-adjudication. Decision register: `tasks/T15-7-WP4-YO-G1-OWNER-DECISION.md`.
+
+Coordinator authored self-contained proposed WP4 G1 ADR in **draft PR #4** `task/T15-7-wp4-g1-normative-adr`, file `tasks/T15-7-WP4-G1-NORMATIVE-ADR.md`. It contains exact source-only stress semantics, statuses, sample/2, pre-respell YO candidate identity and private schema, two independent authoritative ledgers and score freshness, retained C3 M1–M5, metrics/quality gating, and a **42-case proposed T01–T42 register**. The architect's original exact 42-row register was not in inspected sources; new register explicitly does **not** claim to be verbatim. Reviewer instructions are in `tasks/T15-7-WP4-G1-ADR-INDEPENDENT-REVIEW.md` in PR #4.
+
+**Status: PROPOSED_NORMATIVE_PENDING_INDEPENDENT_REVIEW**, not yet adopted. Coordinator self-validated 42 sequential IDs and core section coverage; one **independent Sol architecture review at the pinned final document SHA remains REQUIRED and has not been run**. The existing authoritative `tasks/T15-7-FINAL-ADR.md` rev.2 remains untouched. No production or S4 edits, no PR #3 merge, no H04/sample generation, no WP5/T16/T17/render. If independent review PASS and the owner separately accepts the revised ADR, request a fresh separate code GO.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
