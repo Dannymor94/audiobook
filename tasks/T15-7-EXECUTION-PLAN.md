@@ -67,6 +67,14 @@ Coordinator authored self-contained proposed WP4 G1 ADR in **draft PR #4** `task
 
 **Status: PROPOSED_NORMATIVE_PENDING_INDEPENDENT_REVIEW**, not yet adopted. Coordinator self-validated 42 sequential IDs and core section coverage; one **independent Sol architecture review at the pinned final document SHA remains REQUIRED and has not been run**. The existing authoritative `tasks/T15-7-FINAL-ADR.md` rev.2 remains untouched. No production or S4 edits, no PR #3 merge, no H04/sample generation, no WP5/T16/T17/render. If independent review PASS and the owner separately accepts the revised ADR, request a fresh separate code GO.
 
+### PR #4 independent Sol review #1 — CHANGES_REQUIRED; provenance BLOCKED (2026-11-14)
+
+At reviewed SHA `c382723fae22d5cb903e46396628fd527eea1cf4`, independent Sol identified three textual defects: disabled `text_prep.yo_restore` wrongly treated as always-on direct restore (§4.2/T30/T32), undefined `observation_fp` in T38 (use freshly verified current `restoration_fp`), and T06/T27/T28 acceptance requiring old retained-C3 behavior to fail (should remain passing and fail only against inappropriate latest-date/archive-authority/history deletion). Sol previously ran full pre-existing code suite `1793 PASS / 11 SKIP` without touching protected data; this does not certify the revised ADR. Coordinator applied corrections in draft PR #4 documentation only, and requested a **targeted Sol re-review**.
+
+**Original architect-authority T01–T42 remains BLOCKED**: none of the inspected tracked repo, available prior Project files, or conversation summary contained the full exact 42 rows. PR #4's 42 rows are reconstructed, not original. New `tasks/T15-7-WP4-G1-T01-T42-ARCHITECT-SIGNOFF.md` specifies a full exact-SHA architect acceptance OR original-table reconciliation as prerequisite. No actor may claim T01–T42 provenance PASS without this.
+
+Owner's retained C3 version-ledger decision is unchanged; no migration, gold/todo rewrite, production implementation or ADR adoption is authorized. PR #4 remains draft, PR #3 unmerged, WP4 BLOCKED and WP5/T16/T17/full render HOLD.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
