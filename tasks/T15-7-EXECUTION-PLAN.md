@@ -47,6 +47,12 @@ G0 remains technical PASS: 52/52 targeted tests at `650127b9`; 51,629/51,629 eli
 
 Do **not** change normative ADR, production, S4 gold/todo/archive, sample, local corpus, 6C11, audio, models or cache; do not run H04, merge PR #3, or start WP5/T16/T17/render. After S4 audit, obtain separate owner decision on B, then a complete T01–T42 normative ADR, independent review and new explicit code GO.
 
+### S4 compatibility audit implementation — pending owner-local run (2026-11-14)
+
+Coordinator independently authored **test-only** read-only `tests/stress_s4_c3_readonly.py`, synthetic `tests/test_stress_s4_c3_readonly.py` and runbook `tasks/T15-7-WP4-G1-S4-READONLY-AUDIT.md` in draft PR #3 (`task/T15-7-yo-risk-audit`). These files were not run with the owner's actual private S4. **No gold/archive/todo counts are yet established**; the S4 files are Git-ignored and inaccessible via the GitHub connector. Local pure helper synthetic harness: 5 PASS (not full project QA). The audit now refuses missing owner-local gold/todo or unverifiable saved sample instead of interpreting absent worktree files as zero history; validates pre-respell selected RESTORED and F1 exclusions, checks private snapshot freshness and emits safe aggregates only. Owner-local runner must verify 416-file protected parity and return only aggregate status/counts.
+
+G1.1–G1.5 = APPROVED_IN_PRINCIPLE; G1.6 = DEFERRED_NOT_APPROVED. Read-only audit authorization does **not** include approval of format change, migration, PR merge, production code, H04 or render. After actual S4 counts and owner decision on B, request full exact T01–T42 ADR and separate GO.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
