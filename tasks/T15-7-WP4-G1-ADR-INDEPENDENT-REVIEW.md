@@ -32,18 +32,25 @@ branch: task/T15-7-wp4-g1-normative-adr
 - **T01–T42:** audit all 42 numbered proposed tests for exact stimulus/oracle sufficiency and correct inclusion of T06, T27, T28. **Provenance caveat:** the original full architect-authored T01–T42 table was NOT present in owner handoff or inspected tracked repo. This 42-row registry was reconstructed and MUST NOT be represented as verbatim original. If exact reconciliation requires the original, mark that specific issue BLOCKED and request its source; do not guess silent equivalence.
 - **Scope and adoption:** proposed ADR is a candidate, does NOT replace accepted rev.2 or authorize code/merge/H04/S4 migration/WP5/T16/T17/render until a later owner decision. A successful review is not itself code GO.
 
+## Historical numbering reconciliation
+
+Prior architect handoff fragments described T06 as requiring owner adjudication on conflicting current judgments, T27 as stale-history archive behavior, and T28 as source-context return. The proposed ADR now redefines **T06** as fail-closed OWNER_ADJUDICATION_REQUIRED, **T27** as M4-derived SOURCE_STALE archive export *while retaining history in gold*, and **T28** as A→B→A reactivation from gold without trusting archive. These are deliberate adaptations because the owner rejected the archive-authoritative model. Legacy synth-only yo replacement is now explicitly covered by **T10**; F1-exclusion predicate by **T16/T18/T29**. The original complete table remains unavailable and must not be claimed as source-identical without comparison.
+
 ## Output required
 
 Respond with exact SHA and one of PASS / CHANGES_REQUIRED / BLOCKED. State only independently inspected evidence and aggregate facts; identify any line/section blockers and exact corrective wording. Include explicit checks:
   C3_RETAINED;
   C3_ARCHIVE_NON_AUTHORITATIVE;
-  LEGACY_YO_REPLACEMENT_T06;
+  LEGACY_YO_REPLACEMENT_T10;
+  HUMAN_CONFLICT_OWNER_ADJUDICATION_REQUIRED_T06;
   SOURCE_CONTEXT_REVERSIONS;
   HUMAN_CONFLICT_STOP;
   M1_TO_M5_ATOMICITY;
   SAMPLE_2_TODO_PRESERVATION;
   PRE_RESPELL_YO_EVIDENCE;
-  F1_EXCLUSION_T27_T28;
+  F1_EXCLUSION_T16_T18;
+  DERIVED_ARCHIVE_T27;
+  SOURCE_CONTEXT_RETURN_T28;
   DUAL_LEDGER_SCORE_FRESHNESS;
   COMPLETE_INCOMPLETE_ERROR;
   T01_T42_NORMATIVE_ORACLES_AND_PROVENANCE;
