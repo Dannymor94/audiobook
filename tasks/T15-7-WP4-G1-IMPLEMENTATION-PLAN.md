@@ -73,6 +73,12 @@ Allowed paths above are a proposed LIMIT, not a grant. Any change to other produ
 
 **Final plan status:** NORMATIVE_ADR_APPROVED_AT_PINNED_SHA / IMPLEMENTATION_PLAN_READY / CODE_GO_NOT_GRANTED / WP4_BLOCKED / NO_S4_MIGRATION.
 
+## Independent architecture QA exit — PASS (2026-11-14)
+
+**Approved ADR pin:** PR #4 `a012c84240eb246b8072a735989f598b6ca566e2`. Owner explicitly APPROVED the G1 normative contract and reconstructed T01–T42. An independent Sol **DOCUMENT architecture PASS** has now been reported at the **same pinned SHA** and the architect's external `ACCEPT_RECONSTRUCTED_T01_T42_AT_PINNED_SHA` closes previous provenance HOLD. Reviewer specifically checked R1–R8, retained C3 version-ledger, source-stale / return A→B→A, todos protected even if empty, pre-respell/L3 every-SU proof, persisted-score safety and 42/42 O coverage (40 mapped, O17 replaced, O38 void/replaced). The pinned PR #4 docs still contain obsolete review-request statuses; do not rewrite the approved pin to make metadata look current.
+
+**Limits of PASS:** no pytest was run in this independent document review; private S4 and future T01–T42 code behavior were NOT independently retested. This closes **architecture review only**, not implementation acceptance. The **plan approval remains separate and PENDING**, and **CODE GO remains NOT GRANTED**. The future I1 real-corpus read-only checkpoint, exact allowlist, three phase commits, all five S2-dependent tests and final independent Sol CODE review remain mandatory future gates.
+
 ## 5. Proposed limited CODE GO refinements — awaiting separate owner approval (2026-11-14)
 
 This section makes the future implementation proposal more precise; it does NOT authorize code execution or a read-only private-corpus run by itself. The normative ADR at a012c84240eb246b8072a735989f598b6ca566e2 is ALREADY owner-approved. Do not seek a redundant ADR approval. The next required decision is a separate limited CODE GO for I1→I2→I3.
