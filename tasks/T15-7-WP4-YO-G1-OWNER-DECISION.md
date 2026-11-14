@@ -82,4 +82,18 @@ A self-contained replacement **proposal** covering source-only gold, LEGACY_YO_U
 
 **Review status: REQUESTED / NOT COMPLETED.** Coordinator's structural self-check found 42 sequential test IDs and all required domain sections, but **this is NOT independent Sol signoff**. Original architect-authored T01–T42 table was not included in the owner handoff or located in inspected tracked sources; PR #4 contains a clearly labeled reconstructed 42-oracle register, and independent reviewer must flag any mismatch/provenance gap. Keep current `tasks/T15-7-FINAL-ADR.md` rev.2 untouched until reviewed ADR is separately adopted. No code, S4, H04, sample recreation, PR #3 merge, WP5/T16/T17 or render authorization.
 
+## Independent Sol review #1 of PR #4: CHANGES_REQUIRED (2026-11-14)
+
+The user relayed independent Sol's review of exact PR #4 SHA `c382723fae22d5cb903e46396628fd527eea1cf4`: **CHANGES_REQUIRED**, specifically §4.2/T30/T32 incorrectly applied direct yo.restore when disabled; T38 used undefined `observation_fp` instead of `restoration_fp`; and test-acceptance wording wrongly required retained-C3 T06/T27/T28 to fail against old safe code. The **original architect-authored complete T01–T42 table remains unavailable**, so provenance is **BLOCKED** pending exact architect signoff on reconstructed 42 rows or supply/reconciliation of the original.
+
+Coordinator updated **only PR #4 proposal documents**, not production, S4 or the accepted rev.2 ADR:
+- Disabled yo_restore explicitly compares unchanged source to verified pre-respell prepared word (NONE when equal even when map could change it); enabled restore applies direct map; T30/T32 explicit.
+- T38 matches freshly verified current restoration_fp.
+- T06/T27/T28 preserve existing C3 PASS and catch selection by latest date/authoritative archive/history deletion; the three original unsafe Sol F1 repros remain expected to fail pre-fix.
+- Added explicit architect signature request in `tasks/T15-7-WP4-G1-T01-T42-ARCHITECT-SIGNOFF.md`, within draft PR #4.
+
+**Revision status:** three textual findings `FIX_APPLIED_PENDING_INDEPENDENT_REVIEW`; T01–T42 provenance `BLOCKED_PENDING_ARCHITECT`. Sol reported prior-code full suite **1,793 passed / 11 skipped / 0 failed** at reviewed SHA. This is not a rerun of corrected ADR or the future 42 test implementations.
+
+**No change in owner's authorizations:** C3 existing version-ledger approved, archive-authority model rejected, S4 migration prohibited; G1.1–G1.5 approved in principle; reviewed final normative ADR NOT adopted; production code / S4 / H04 / sample recreation / PR #3 or #4 merge / WP5/T16/T17 / render all HOLD. One **targeted independent re-review** of corrected exact SHA and one exact architect T01–T42 signoff are required before a new owner adoption request.
+
 **Owner reply format:** `G1.1–G1.5: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ; G1.6 изменение C3: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ`. The coordinator must update this register **only after** an actual owner response. Do not read approval into forwarding an architect handoff.
