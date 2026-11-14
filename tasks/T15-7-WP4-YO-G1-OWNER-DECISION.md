@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP4-YO-G1-OWNER-DECISION
 title: G1 Option B-prime proposed owner decision register
-status: proposed_for_owner
+status: owner_a_approved_in_principle_b_deferred
 owner: owner
 agent: coordinator
 branch: task/T15
@@ -12,7 +12,7 @@ depends_on: [T15-7-WP4-YO-G1-DECISION-PACKET]
 
 **Received:** 2026-11-13, owner-provided "COORDINATOR HANDOFF — T15-7-WP4-YO-G1".  
 **Reported architect verdict:** `PROPOSED_FOR_OWNER — READY FOR OWNER DECISION`.  
-**Formal owner approval:** **NOT YET GRANTED**.  
+**Owner decision 2026-11-14:** **A / G1.1–G1.5 APPROVED IN PRINCIPLE; B / G1.6 DEFERRED — NOT APPROVED.** This is **not** implementation authorization.  
 **Normative ADR:** **UNCHANGED**, pending explicit owner approval followed by a complete, reconciled addendum.  
 **WP4:** `BLOCKED`. **WP5/T16/T17/full render:** `HOLD`.
 
@@ -26,13 +26,13 @@ This record reproduces the six owner decision subjects **from the handoff** and 
 4. **G1.4 YO evidence:** separate append-only local history binds each human y/n to an exact independently verified **pre-respell** restoration observation, never to post-respell `WordOcc.form_synth`. Future map/config changes require reobservation and exact match before reuse.
 5. **G1.5 Dual ledger:** independent atomic stress/YO operations, read consistency and freshness check when a stored score is consumed; no false cross-file atomicity or inference of missing human labels.
 
-**Owner decision G1.1–G1.5:** `PENDING_EXPLICIT_OWNER_REPLY`.
+**Owner decision G1.1–G1.5:** `APPROVED_IN_PRINCIPLE` (2026-11-14). Exact normative ADR and tests remain to be approved before code.
 
 ## B. Separately approvable C3 contract change: G1.6
 
 6. **G1.6 C3 model change:** proposed switch to **one active stress row per `source_key`** with an authoritative append-only archive, conflict resolution M1–M5 and **mandatory read-only compatibility gate before any migration**. This differs from the current C3 storage model and **requires its own explicit owner decision**. No implicit consent merely from approving G1.1–G1.5.
 
-**Owner decision G1.6:** `PENDING_SEPARATE_EXPLICIT_OWNER_REPLY`.
+**Owner decision G1.6:** `DEFERRED_NOT_APPROVED` (2026-11-14), pending owner-authorized **read-only local S4 compatibility audit**. No archive format/migration change allowed.
 
 **Even if G1.6 is approved:** any specific existing S4 migration or rewrite remains disallowed until a read-only compatibility report is reviewed and the owner separately authorizes that concrete operation. Preserving history is mandatory.
 
@@ -49,15 +49,17 @@ This record reproduces the six owner decision subjects **from the handoff** and 
 
 ```text
 ARCHITECT_PROPOSAL: READY_FOR_OWNER_DECISION (reported)
-OWNER_G1_1_TO_G1_5: PENDING
-OWNER_G1_6_C3_CHANGE: PENDING_SEPARATE_APPROVAL
+OWNER_G1_1_TO_G1_5: APPROVED_IN_PRINCIPLE
+OWNER_G1_6_C3_CHANGE: DEFERRED_NOT_APPROVED
 NORMATIVE_ADR_CHANGE: NOT_AUTHORIZED
-READ_ONLY_S4_COMPATIBILITY: AFTER_OWNER_ARCHITECTURE_DECISION
+READ_ONLY_S4_COMPATIBILITY: AUTHORIZED_FOR_AGGREGATE_READ_ONLY_AUDIT
 S4_MIGRATION_OR_WRITE: NOT_AUTHORIZED
 PRODUCTION_IMPLEMENTATION: NOT_AUTHORIZED
 PR_3_MERGE: NOT_AUTHORIZED
 WP4: BLOCKED
 WP5_T16_T17_FULL_RENDER: HOLD
 ```
+
+**Owner audit scope (2026-11-14):** local-only aggregate counts of `stress_gold.tsv` rows, distinct/repeated source_key and historical identities, `stress_gold.archive.tsv` rows, completed gold labels and filled-but-unmerged todo, selected RESTORED candidates excluded by `f1_rule != null` or `f1_flag != none`, and conservative C3 alternative recommendation. No private rows, text, individual hashes, file content, S4 writes, H04, PR merge, production, WP5/T16/T17 or rendering. B stays deferred until the owner reviews the audit and separately authorizes it.
 
 **Owner reply format:** `G1.1–G1.5: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ; G1.6 изменение C3: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ`. The coordinator must update this register **only after** an actual owner response. Do not read approval into forwarding an architect handoff.
