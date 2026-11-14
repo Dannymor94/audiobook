@@ -79,6 +79,12 @@ Owner's retained C3 version-ledger decision is unchanged; no migration, gold/tod
 
 At **PR #4 pinned SHA `a012c84240eb246b8072a735989f598b6ca566e2`**, owner explicitly **APPROVED** the reconstructed normative G1 ADR/T01–T42 after architect `ACCEPT_RECONSTRUCTED_T01_T42_AT_PINNED_SHA` and independent Sol `PASS` (both reported by owner; earlier GitHub text statuses are historical). O01–O42 covered. Retained authoritative stress C3 version-ledger, derived non-authoritative archive, no S4 migration. **This supersedes older review-pending architecture-status paragraphs without authorizing production changes.** The owner has commissioned only a bounded WP4 implementation **PLAN**, stored in `tasks/T15-7-WP4-G1-IMPLEMENTATION-PLAN.md`; this plan still requires a distinct owner approval/GO before any Sonnet production code. WP4 `BLOCKED_PENDING_CODE_GO`, WP5/T16/T17/render HOLD. PR #3/#4 draft, unmerged, and protected S4/todo unchanged.
 
+### Independent Sol architecture review PASS for adopted G1 ADR (2026-11-14)
+
+At pinned PR #4 SHA `a012c84240eb246b8072a735989f598b6ca566e2`, owner explicitly APPROVED the normative G1 ADR/T01–T42 and provided independent Sol architecture **PASS** plus architect `ACCEPT_RECONSTRUCTED_T01_T42_AT_PINNED_SHA`. The earlier provenance blocker and R1–R8 textual concerns are closed **for the document contract**. Verified coverage: 42 sequential T oracles, O01–O42 total 42 (40 mapped, O17 replaced, O38 void/replaced); PR #4 document-only. **Sol explicitly did NOT run pytest or owner-private S4 checks at this review**, and no code tests or WP4 implementation passed.
+
+**Current next gate:** owner approval of the bounded plan `tasks/T15-7-WP4-G1-IMPLEMENTATION-PLAN.md`, then a separate limited implementation CODE GO, possibly including explicitly authorized owner-local memory-only I1 corpus observation. Until then no Sonnet production edits, S4 todo/sample/YO evidence writes, PR #3/#4 merge, H04, WP5/T16/T17 or full render. Older pending-architecture paragraphs in this historical plan are superseded by this timestamped decision record, not removed.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
