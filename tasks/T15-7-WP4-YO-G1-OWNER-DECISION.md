@@ -32,7 +32,7 @@ This record reproduces the six owner decision subjects **from the handoff** and 
 
 6. **G1.6 C3 model change:** proposed switch to **one active stress row per `source_key`** with an authoritative append-only archive, conflict resolution M1–M5 and **mandatory read-only compatibility gate before any migration**. This differs from the current C3 storage model and **requires its own explicit owner decision**. No implicit consent merely from approving G1.1–G1.5.
 
-**Owner decision G1.6:** `DEFERRED_NOT_APPROVED` (2026-11-14), pending owner-authorized **read-only local S4 compatibility audit**. No archive format/migration change allowed.
+**Owner decision G1.6:** `DEFERRED_NOT_APPROVED` (2026-11-14). The authorized read-only S4 census has now **PASS** (reported pinned SHA `355507df`), but the owner has **NOT YET** selected the final C3 model. No archive authority/format/migration change allowed. **Coordinator recommendation:** reject the proposed authoritative archive change and retain current C3 version-ledger with one authoritative stress file.
 
 **Even if G1.6 is approved:** any specific existing S4 migration or rewrite remains disallowed until a read-only compatibility report is reviewed and the owner separately authorizes that concrete operation. Preserving history is mandatory.
 
@@ -61,5 +61,13 @@ WP5_T16_T17_FULL_RENDER: HOLD
 ```
 
 **Owner audit scope (2026-11-14):** local-only aggregate counts of `stress_gold.tsv` rows, distinct/repeated source_key and historical identities, `stress_gold.archive.tsv` rows, completed gold labels and filled-but-unmerged todo, selected RESTORED candidates excluded by `f1_rule != null` or `f1_flag != none`, and conservative C3 alternative recommendation. No private rows, text, individual hashes, file content, S4 writes, H04, PR merge, production, WP5/T16/T17 or rendering. B stays deferred until the owner reviews the audit and separately authorizes it.
+
+## Completed local S4 audit — evidence for G1.6 decision (2026-11-14)
+
+User forwarded Sonnet's read-only owner-local output for pinned `355507df2789840adb2925f644818ccd899be8c6`. `tests/test_stress_s4_c3_readonly.py`: **17 PASS / 0 FAIL / 0 SKIP**. Scanner `PASS`, no reported data/code writes, migration not authorized. `stress_gold.tsv` present but **0 rows**: 0 unique/repeated keys, historical versions, current conflicts, stale records, or human labels. `stress_gold.archive.tsv` present **0 rows**. `stress_gold.todo.tsv` present **320 blank / 0 filled / 0 partially filled / 0 unmerged**. Selected `RESTORED=40`, F1 excluded **0**, `YO_EVALUABLE=40`. G0 verified eligible **51,629**. `text/` count 246 before/after, local MD5 gold/todo unchanged; these checks are **not** a fresh 416-file hash audit. The aggregate data were not independently rerun by coordinator because S4 remains local and Git-ignored.
+
+**Assessment:** census PASS, C3 owner decision **PENDING**. Given zero historical annotations, the **simplest/least migration-risk path is to retain the existing authoritative C3 version-ledger** and derived non-authoritative archive; do **not** migrate empty gold or change the archive authority. A later correction procedure for same-source conflicting human labels remains a separate ADR issue; never silently prefer newest date.
+
+Detailed report: `tasks/T15-7-WP4-G1-S4-READONLY-AUDIT.md` in draft PR #3. No B approval is inferred from forwarding this audit. The owner must explicitly decide **retain current C3** versus request an alternative before any new normative ADR or code GO.
 
 **Owner reply format:** `G1.1–G1.5: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ; G1.6 изменение C3: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ`. The coordinator must update this register **only after** an actual owner response. Do not read approval into forwarding an architect handoff.
