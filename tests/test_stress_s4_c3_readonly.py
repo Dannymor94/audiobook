@@ -208,3 +208,23 @@ def test_disabled_yo_restore_is_not_misclassified_as_restoration(tmp_path, monke
     assert result["selected_restored"] == 0
     assert result["yo_evaluable"] == 0
     assert result["excluded_union"] == 0
+
+
+
+def test_missing_owner_gold_mount_blocks_audit_before_any_inventory_read(tmp_path, monkeypatch):
+    from audiobook import paths
+    from stress_s4_c3_readonly import audit_local
+
+    monkeypatch.setattr(paths, "TEXT", tmp_path)
+    with pytest.raises(AuditBlocked, match="AUTHORITATIVE_GOLD_NOT_MOUNTED"):
+        audit_local({})
+
+
+def test_missing_owner_todo_mount_blocks_even_with_empty_gold_header(tmp_path, monkeypatch):
+    from audiobook import paths
+    from stress_s4_c3_readonly import audit_local
+
+    monkeypatch.setattr(paths, "TEXT", tmp_path)
+    (tmp_path / "stress_gold.tsv").write_text("\t".join(FIELDS) + "\n", encoding="utf-8")
+    with pytest.raises(AuditBlocked, match="OWNER_TODO_NOT_MOUNTED"):
+        audit_local({})
