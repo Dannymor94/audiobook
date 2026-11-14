@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP4-G1-ADR-INDEPENDENT-REVIEW
 title: "One independent Sol review of proposed unified G1 normative ADR retaining C3"
-status: REQUESTED_NOT_COMPLETED
+status: REVIEW1_CHANGES_REQUIRED_REVISED_PENDING_TARGETED_RECHECK_AND_ARCHITECT_SIGNOFF
 owner: owner
 reviewer: codex-sol
 branch: task/T15-7-wp4-g1-normative-adr
@@ -9,7 +9,7 @@ branch: task/T15-7-wp4-g1-normative-adr
 
 # T15-7 WP-4 G1 — one independent architectural consistency review
 
-**STATUS: PENDING INDEPENDENT SOL.** The coordinator authored the proposal; the coordinator's static checks are not an independent review and cannot mark this PASS.
+**STATUS: independent Sol review #1 completed with CHANGES_REQUIRED; coordinator textual corrections submitted for TARGETED INDEPENDENT RE-REVIEW. Architect/original-register provenance still BLOCKED.** This coordinator-authored proposal is not accepted until the remaining gates close; structural self-checks are not independent PASS.
 
 ## Pin and sources
 
@@ -18,6 +18,28 @@ branch: task/T15-7-wp4-g1-normative-adr
 3. Read tasks/T15-7-WP4-YO-G1-OWNER-DECISION.md on task/T15 for the final owner declaration: G1.1–G1.5 approved in principle; keep current C3 version-ledger; reject authoritative archive/one-active-physical-row model; absolutely no S4 migration, no production GO.
 4. Read owner-local S4 census aggregate report tasks/T15-7-WP4-G1-S4-READONLY-AUDIT.md in draft PR #3 (prior census at SHA 355507df): stress gold 0, archive 0, todo 320 blank, selected RESTORED=40, YO_EVALUABLE=40, F1 excluded=0. No private S4 copies, per-row text or hashes.
 5. Read tasks/T15-7-WP4-YO-G1-DECISION-PACKET.md and tasks/T15-7-WP4-YO-ARCHITECTURE-AUDIT.md from draft PR #3, but their unapproved old B/B′ proposals do not supersede the owner's final C3 decision.
+
+## Review #1 — findings and follow-up
+
+Sol reviewed exact SHA `c382723fae22d5cb903e46396628fd527eea1cf4`. Report: **CHANGES_REQUIRED**, with T01–T42 provenance **BLOCKED**; prior unchanged production suite: **1793 passed, 11 skipped, 0 failed**. Reported document-only PR delta and clean worktree. These test numbers are a report on old code, not execution of new ADR or its 42 future oracles.
+
+Three textual corrections have been made in the ADR proposal, **but not yet independently re-reviewed**:
+
+1. §4.2: apply direct `yo.restore` only when pinned `text_prep.yo_restore` is enabled; otherwise compare unchanged source token to verified pre-respell prepared token and classify provable NONE. T30 now explicitly uses a map entry which would change the token if the feature were enabled; T32 covers both enabled and disabled branches.
+2. T38: only the defined `restoration_fp` is used to match the freshly verified current candidate, not undefined `observation_fp`.
+3. T06/T27/T28 acceptance: existing safe C3 behavior must **remain PASS**; prohibit latest-date selection, authoritative-archive selection, history deletion. Only the three old unsafe F1 regressions must fail under pre-fix implementation.
+
+**Separate provenance gate:** no complete original architect-authored T01–T42 file was found in inspected GitHub worktree, earlier conversation context or available Project/Library searches. An older Option B architect proposal exists with **18** original regression bullets, NOT the final 42-case G1 register. The existing 42 items are a reconstruction. The architect must sign off the exact current reconstructed rows at a pinned SHA, **or** produce the full original 42-row table and reconcile differences. If not, reviewer must report `BLOCKED: T01–T42 provenance` even when three corrections PASS. Do not call it accepted without this gate.
+
+### Narrow re-review request
+
+Verify each corrected phrase at the new pinned PR head, check T30/T32 disabled-map-entry synthetic oracle is internally consistent, and verify no additional conflicts. Explicitly mark:
+- `FIX1_DISABLED_YO_RESTORE`: PASS/FAIL
+- `FIX2_T38_RESTORATION_FP`: PASS/FAIL
+- `FIX3_RETAINED_C3_REGRESSION_ACCEPTANCE`: PASS/FAIL
+- `T01_T42_PROVENANCE`: PASS/BLOCKED
+
+Run no destructive actions; one independent follow-up on this same ADR review is sufficient. Submit the source/architect signoff separately; it is not fabricated by the coordinator.
 
 ## Independent review obligations — no edits to production
 
