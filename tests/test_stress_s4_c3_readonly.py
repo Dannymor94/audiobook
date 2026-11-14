@@ -140,3 +140,71 @@ def test_symlink_refused(tmp_path):
     link.symlink_to(target)
     with pytest.raises(AuditBlocked, match="S4_SYMLINK_UNSUPPORTED"):
         _read_gold_table(link, FIELDS)
+
+
+
+@pytest.mark.parametrize("rule,flag,excluded,by_rule,by_flag", [
+    (None, "none", 0, 0, 0),
+    ("synthetic_rule", "none", 1, 1, 0),
+    (None, "span_ambiguous", 1, 0, 1),
+    ("synthetic_rule", "span_ambiguous", 1, 1, 1),
+])
+def test_selected_restored_f1_exclusion_truth_table(
+    tmp_path, monkeypatch, rule, flag, excluded, by_rule, by_flag,
+):
+    """Exact pre-respell ё only; never guess from post-respell WordOcc."""
+    import dataclasses
+    import json
+    from audiobook import paths, stress_eval as evaluation, yo
+    from stress_s4_c3_readonly import _selected_yo_exclusions
+    from test_stress_eval_sample import context_for
+
+    raw = "Елепа."
+    context = context_for([{"type": "text", "text": raw}])
+    occ = dataclasses.replace(context.rows[0], f1_rule=rule, f1_flag=flag)
+    context = dataclasses.replace(context, rows=(occ,))
+    selection = evaluation._selection(context)
+    section = tmp_path / "sections" / "01_test"
+    section.mkdir(parents=True)
+    (section / "manifest.jsonl").write_text(
+        json.dumps({"id": "0001", "text": raw}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    mapping = {"елепа": "ёлепа"}
+    monkeypatch.setattr(yo, "book_map", lambda: mapping)
+    result = _selected_yo_exclusions(
+        {"text_prep": {"yo_restore": True}}, context, selection, mapping,
+    )
+    assert result["selected_checked"] == 1
+    assert result["selected_restored"] == 1
+    assert result["excluded_union"] == excluded
+    assert result["excluded_f1_rule"] == by_rule
+    assert result["excluded_f1_flag"] == by_flag
+    assert result["excluded_both"] == int(by_rule and by_flag)
+    assert result["yo_evaluable"] == 1 - excluded
+
+
+def test_disabled_yo_restore_is_not_misclassified_as_restoration(tmp_path, monkeypatch):
+    import json
+    from audiobook import paths, stress_eval as evaluation
+    from stress_s4_c3_readonly import _selected_yo_exclusions
+    from test_stress_eval_sample import context_for
+
+    raw = "Елепа."
+    context = context_for([{"type": "text", "text": raw}])
+    section = tmp_path / "sections" / "01_test"
+    section.mkdir(parents=True)
+    (section / "manifest.jsonl").write_text(
+        json.dumps({"id": "0001", "text": raw}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    result = _selected_yo_exclusions(
+        {"text_prep": {"yo_restore": False}}, context,
+        evaluation._selection(context), {"елепа": "ёлепа"},
+    )
+    assert result["selected_checked"] == 1
+    assert result["selected_restored"] == 0
+    assert result["yo_evaluable"] == 0
+    assert result["excluded_union"] == 0
