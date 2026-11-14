@@ -24,6 +24,7 @@ from audiobook.unitmap import AnnotationError, validate_section
 from audiobook.wordprov import gold_identity
 
 SEED = "t15-7/1"
+SEED_V2 = "t15-7/2"
 STRATA = (("omograph", 100), ("top300", 60), ("name", 40),
           ("override_covered", 40), ("yo_changed", 40), ("tail", 40))
 GOLD_FIELDS = ("source_key", "form_source", "unit_text_sha256", "unit_kind",
@@ -111,6 +112,190 @@ def select_sample(rows, source_fp, analysis_fp, *, homographs, names, targets=ST
     return Selection({"sample_fp": fingerprint, "source_fp": source_fp, "analysis_fp": analysis_fp,
                       "strata": counts, "keys": selected}, assignment,
                      sum(row.alignment_status == "aligned" and vowel_count(row.form_analysis) == 1 for row in rows))
+
+
+# ---------------------------------------------------------------------------
+# Sample/2 — updated fingerprint with observer inputs and RESTORED-based stratum
+# ---------------------------------------------------------------------------
+
+def select_sample_v2(rows, source_fp, analysis_fp, *, homographs, names,
+                     obs_map, norm_digest, yo_map_digest, prep_config_digest,
+                     targets=STRATA):
+    """Sample/2 selection (ADR G1 §3).
+
+    obs_map: dict mapping source_key → ObsResult for every eligible occurrence.
+    yo_changed stratum uses RESTORED (pre-respell forward observation), not form_synth.
+    Returns Selection with sample/2 fingerprint; path helpers use _sample_path_v2.
+    """
+    from audiobook.stress_yo_observer import RESTORED_obs
+    if (tuple(name for name, _ in targets) != tuple(name for name, _ in STRATA)
+            or any(type(n) is not int or n < 0 for _, n in targets)):
+        _error("SAMPLE_POLICY_INVALID")
+    keys = [row.source_key for row in rows]
+    if len(keys) != len(set(keys)):
+        _error("OCCURRENCE_IDENTITY_DUPLICATE")
+    eligible = [row for row in rows if row.alignment_status == "aligned" and vowel_count(row.form_analysis) >= 2]
+    frequencies = Counter(_fold(row.form_source) for row in eligible)
+    top = {form for form, _ in sorted(frequencies.items(), key=lambda pair: (-pair[1], pair[0]))[:300]}
+    assignment = {}
+    groups = {name: [] for name, _ in targets}
+    for row in eligible:
+        obs = obs_map.get(row.source_key)
+        is_restored = isinstance(obs, RESTORED_obs)
+        if row.form_source.lower() in homographs:
+            name = "omograph"
+        elif _fold(row.form_source) in top:
+            name = "top300"
+        elif row.form_source.lower() in names:
+            name = "name"
+        elif row.status == "covered_by_override":
+            name = "override_covered"
+        elif is_restored:
+            name = "yo_changed"
+        else:
+            name = "tail"
+        groups[name].append(row.source_key)
+        assignment[row.source_key] = name
+    # Fingerprint: eligible assignment digest over ALL eligible keys.
+    eligible_assign_sha = _hash(sorted([sk, assignment[sk]] for sk in assignment))
+    # Per-stratum deterministic ranking and selection.
+    selected_by_stratum = {}
+    counts = {}
+    for name, n in targets:
+        ranked = sorted(groups[name], key=lambda key: (
+            hashlib.sha256(f"{SEED_V2}|{key}".encode("utf-8")).hexdigest(), key
+        ))
+        selected_by_stratum[name] = ranked[:n]
+        counts[name] = {"N": len(groups[name]), "n": min(n, len(groups[name]))}
+    selected_by_stratum_sha = _hash(
+        {name: sorted(selected_by_stratum[name]) for name, _ in STRATA}
+    )
+    fingerprint = _hash({
+        "algo": "sample/2",
+        "source_fp": source_fp,
+        "analysis_fp": analysis_fp,
+        "observation_contract_version": "yo-observation/1",
+        "observation_inputs": {
+            "norm_content_sha256": norm_digest,
+            "yo_map_sha256": yo_map_digest,
+            "prep_config_sha256": prep_config_digest,
+        },
+        "seed": SEED_V2,
+        "strata_order": [name for name, _ in STRATA],
+        "population": {name: counts[name]["N"] for name, _ in STRATA},
+        "selected_n": {name: counts[name]["n"] for name, _ in STRATA},
+        "eligible_assignment_sha256": eligible_assign_sha,
+        "selected_by_stratum_sha256": selected_by_stratum_sha,
+    })
+    all_selected = sorted(sk for keys in selected_by_stratum.values() for sk in keys)
+    strata_by_key = {sk: name for name, keys in selected_by_stratum.items() for sk in keys}
+    record = {
+        "sample_fp": fingerprint,
+        "source_fp": source_fp,
+        "analysis_fp": analysis_fp,
+        "observation_contract_version": "yo-observation/1",
+        "observation_inputs": {
+            "norm_content_sha256": norm_digest,
+            "yo_map_sha256": yo_map_digest,
+            "prep_config_sha256": prep_config_digest,
+        },
+        "strata": counts,
+        "eligible_assignment_sha256": eligible_assign_sha,
+        "selected_by_stratum_sha256": selected_by_stratum_sha,
+        "selected_by_stratum": {name: sorted(selected_by_stratum[name]) for name, _ in STRATA},
+        "keys": all_selected,
+    }
+    return Selection(record, strata_by_key,
+                     sum(row.alignment_status == "aligned" and vowel_count(row.form_analysis) == 1 for row in rows))
+
+
+# ---------------------------------------------------------------------------
+# Versioned paths for sample/2
+# ---------------------------------------------------------------------------
+
+def _sample_path_v2(sample_fp: str) -> Path:
+    return paths.OUT / "stress" / "eval" / "sample" / f"s2-{sample_fp[:16]}.json"
+
+
+def _todo_path_v2(sample_fp: str) -> Path:
+    return paths.TEXT / f"stress_gold.todo.s2-{sample_fp[:16]}.tsv"
+
+
+def _check_todo_v2(todo_path: Path, requested_rows, gold_rows):
+    """Guard versioned sample/2 todo creation.
+
+    absent → guarded creation allowed; same bytes → no-op; different bytes →
+    OWNER_TODO_PROTECTED. If different and contains filled labels not in gold →
+    also TODO_HAS_UNMERGED_LABELS.
+    """
+    if not todo_path.exists():
+        return "create"
+    before = todo_path.read_bytes()
+    expected = serialize_gold(requested_rows, allow_blank=True).encode("utf-8")
+    if before == expected:
+        return "noop"
+    # Different bytes: check for unmerged labels.
+    try:
+        existing = parse_gold(before.decode("utf-8"), allow_blank=True)
+    except (UnicodeError, AnnotationError):
+        _error("OWNER_TODO_PROTECTED")
+    saved_sigs = {tuple(r[n] for n in GOLD_FIELDS) for r in gold_rows}
+    for row in existing:
+        if any(row[f] for f in LABEL_FIELDS):
+            sig = tuple(row[n] for n in GOLD_FIELDS)
+            if sig not in saved_sigs:
+                _error("TODO_HAS_UNMERGED_LABELS")
+    _error("OWNER_TODO_PROTECTED")
+
+
+# ---------------------------------------------------------------------------
+# OS-backed exclusive evaluation lock
+# ---------------------------------------------------------------------------
+
+_EVAL_LOCK_NAME = ".wp4.lock"
+
+
+def _lock_path() -> Path:
+    return paths.OUT / "stress" / "eval" / _EVAL_LOCK_NAME
+
+
+def acquire_eval_lock(lock_path: Path | None = None) -> object:
+    """Acquire OS-backed exclusive evaluation lock. Returns opaque lock handle.
+
+    Fails closed with EVAL_LOCK_UNAVAILABLE/ERROR if unavailable or unsafe.
+    Call release_eval_lock(handle) when done.
+    """
+    path = lock_path if lock_path is not None else _lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = open(path, "a", encoding="utf-8")  # noqa: WPS515
+    except OSError:
+        _error("EVAL_LOCK_UNAVAILABLE")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, IOError):
+        fd.close()
+        _error("EVAL_LOCK_UNAVAILABLE")
+    return fd
+
+
+def release_eval_lock(handle: object) -> None:
+    """Release a lock handle returned by acquire_eval_lock."""
+    if handle is None:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    except (OSError, IOError):
+        pass
+    finally:
+        handle.close()
 
 
 def _split_key(key):
