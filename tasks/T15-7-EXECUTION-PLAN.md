@@ -23,6 +23,14 @@ Before giving an implementation task to another agent, the coordinator checks: *
 
 **Active example:** WP-4 historical ё semantics remain BLOCKED until a signed architect ADR decision. Coordinator may independently prepare isolated synthetic regression tests and a failure-characterization PR, but may not decide semantic migration or rewrite gold labels. See `tasks/T15-7-WP4-YO-ADR-ESCALATION.md`.
 
+## Latest owner decision / operations state — 2026-11-14
+
+**PLAN APPROVED; CODE GO NOT GRANTED.** Owner explicitly approved corrected C1–C6 plan `tasks/T15-7-WP4-G1-IMPLEMENTATION-PLAN.md` at exact commit SHA `0afd382a276832816bb7e84a020a5b58ae8d5f58`. Normative G1 ADR approved at `a012c84240eb246b8072a735989f598b6ca566e2`. Both are separate from a production authorization. The owner authorized **drafting** a separate bounded CODE GO for Sonnet, now recorded in `tasks/T15-7-WP4-G1-LIMITED-CODE-GO-PROPOSAL.md` with `status: PROPOSED_FOR_OWNER_NOT_AUTHORIZED`; it is **not** a developer execution task.
+
+**Proposed future sequencing, NOT DISPATCHED:** base code `201f0cd4e946f7f5405e47fe27153df9aeac17ef`; new isolated branch `task/T15-7-wp4-g1-implementation` only on subsequent GO; three sequential commits, I1 13 oracles → memory-only real owner-corpus I1-A original sample/1 replay and I1-B sample/2 + L3 all-SU coordinator PASS → I2 22 oracles + 3 old Sol F1 regressions → I3 7 oracles, five S2-dependent tests truly executed, full tests and one final independent Sol CODE review. STOP on scope/fingerprint mismatch, unsupported, protected-file parity failure, S2 missing or any unauthorized S3/S4 write. No PR #3/#4 merge. Details: approved plan §§2, 5.1–5.6.
+
+**Operational tracker:** WP-0 PASS, WP-1 PASS, WP-2 PASS, WP-3 PASS; WP-4 normative architecture PASS, corrected implementation plan APPROVED, code execution `WAITING_OWNER_CODE_GO`; WP-5 HOLD; T16/T17 HOLD; full render HOLD. Existing historical paragraphs below describe earlier WP-4 blockers before architecture closure; this latest status supersedes their obsolete decision state without removing evidence. The next owner action is to **approve or revise the exact separate CODE GO**, not to approve the plan again. Estimated WP-4 active developer **10–20 h** plus final Sol independent QA **2–4 h** (prior baseline, not a schedule commitment); actual new implementation effort 0 h.
+
 ## Current position
 
 - **Production 6C11, TD-1–TD-4:** CLOSED. Do not re-audit.
