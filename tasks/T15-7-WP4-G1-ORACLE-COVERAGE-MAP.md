@@ -30,7 +30,7 @@ branch: task/T15-7-wp4-g1-normative-adr
 | O14 | T36 | Same mtime with different normalized YO-map content must be detected via bytes |
 | O15 | T36, T35 | Fresh reobservation of identical candidate permits reusing its human verdict |
 | O16 | T34 | Different candidate fingerprint requires new judgment; old retained |
-| O17 | T21 | sample/1 assignment collision captured as characterization; sample/2 rejects |
+| O17 | REPLACED by T21(a) | Historical sample/1 selected-membership/assignment collision is NOT retained as an executable sampling policy; T21(a) is the required sample/2 regression: the same selected union/counts with changed stratum assignments changes fingerprint and rejects stale sample. No test that executes the old sample/1 algorithm is required |
 | O18 | T21 | Selected stratum swap changes sample/2 digest/fp |
 | O19 | T21 | Selected key union unchanged but stratum assignment changed => old sample stale |
 | O20 | T24, T25 | Original 320-row todo protected; no silent replacement or migration |
@@ -60,10 +60,10 @@ branch: task/T15-7-wp4-g1-normative-adr
 ## Completeness gates
 
 - Input concepts: **42/42** enumerated exactly once, O01–O42.
-- Disposition: **41 MAPPED + 1 VOID/REPLACED (O38)**; no unaccounted concept.
+- Disposition: **40 MAPPED + 1 REPLACED (O17) + 1 VOID/REPLACED (O38)**; all original concepts accounted for, with reasons.
 - Original O38 is not silently dropped: replacement checks derived archive byte-identical rebuild and prohibition on archived authority through T19/T27/T40.
 - New reconstructed register: T01–T42, exactly 42 numbered synthetic oracles; not all 42 must map to exactly one original concept because new tests also address approved protocol gaps.
-- Critical crosschecks: O33→T07/T34 (source-only merge); O35→T31 (§4.8 exact L3); O36→T41 (§5.7 lock); O32→T24/T25 (§3.6 protected todo); O41→T37 (historical same-fp conflict); O42→T39 (§4.7 version isolation).
+- Critical crosschecks: O17→REPLACED by T21(a), sample/1 historical collision not executable; O38→VOID/REPLACED by T19/T27/T40, byte-identical derived archive; O33→T07/T34 (source-only merge); O35→T31 (§4.8 exact L3); O36→T41 (§5.7 lock); O32→T24/T25 (§3.6 protected todo); O41→T37 (historical same-fp conflict); O42→T39 (§4.7 version isolation).
 - This map does not establish test execution, independent Sol PASS or architect sign-off. Owner adoption and production-code authorization are separate subsequent gates.
 
 **Requested architect decision:** On the exact pinned PR #4 SHA containing this file and the revised normative ADR, explicitly ACCEPT the reconstructed 42-oracle register as new authoritative contract under retained C3, or return exact CHANGES_REQUIRED IDs. Do not sign for architect or merge PR #3/#4.
