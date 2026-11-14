@@ -465,11 +465,18 @@ class GoldState:
     active: dict
     stale: tuple
     duplicates: int
+    legacy: tuple = ()  # LEGACY_YO_UNRESOLVED rows with current five-field identity
+
+
+def _is_legacy_yo(row: dict) -> bool:
+    """True when form_source has е but no ё and gold_vowel=yo: LEGACY_YO_UNRESOLVED."""
+    text = row["form_source"].lower()
+    return row["gold_vowel"] == "yo" and "ё" not in text and "е" in text
 
 
 def inspect_ledger(rows, context):
     by_key = {row.source_key: row for row in context.rows}
-    active, stale = {}, []
+    active, stale, legacy_rows = {}, [], []
     duplicates = 0
     for raw in rows:
         row = validate_gold(raw, historical=True)
@@ -478,6 +485,10 @@ def inspect_ledger(rows, context):
             stale.append(row)
             continue
         occ = by_key.get(row["source_key"])
+        if _is_legacy_yo(row) and not (occ is not None and yo_changed(occ)):
+            # LEGACY_YO_UNRESOLVED: form_source has е but yo_restore does not currently restore it.
+            legacy_rows.append(row)
+            continue
         usable_context = occ is not None and occ.alignment_status == "aligned" and vowel_count(occ.form_analysis) >= 2
         row = validate_gold(row, occ if usable_context else None, historical=not usable_context)
         key = row["source_key"]
@@ -489,7 +500,7 @@ def inspect_ledger(rows, context):
                 active[key] = row
         else:
             active[key] = row
-    return GoldState(active, tuple(stale), duplicates)
+    return GoldState(active, tuple(stale), duplicates, tuple(legacy_rows))
 
 
 def _todo_row(occ, sources):
@@ -788,6 +799,176 @@ def score(config):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Source-only merge (C1 compliant): no sample dependency
+# ---------------------------------------------------------------------------
+
+def merge_source(config, incoming: Path):
+    """M1-M5 without sample validation. Any source-current key is eligible (C1)."""
+    context = _load_context(config)
+    gold = paths.TEXT / "stress_gold.tsv"
+    archive = paths.TEXT / "stress_gold.archive.tsv"
+    if incoming.resolve() == archive.resolve():
+        _error("GOLD_ARCHIVE_NOT_AUTHORITATIVE")
+    ledger, gold_before = _read_ledger(gold)
+    state = inspect_ledger(ledger, context)
+    try:
+        batch = parse_gold(incoming.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        _error("GOLD_INPUT_INVALID")
+    by_key = {occ.source_key: occ for occ in context.rows}
+    additions, skipped = {}, 0
+    for row in batch:
+        key = row["source_key"]
+        expected = context.sources.resolve(key)
+        if expected is None:
+            _error("GOLD_UNEXPECTED_KEY")
+        identity, _, _ = expected
+        if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
+            _error("GOLD_STALE_INPUT")
+        occ = by_key.get(key)
+        row = validate_gold(row, occ)
+        existing = additions.get(key, state.active.get(key))
+        if existing is not None:
+            if (existing["gold_vowel"], existing["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
+                _error("GOLD_ACTIVE_CONFLICT")
+            skipped += 1
+        else:
+            additions[key] = row
+    updated = ledger + list(additions.values())
+    updated_state = inspect_ledger(updated, context)
+    plans = [_plan(gold, serialize_gold(updated), gold_before),
+             _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
+    _assert_current(context, config)
+    for plan in plans:
+        _apply(plan)
+    return {"added": len(additions), "skipped": skipped,
+            "active": len(updated_state.active), "stale": len(updated_state.stale),
+            "duplicates": updated_state.duplicates}
+
+
+# ---------------------------------------------------------------------------
+# YO evidence ledger (G1.4 §5 / M5): two independent authoritative ledgers
+# ---------------------------------------------------------------------------
+
+YO_FIELDS = (
+    "schema_version", "source_key", "form_source", "unit_text_sha256",
+    "unit_kind", "context_sha256", "restored_form_pre_respell",
+    "restored_vowel_indices", "observation_contract_version",
+    "restoration_fp", "norm_content_sha256", "yo_map_sha256",
+    "prep_config_sha256", "yo_correct", "labeler", "date",
+)
+
+_YO_INDICES = re.compile(r"(?:0|[1-9][0-9]*)(?:\|(?:0|[1-9][0-9]*))*", re.ASCII)
+
+
+def validate_yo_row(row: dict) -> dict:
+    """Validate one YO evidence row; raise YO_EVIDENCE_INVALID / YO_OBSERVATION_UNSUPPORTED."""
+    if type(row) is not dict or set(row) != set(YO_FIELDS) or any(not _safe_cell(row[n]) for n in YO_FIELDS):
+        _error("YO_EVIDENCE_INVALID")
+    if row["schema_version"] != "yo-evidence/1":
+        _error("YO_EVIDENCE_INVALID")
+    if row["observation_contract_version"] != "yo-observation/1":
+        _error("YO_OBSERVATION_UNSUPPORTED")
+    _split_key(row["source_key"])
+    if not _WORD.fullmatch(row["form_source"]) or not row["unit_kind"]:
+        _error("YO_EVIDENCE_INVALID")
+    for hex_field in ("unit_text_sha256", "context_sha256", "restoration_fp",
+                      "norm_content_sha256", "yo_map_sha256", "prep_config_sha256"):
+        if not _HEX.fullmatch(row[hex_field]):
+            _error("YO_EVIDENCE_INVALID")
+    idx_str = row["restored_vowel_indices"]
+    if not _YO_INDICES.fullmatch(idx_str):
+        _error("YO_EVIDENCE_INVALID")
+    parts = [int(p) for p in idx_str.split("|")]
+    if parts != sorted(set(parts)):
+        _error("YO_EVIDENCE_INVALID")
+    if not _WORD.fullmatch(row["restored_form_pre_respell"]):
+        _error("YO_EVIDENCE_INVALID")
+    if row["yo_correct"] not in ("y", "n"):
+        _error("YO_EVIDENCE_INVALID")
+    if not row["labeler"].strip():
+        _error("YO_EVIDENCE_INVALID")
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", row["date"]):
+        _error("YO_EVIDENCE_INVALID")
+    try:
+        datetime.date.fromisoformat(row["date"])
+    except ValueError:
+        _error("YO_EVIDENCE_INVALID")
+    return dict(row)
+
+
+def parse_yo_evidence(text: str) -> list:
+    if isinstance(text, str):
+        text = text.replace("\r\n", "\n")
+    if not isinstance(text, str) or not text.endswith("\n"):
+        _error("YO_EVIDENCE_INVALID")
+    lines = text[:-1].split("\n")
+    if lines[0] != "\t".join(YO_FIELDS):
+        _error("YO_EVIDENCE_INVALID")
+    result = []
+    for line in lines[1:]:
+        cells = line.split("\t")
+        if len(cells) != len(YO_FIELDS):
+            _error("YO_EVIDENCE_INVALID")
+        result.append(validate_yo_row(dict(zip(YO_FIELDS, cells))))
+    return result
+
+
+def serialize_yo_evidence(rows: list) -> str:
+    validated = [validate_yo_row(row) for row in rows]
+    validated.sort(key=lambda row: tuple(row[n] for n in YO_FIELDS))
+    return "\t".join(YO_FIELDS) + "\n" + "".join(
+        "\t".join(row[n] for n in YO_FIELDS) + "\n" for row in validated
+    )
+
+
+def _yo_path() -> Path:
+    return paths.TEXT / "stress_gold.yo_evidence.tsv"
+
+
+def merge_yo(config, incoming: Path):
+    """Append verified YO evidence; validates observation version and fp conflict (G1.4 §6.3)."""
+    context = _load_context(config)
+    yo_path = _yo_path()
+    yo_data = _optional_bytes(yo_path)
+    try:
+        existing = [] if yo_data is None else parse_yo_evidence(yo_data.decode("utf-8"))
+    except UnicodeError:
+        _error("YO_EVIDENCE_INVALID")
+    existing_by_fp: dict[str, dict] = {}
+    for row in existing:
+        fp = row["restoration_fp"]
+        if fp in existing_by_fp and existing_by_fp[fp]["yo_correct"] != row["yo_correct"]:
+            _error("YO_EVIDENCE_CONFLICT")
+        existing_by_fp[fp] = row
+    try:
+        batch = parse_yo_evidence(incoming.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        _error("YO_EVIDENCE_INVALID")
+    additions: list[dict] = []
+    for row in batch:
+        key = row["source_key"]
+        current = context.sources.resolve(key)
+        if current is None:
+            _error("YO_UNEXPECTED_KEY")
+        identity, _, _ = current
+        if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
+            _error("YO_STALE_INPUT")
+        fp = row["restoration_fp"]
+        if fp in existing_by_fp:
+            if existing_by_fp[fp]["yo_correct"] != row["yo_correct"]:
+                _error("YO_EVIDENCE_CONFLICT")
+            continue  # idempotent: same fp, same verdict
+        additions.append(row)
+        existing_by_fp[fp] = row
+    updated = existing + additions
+    plan = _plan(yo_path, serialize_yo_evidence(updated), yo_data)
+    _assert_current(context, config)
+    _apply(plan)
+    return {"added": len(additions), "skipped": len(batch) - len(additions)}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="stress-eval", description="Локальная выборка и журнал ручной разметки ударений")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -796,6 +977,10 @@ def main(argv=None):
     merge_parser = commands.add_parser("merge", help="Проверить и объединить ручную разметку")
     merge_parser.add_argument("file", type=Path, help="Локальный TSV с разметкой")
     merge_parser.add_argument("--sample", type=Path, help="Запись текущей выборки JSON")
+    merge_src_parser = commands.add_parser("merge-source", help="Объединить разметку (source-only, без sample)")
+    merge_src_parser.add_argument("file", type=Path, help="Локальный TSV с разметкой")
+    merge_yo_parser = commands.add_parser("merge-yo", help="Добавить YO-свидетельства")
+    merge_yo_parser.add_argument("file", type=Path, help="Локальный YO TSV")
     args = parser.parse_args(argv)
     from audiobook.__main__ import load_config
     try:
@@ -804,6 +989,10 @@ def main(argv=None):
             result = sample(config)
         elif args.command == "score":
             result = score(config)
+        elif args.command == "merge-source":
+            result = merge_source(config, args.file)
+        elif args.command == "merge-yo":
+            result = merge_yo(config, args.file)
         else:
             result = merge(config, args.file, args.sample)
     except (AnnotationError, OSError, ValueError) as error:

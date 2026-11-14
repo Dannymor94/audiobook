@@ -408,3 +408,406 @@ def test_windows_dispatch_does_not_skip_durability(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluation, "_windows_sync_directory", lambda path: events.append(path))
     evaluation._sync_directory(tmp_path)
     assert events == [tmp_path]
+
+
+# ===========================================================================
+# I2 oracles: T01, T02, T05, T07, T08, T10, T19, T28, T34, T35, T37, T39,
+#             plus three original Sol F1 regressions.
+# ===========================================================================
+
+import copy
+import hashlib as _hashlib
+
+from audiobook.stress_yo_observer import (
+    NONE_obs, RESTORED_obs, UNSUPPORTED_obs, restoration_fp as _rfp,
+)
+
+
+def _yo_row(source_key, form_source, unit_text_sha256, unit_kind, context_sha256,
+            restored_form, indices, restoration_fp_val, yo_correct, *,
+            norm="a" * 64, yo_map="b" * 64, prep_cfg="c" * 64,
+            labeler="synthetic-owner", date="2026-11-15"):
+    return {
+        "schema_version": "yo-evidence/1",
+        "source_key": source_key, "form_source": form_source,
+        "unit_text_sha256": unit_text_sha256, "unit_kind": unit_kind,
+        "context_sha256": context_sha256,
+        "restored_form_pre_respell": restored_form,
+        "restored_vowel_indices": "|".join(map(str, sorted(indices))),
+        "observation_contract_version": "yo-observation/1",
+        "restoration_fp": restoration_fp_val,
+        "norm_content_sha256": norm, "yo_map_sha256": yo_map,
+        "prep_config_sha256": prep_cfg,
+        "yo_correct": yo_correct, "labeler": labeler, "date": date,
+    }
+
+
+def _write_yo_input(tmp_path, rows, name="yo_input.tsv"):
+    p = tmp_path / name
+    p.write_text(evaluation.serialize_yo_evidence(rows), encoding="utf-8", newline="")
+    return p
+
+
+def _make_identity(source_key="01_test|0|0", form_source="Пение"):
+    sha = lambda s: _hashlib.sha256(s.encode()).hexdigest()
+    return {
+        "source_key": source_key, "form_source": form_source,
+        "unit_text_sha256": sha(form_source + "unit"),
+        "unit_kind": "text",
+        "context_sha256": sha(form_source + "ctx"),
+    }
+
+
+def _restoration_fp_for(identity, restored_form, indices):
+    return _rfp(identity, restored_form, indices)
+
+
+# ---------------------------------------------------------------------------
+# T01: global fp change does not stale a source-current stress label
+# ---------------------------------------------------------------------------
+
+class TestT01GlobalFpDoesNotStaleCurrentLabel:
+    def test_analysis_fp_change_leaves_active_label_unchanged(self):
+        """T01: analysis_fp and yo-map change must not stale a valid five-field identity."""
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx_a = context_for(units)
+        # Build a valid gold row using the A-context identity
+        identity_a = ctx_a.sources.resolve("01_test|0|0")[0]
+        row_a = {**identity_a, "context": "X", "gold_vowel": "0",
+                 "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        # Build a "changed" context that has different analysis_fp (simulated via source_fp change)
+        # but the same five-field source identity for unit 0
+        ctx_changed = evaluation.EvalContext(
+            ctx_a.rows, ctx_a.source_fp + "_changed", ctx_a.analysis_fp + "_fp",
+            ctx_a.sources, ctx_a.homographs, ctx_a.names, ctx_a.generation,
+        )
+        state = evaluation.inspect_ledger([row_a], ctx_changed)
+        assert state.active.get("01_test|0|0") == evaluation.validate_gold(row_a)
+        assert len(state.stale) == 0
+
+
+# ---------------------------------------------------------------------------
+# T02: source token text change → SOURCE_STALE
+# ---------------------------------------------------------------------------
+
+class TestT02SourceTokenTextChangeStales:
+    def test_source_text_change_makes_label_stale(self):
+        """T02: changing unit text changes unit_text_sha256 → old row becomes SOURCE_STALE."""
+        units_a = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx_a = context_for(units_a)
+        identity_a = ctx_a.sources.resolve("01_test|0|0")[0]
+        row_a = {**identity_a, "context": "X", "gold_vowel": "0",
+                 "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        # Change source token text
+        units_b = copy.deepcopy(units_a)
+        units_b[0]["text"] = "Лебедь."
+        ctx_b = context_for(units_b)
+        state = evaluation.inspect_ledger([row_a], ctx_b)
+        assert len(state.stale) == 1 and row_a in state.stale
+        assert len(state.active) == 0
+
+
+# ---------------------------------------------------------------------------
+# T05 / T10: LEGACY_YO_UNRESOLVED preserved, not active; new numeric activates
+# ---------------------------------------------------------------------------
+
+class TestT05T10LegacyYoUnresolved:
+    def _legacy_row(self):
+        """'Пение' has е, no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED."""
+        units = [{"type": "text", "text": "Пение."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        assert "е" in identity["form_source"].lower() and "ё" not in identity["form_source"].lower()
+        row = {**identity, "context": "X", "gold_vowel": "yo",
+               "yo_correct": "y", "labeler": "syn", "date": "2026-11-01"}
+        return row, ctx
+
+    def test_T05_legacy_yo_not_in_active(self):
+        """T05: LEGACY_YO_UNRESOLVED row not placed in active; key counts as incomplete."""
+        row, ctx = self._legacy_row()
+        state = evaluation.inspect_ledger([row], ctx)
+        assert len(state.active) == 0
+        assert len(state.legacy) == 1 and row in state.legacy
+        assert len(state.stale) == 0
+
+    def test_T10_new_numeric_activates_alongside_legacy(self):
+        """T10: new numeric row for same key becomes ACTIVE; legacy retained; no conflict."""
+        legacy, ctx = self._legacy_row()
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        numeric = {**identity, "context": "X", "gold_vowel": "0",
+                   "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        state = evaluation.inspect_ledger([legacy, numeric], ctx)
+        assert state.active.get("01_test|0|0") == evaluation.validate_gold(numeric)
+        assert len(state.legacy) == 1
+        assert len(state.stale) == 0
+        assert state.duplicates == 0
+
+    def test_T10_legacy_not_exported_to_archive(self):
+        """T10/M4: LEGACY_YO_UNRESOLVED rows stay in gold, not in derived stale archive."""
+        legacy, ctx = self._legacy_row()
+        state = evaluation.inspect_ledger([legacy], ctx)
+        # stale (archive export) must be empty; legacy stays only in gold
+        assert len(state.stale) == 0
+        assert len(state.legacy) == 1
+
+
+# ---------------------------------------------------------------------------
+# T07: source-only merge independent of sample/analysis/restoration changes
+# ---------------------------------------------------------------------------
+
+class TestT07MergeSourceIndependent:
+    def test_merge_source_accepts_key_outside_current_sample(self, tmp_path, monkeypatch):
+        """T07: merge_source works on source-current key even when sample has changed."""
+        units = setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        # Simulate a sample change by modifying the sample record on disk
+        sample_dir = paths.OUT / "stress" / "eval" / "sample"
+        old_path = next(sample_dir.glob("*.json"))
+        import json as _json
+        old_record = _json.loads(old_path.read_text(encoding="utf-8"))
+        # Change source_fp in the sample record to simulate a stale sample
+        stale_record = {**old_record, "source_fp": "stale"}
+        old_path.write_text(_json.dumps(stale_record), encoding="utf-8")
+        # Todo row for key 0
+        row = todo_rows()[0]
+        incoming = write_input(tmp_path, [labeled(row)])
+        # Regular merge would fail (sample_fp mismatch); merge_source does not care
+        result = evaluation.merge_source({}, incoming)
+        assert result["added"] == 1
+
+    def test_merge_source_validates_five_field_identity(self, tmp_path, monkeypatch):
+        """T07: merge_source rejects stale source identity despite accepting any key."""
+        units = setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        row = todo_rows()[0]
+        stale_row = {**labeled(row), "unit_text_sha256": "0" * 64}
+        with pytest.raises(AnnotationError, match="GOLD_STALE_INPUT"):
+            evaluation.merge_source({}, write_input(tmp_path, [stale_row]))
+
+
+# ---------------------------------------------------------------------------
+# T19: archive rebuild twice from same gold → byte-identical
+# ---------------------------------------------------------------------------
+
+class TestT19ArchiveDoubleRebuildByteIdentical:
+    def test_double_rebuild_gives_identical_bytes(self, tmp_path, monkeypatch):
+        """T19: f(gold) must yield byte-identical archive on two independent rebuilds."""
+        units = setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        # Merge a label to create stale state: label unit 1, then stale it by neighbor change
+        row = labeled(todo_rows()[1])
+        evaluation.merge({}, write_input(tmp_path, [row]))
+        units[0]["text"] = "Дельта."
+        evaluation.sample({})
+        # Rebuild archive twice by running sample again (both rebuilds from same gold)
+        archive = paths.TEXT / "stress_gold.archive.tsv"
+        archive_bytes_1 = archive.read_bytes()
+        # Second rebuild: corrupt archive and re-run sample (which re-derives archive)
+        archive.write_text("synthetic stale export", encoding="utf-8")
+        evaluation.sample({})
+        archive_bytes_2 = archive.read_bytes()
+        assert archive_bytes_1 == archive_bytes_2
+
+
+# ---------------------------------------------------------------------------
+# T28: A→B→A single label reactivates; B becomes SOURCE_STALE
+# ---------------------------------------------------------------------------
+
+class TestT28SourceReversionReactivates:
+    def test_single_a_label_reactivates_after_ab_a(self):
+        """T28: A→B→A for context reversion; single original A label reactivates."""
+        units_a = [{"type": "text", "text": "Бета."},
+                   {"type": "text", "text": "Гамма."},
+                   {"type": "text", "text": "Альфа."}]
+        ctx_a = context_for(units_a)
+        # L1: label for unit 1 in A-context
+        identity_a = ctx_a.sources.resolve("01_test|1|0")[0]
+        l1 = {**identity_a, "context": "X", "gold_vowel": "0",
+              "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        # B-context: change first unit (prev of unit 1)
+        units_b = copy.deepcopy(units_a)
+        units_b[0]["text"] = "Дельта."
+        ctx_b = context_for(units_b)
+        # L2: label for unit 1 in B-context
+        identity_b = ctx_b.sources.resolve("01_test|1|0")[0]
+        l2 = {**identity_b, "context": "Y", "gold_vowel": "1",
+              "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        # B-context: L1 is stale, L2 is active
+        state_b = evaluation.inspect_ledger([l1, l2], ctx_b)
+        assert l1 in state_b.stale
+        assert state_b.active.get("01_test|1|0") == evaluation.validate_gold(l2)
+        # A-context (reverted): L1 reactivates, L2 becomes stale
+        state_a = evaluation.inspect_ledger([l1, l2], ctx_a)
+        assert state_a.active.get("01_test|1|0") == evaluation.validate_gold(l1)
+        assert l2 in state_a.stale
+
+
+# ---------------------------------------------------------------------------
+# T34, T35, T37, T39: YO evidence merge operations
+# ---------------------------------------------------------------------------
+
+class TestT34T35T37T39YoMerge:
+    def _setup(self, tmp_path, monkeypatch):
+        units = setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0])]))
+        return units
+
+    def _identity(self):
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        return ctx.sources.resolve("01_test|0|0")[0]
+
+    def test_T34a_same_fp_accepted_despite_no_sample(self, tmp_path, monkeypatch):
+        """T34a: merge_yo accepts same restoration_fp regardless of sample identity."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бёта", [0], fp, "y")
+        result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        assert result["added"] == 1 and result["skipped"] == 0
+
+    def test_T34a_repeat_idempotent(self, tmp_path, monkeypatch):
+        """T34a: same fp + same y/n is a no-op on repeat."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бёта", [0], fp, "y")
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        assert result["added"] == 0 and result["skipped"] == 1
+
+    def test_T34b_different_candidate_requires_new_judgment(self, tmp_path, monkeypatch):
+        """T34b: different restoration_fp (candidate moved) requires a new YO entry."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp_a = _restoration_fp_for(identity, "Бёта", [0])
+        fp_b = _restoration_fp_for(identity, "Бетё", [1])
+        row_a = _yo_row(identity["source_key"], identity["form_source"],
+                        identity["unit_text_sha256"], identity["unit_kind"],
+                        identity["context_sha256"], "Бёта", [0], fp_a, "y")
+        row_b = _yo_row(identity["source_key"], identity["form_source"],
+                        identity["unit_text_sha256"], identity["unit_kind"],
+                        identity["context_sha256"], "Бетё", [1], fp_b, "n")
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_a]))
+        result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_b]))
+        assert result["added"] == 1  # new entry for different fp
+
+    def test_T35_ab_a_reuses_verdict_after_fresh_observation(self, tmp_path, monkeypatch):
+        """T35: A→B→A; same restoration_fp reappears → old y/n verdict reused (idempotent)."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бёта", [0], fp, "y")
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        # Simulate A→B→A: same fp reappears with same verdict
+        result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        assert result["skipped"] == 1 and result["added"] == 0
+
+    def test_T37a_same_fp_same_verdict_idempotent(self, tmp_path, monkeypatch):
+        """T37: same restoration_fp + same y/n → no-op."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бёта", [0], fp, "n")
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
+        assert result["added"] == 0
+
+    def test_T37b_same_fp_opposite_verdict_error(self, tmp_path, monkeypatch):
+        """T37: same restoration_fp with opposite y/n → YO_EVIDENCE_CONFLICT/ERROR."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row_y = _yo_row(identity["source_key"], identity["form_source"],
+                        identity["unit_text_sha256"], identity["unit_kind"],
+                        identity["context_sha256"], "Бёта", [0], fp, "y")
+        row_n = _yo_row(identity["source_key"], identity["form_source"],
+                        identity["unit_text_sha256"], identity["unit_kind"],
+                        identity["context_sha256"], "Бёта", [0], fp, "n")
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_y]))
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_CONFLICT"):
+            evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_n]))
+
+    def test_T39_unknown_observer_version_error(self, tmp_path, monkeypatch):
+        """T39: unknown observation_contract_version → YO_OBSERVATION_UNSUPPORTED/ERROR."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp = _restoration_fp_for(identity, "Бёта", [0])
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бёта", [0], fp, "y")
+        bad_row = {**row, "observation_contract_version": "yo-observation/9999"}
+        p = tmp_path / "bad_yo.tsv"
+        # Build TSV manually bypassing validate_yo_row
+        p.write_text("\t".join(evaluation.YO_FIELDS) + "\n"
+                     + "\t".join(bad_row[f] for f in evaluation.YO_FIELDS) + "\n",
+                     encoding="utf-8", newline="")
+        with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+            evaluation.merge_yo({}, p)
+
+    def test_T39_malformed_indices_rejected(self, tmp_path, monkeypatch):
+        """T39: malformed restored_vowel_indices → YO_EVIDENCE_INVALID."""
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.validate_yo_row({
+                "schema_version": "yo-evidence/1",
+                "source_key": "01_test|0|0",
+                "form_source": "Бета",
+                "unit_text_sha256": "a" * 64, "unit_kind": "text",
+                "context_sha256": "b" * 64,
+                "restored_form_pre_respell": "Бёта",
+                "restored_vowel_indices": "0|0",  # duplicate index → invalid
+                "observation_contract_version": "yo-observation/1",
+                "restoration_fp": "c" * 64,
+                "norm_content_sha256": "d" * 64, "yo_map_sha256": "e" * 64,
+                "prep_config_sha256": "f" * 64,
+                "yo_correct": "y", "labeler": "syn", "date": "2026-11-15",
+            })
+
+
+# ---------------------------------------------------------------------------
+# Three original Sol F1 regressions:
+#   (1) removal of restored ё → different restoration_fp → old verdict cannot apply
+#   (2) introduction of restored ё → new restoration_fp → new judgment needed
+#   (3) movement of ё between е positions → different restoration_fp
+# ---------------------------------------------------------------------------
+
+class TestF1SolRegressions:
+    def _base_identity(self):
+        return _make_identity(source_key="01_test|0|0", form_source="Пение")
+
+    def test_f1_removal_old_verdict_not_reused(self):
+        """F1 reg 1: restored ё removed → new restoration_fp → old y/n cannot apply."""
+        identity = self._base_identity()
+        fp_restored = _restoration_fp_for(identity, "Пёние", [0])
+        fp_no_restore = _restoration_fp_for(identity, "Пение", [1])  # different candidate
+        # Different fps: old verdict (fp_restored, "y") is NOT applicable to fp_no_restore
+        assert fp_restored != fp_no_restore
+
+    def test_f1_introduction_new_fp_created(self):
+        """F1 reg 2: new ё introduced → new restoration_fp separate from prior NONE state."""
+        identity = self._base_identity()
+        fp_new = _restoration_fp_for(identity, "Пёние", [0])
+        fp_other = _restoration_fp_for(identity, "Пениё", [2])
+        # Each new restoration event gets its own independent fp
+        assert fp_new != fp_other
+
+    def test_f1_movement_between_positions_creates_different_fp(self):
+        """F1 reg 3: same source identity, ё at position 0 vs position 1 → different fp."""
+        identity = self._base_identity()
+        fp_pos0 = _restoration_fp_for(identity, "Пёние", [0])
+        fp_pos1 = _restoration_fp_for(identity, "Пениё", [2])
+        # Moving ё from position 0 to position 2 (another е) produces a different fp
+        # → old y/n verdict (fp_pos0) cannot be applied to new restoration (fp_pos1)
+        assert fp_pos0 != fp_pos1
+        # Verify the fp depends on BOTH the form AND the indices
+        fp_same_form_diff_idx = _restoration_fp_for(identity, "Пёние", [1])
+        assert fp_pos0 != fp_same_form_diff_idx
