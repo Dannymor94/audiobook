@@ -1,7 +1,7 @@
 ---
 id: T15-7-WP4-YO-G1-OWNER-DECISION
 title: G1 Option B-prime proposed owner decision register
-status: owner_c3_retained_adr_authoring_authorized
+status: owner_normative_g1_approved_at_pinned_sha_code_go_pending
 owner: owner
 agent: coordinator
 branch: task/T15
@@ -95,6 +95,12 @@ Coordinator updated **only PR #4 proposal documents**, not production, S4 or the
 **Revision status:** three textual findings `FIX_APPLIED_PENDING_INDEPENDENT_REVIEW`; T01–T42 provenance `BLOCKED_PENDING_ARCHITECT`. Sol reported prior-code full suite **1,793 passed / 11 skipped / 0 failed** at reviewed SHA. This is not a rerun of corrected ADR or the future 42 test implementations.
 
 **No change in owner's authorizations:** C3 existing version-ledger approved, archive-authority model rejected, S4 migration prohibited; G1.1–G1.5 approved in principle; reviewed final normative ADR NOT adopted; production code / S4 / H04 / sample recreation / PR #3 or #4 merge / WP5/T16/T17 / render all HOLD. One **targeted independent re-review** of corrected exact SHA and one exact architect T01–T42 signoff are required before a new owner adoption request.
+
+## Owner/auditor alignment — authoritative status (2026-11-14)
+
+**Final decision: ADR APPROVED / IMPLEMENTATION GO PENDING.** The owner explicitly approved normative G1 and reconstructed T01–T42 at PR #4 exact SHA `a012c84240eb246b8072a735989f598b6ca566e2`. The owner reports **architect ACCEPT_RECONSTRUCTED_T01_T42_AT_PINNED_SHA** and independent **Sol PASS** on that same SHA, and confirms coverage of O01–O42. This newer sign-off supersedes the earlier CHANGES_REQUIRED and review-pending *decision statuses* noted lower in this historical log, but not their documented findings. The archived GitHub PR review listing and old sign-off document may not display the external chats; treat ACCEPT/PASS as owner-relayed and do not attribute those records to a GitHub review that was never posted.
+
+**Owner-approved only:** architecture and regression contract. **Not approved:** implementation or code, existing S4, 320-row todo, migration, H04, sample regeneration, PR #3/#4 merge, WP5/T16/T17 or full render. **Next:** present the limited WP4-I1/I2/I3 plan for **separate owner approval**; do not treat plan preparation or Sol architectural PASS as permission to dispatch Sonnet.
 
 ## Owner approval of normative G1 ADR and T01–T42 at pinned SHA — 2026-11-14
 
