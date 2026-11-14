@@ -1,13 +1,44 @@
 ---
 id: T15-7-WP4-G1-S4-READONLY-AUDIT
 title: Owner-authorized local S4 C3 compatibility census
-status: blocked_pending_local_private_s4
+status: pass_owner_c3_decision_pending
 owner: owner
 agent: coordinator
 branch: task/T15-7-yo-risk-audit
 ---
 
 # T15-7 WP4 — read-only S4 compatibility: owner GO, no migration
+
+## Audit result — PASS for S4 census, owner C3 decision still pending
+
+**Evidence provenance:** user supplied Sonnet's exact owner-local offline read-only run at pinned SHA `355507df2789840adb2925f644818ccd899be8c6`, on 2026-11-14. These are **agent-reported local results**, not independently re-executed by the coordinator; the owner-local S4 files are not present in GitHub and cannot be inspected in this session.
+
+| Domain | Owner-local reported aggregates |
+|---|---|
+| Synthetic module | **17 PASS / 0 FAIL / 0 SKIP** |
+| Scanner | **PASS**; `authorized_migration=false`, `s4_modified=false`, `production_modified=false` |
+| `stress_gold.tsv` | present; **0 data rows**, 0 unique/repeated `source_key`, 0 separate source-identity versions, 0 stale/current-conflicting rows, **0 human labels** |
+| `stress_gold.archive.tsv` | present; **0 rows**, 0 unmatched |
+| `stress_gold.todo.tsv` | present; **320 rows**, **320 blank**, 0 complete/partial/unmerged human annotations |
+| Source snapshot | G0 **51,629 eligible verified**, selected G0 unsupported **0** |
+| Selected RESTORED | **320 selected inspected; 40 restored; 0 F1-rule exclusions, 0 flag exclusions, 0 overlap** |
+| `YO_EVALUABLE = RESTORED ∧ f1_rule=null ∧ f1_flag=none` | **40/40 selected RESTORED** evaluable, 0 excluded |
+| File parity | Owner reports `text/` file count **246 before and after** and unchanged local MD5 for gold/todo; no file mutations. Scope is **not** the former 416-file protected parity and must not be described as a fresh 416-file hash verification |
+| Diff | Reported `src/` change versus G0 baseline **0 files** |
+
+**Result:** `PASS` for **read-only compatibility census**, **not** WP4 quality acceptance or authorization. Reported script recommendation: `PREFER_MINIMAL_C3_KEEP_CURRENT_LEDGER_NO_MIGRATION`. Historical source-only human annotation data are absent **on the measured snapshot**; the blank 320-row todo must still be preserved byte-for-byte. This does not prove that all possible external backups or earlier disconnected versions are absent.
+
+### Coordinator's recommendation (not an owner decision)
+
+**Retain current C3: one authoritative `text/stress_gold.tsv` version-ledger; derived, non-authoritative `stress_gold.archive.tsv`. Do not switch to an authoritative archive or introduce a migration.** It is the simplest model with one authoritative stress file, existing atomicity/fail-closed provenance and no migration just to rearrange empty data.
+
+The one known limitation remains: if a human later submits **two conflicting numeric annotations of unchanged source identity**, existing C3 raises `GOLD_ACTIVE_CONFLICT` and does not let the user correct by appending. Do not silently select the newer row. A separate, explicit owner-approved correction/adjudication contract could be added later, preserving the prior human decision and audit trail without introducing two authoritative stress files now.
+
+**Owner decision now requested:** confirm **`G1.6: REJECT_PROPOSED_ARCHIVE_AUTHORITY; RETAIN_CURRENT_C3_VERSION_LEDGER`** (or decline and request another model). This is a decision on architecture only, never a gold/sample/ADR/code/PR-merge GO. A / G1.1–G1.5 remains `APPROVED_IN_PRINCIPLE`. B / G1.6 remains `DEFERRED_NOT_APPROVED` until actual explicit reply.
+
+**After owner decision:** request complete normative ADR targeting G1.1–G1.5 with C3 retained, exact `T01–T42` including T06/T27/T28, source-only stress and YO observation schema, dual stress/YO ledgers and persisted-score freshness. Submit proposed ADR for owner review and one independent Sol architectural check. **Only then** request production implementation permission. No H04/S4 write/sample regeneration/render authorization.
+
+---
 
 **Owner instruction:** 2026-11-14. **A / G1.1–G1.5:** APPROVED_IN_PRINCIPLE, not implementation authorization. **B / G1.6:** DEFERRED_NOT_APPROVED. Owner authorized *only* aggregate read-only S4 compatibility measurement, with no private book text, gold rows or per-occurrence hashes leaving the machine.
 
