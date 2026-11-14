@@ -227,9 +227,20 @@ def audit_local(config):
         "stress_gold.tsv", "stress_gold.archive.tsv", "stress_gold.todo.tsv"
     )}
     initial = {name: _read_gold_table(path, ev.GOLD_FIELDS) for name, path in files.items()}
+    # Fail closed if an isolated worktree has no owner-local S4 mounted.
+    # Missing files are NOT evidence that the owner has no historical labels.
+    if not initial["stress_gold.tsv"][0]["exists"]:
+        raise AuditBlocked("AUTHORITATIVE_GOLD_NOT_MOUNTED")
+    if not initial["stress_gold.todo.tsv"][0]["exists"]:
+        raise AuditBlocked("OWNER_TODO_NOT_MOUNTED")
     data = {name: item[0]["rows"] for name, item in initial.items()}
     context = ev._load_context(config)
     selection = ev._selection(context)
+    # Verify the persisted sample WITHOUT calling sample(), which writes S4.
+    try:
+        ev._verify_sample(selection.record, ev._sample_path(selection.record))
+    except Exception:
+        raise AuditBlocked("CURRENT_SAMPLE_NOT_VERIFIED") from None
     gold = _ledger_numbers(data["stress_gold.tsv"], context, ev)
     todo = _todo_numbers(
         data["stress_gold.todo.tsv"], data["stress_gold.tsv"], ev,
