@@ -53,6 +53,12 @@ Coordinator independently authored **test-only** read-only `tests/stress_s4_c3_r
 
 G1.1–G1.5 = APPROVED_IN_PRINCIPLE; G1.6 = DEFERRED_NOT_APPROVED. Read-only audit authorization does **not** include approval of format change, migration, PR merge, production code, H04 or render. After actual S4 counts and owner decision on B, request full exact T01–T42 ADR and separate GO.
 
+### S4 C3 compatibility audit — PASS; awaiting explicit final B decision (2026-11-14)
+
+Owner forwarded Sonnet's **aggregate-only** read-only owner-local census at PR #3 SHA `355507df2789840adb2925f644818ccd899be8c6`: synthetic **17/17 PASS**, scanner **PASS**, `stress_gold.tsv` 0 rows / unique keys 0 / historical versions 0 / human labels 0, `stress_gold.archive.tsv` 0 rows, existing `stress_gold.todo.tsv` 320 rows **all blank**, unmerged 0; selected 320 checked / `RESTORED=40` / F1 exclusion 0 / `YO_EVALUABLE=40`. Current G0 eligible verified 51,629; 0 selected unsupported. Reported local parity: `text/` 246 files before/after, original gold/todo MD5 same; does not independently establish the earlier broader 416-file parity. No S4 writes, no migration, no production change. Report: `tasks/T15-7-WP4-G1-S4-READONLY-AUDIT.md` in draft PR #3.
+
+**Coordinator recommendation, pending explicit owner choice:** **retain existing C3 authoritative stress version-ledger with a derived non-authoritative archive**; there is no local historic human data to justify changing archive authority and no migration benefit. Document the known same-source human label correction limitation as a separate later decision, never pick by date. G1.1–G1.5 approved **in principle only**; G1.6 still **DEFERRED_NOT_APPROVED** until owner explicitly confirms `RETAIN_CURRENT_C3_VERSION_LEDGER` or chooses an alternative. No normative ADR/code authority, H04, S4 edit, PR #3 merge, WP5/T16/T17 or render.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
