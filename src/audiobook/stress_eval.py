@@ -474,6 +474,18 @@ def _is_legacy_yo(row: dict) -> bool:
     return row["gold_vowel"] == "yo" and "ё" not in text and "е" in text
 
 
+def _source_vowel_set(row: dict):
+    """Canonical vowel index set from form_source; None for non-usable labels (ADR T09)."""
+    gv = row["gold_vowel"]
+    if gv in ("ambiguous", "unknown_name"):
+        return None
+    if gv == "yo":
+        vowels = [c for c in row["form_source"].lower() if c in _VOWELS]
+        yo_indices = [i for i, c in enumerate(vowels) if c == "ё"]
+        return frozenset(yo_indices) if len(yo_indices) == 1 else None
+    return frozenset(map(int, gv.removeprefix("variants:").split("|")))
+
+
 def inspect_ledger(rows, context):
     by_key = {row.source_key: row for row in context.rows}
     active, stale, legacy_rows = {}, [], []
@@ -484,16 +496,18 @@ def inspect_ledger(rows, context):
         if current is None or any(row[name] != current[0][name] for name in IDENTITY_FIELDS):
             stale.append(row)
             continue
-        occ = by_key.get(row["source_key"])
-        if _is_legacy_yo(row) and not (occ is not None and yo_changed(occ)):
-            # LEGACY_YO_UNRESOLVED: form_source has е but yo_restore does not currently restore it.
+        if _is_legacy_yo(row):
+            # LEGACY_YO_UNRESOLVED: source predicate only (ADR §1.5); never consult observer.
             legacy_rows.append(row)
             continue
+        occ = by_key.get(row["source_key"])
         usable_context = occ is not None and occ.alignment_status == "aligned" and vowel_count(occ.form_analysis) >= 2
         row = validate_gold(row, occ if usable_context else None, historical=not usable_context)
         key = row["source_key"]
         if key in active:
-            if (active[key]["gold_vowel"], active[key]["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
+            vs_e, vs_n = _source_vowel_set(active[key]), _source_vowel_set(row)
+            if (vs_e is None or vs_n is None or vs_e != vs_n) and \
+               (active[key]["gold_vowel"], active[key]["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
                 _error("GOLD_ACTIVE_CONFLICT")
             duplicates += 1
             if tuple(row[n] for n in GOLD_FIELDS) < tuple(active[key][n] for n in GOLD_FIELDS):

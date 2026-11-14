@@ -411,7 +411,7 @@ def test_windows_dispatch_does_not_skip_durability(monkeypatch, tmp_path):
 
 
 # ===========================================================================
-# I2 oracles: T01, T02, T05, T07, T08, T10, T19, T28, T34, T35, T37, T39,
+# I2 oracles: T01–T10, T14, T15, T17, T19, T20, T27, T28, T34, T35, T37, T39, T40,
 #             plus three original Sol F1 regressions.
 # ===========================================================================
 
@@ -508,6 +508,56 @@ class TestT02SourceTokenTextChangeStales:
 
 
 # ---------------------------------------------------------------------------
+# T03: neighbor unit changes → context_sha mismatch → SOURCE_STALE
+# ---------------------------------------------------------------------------
+
+class TestT03NeighborChangeStales:
+    def test_neighbor_change_makes_label_stale_new_annotation_allowed(self):
+        """T03: neighbor context change → context_sha mismatch → SOURCE_STALE; new can append."""
+        units_a = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx_a = context_for(units_a)
+        identity_a = ctx_a.sources.resolve("01_test|0|0")[0]
+        row_a = {**identity_a, "context": "X", "gold_vowel": "0",
+                 "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        # Neighbor changes: same target token text, different surrounding context
+        units_b = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Дельта."}]
+        ctx_b = context_for(units_b)
+        identity_b = ctx_b.sources.resolve("01_test|0|0")[0]
+        # Same source token text, but context_sha differs
+        assert identity_a["unit_text_sha256"] == identity_b["unit_text_sha256"]
+        assert identity_a["context_sha256"] != identity_b["context_sha256"]
+        # Old row becomes SOURCE_STALE
+        state = evaluation.inspect_ledger([row_a], ctx_b)
+        assert len(state.stale) == 1 and row_a in state.stale
+        assert len(state.active) == 0
+        # New annotation with updated identity can be appended
+        row_b = {**identity_b, "context": "X", "gold_vowel": "1",
+                 "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        state2 = evaluation.inspect_ledger([row_a, row_b], ctx_b)
+        assert state2.active.get("01_test|0|0") == evaluation.validate_gold(row_b)
+        assert len(state2.stale) == 1
+
+
+# ---------------------------------------------------------------------------
+# T04: native source ё with gold_vowel=yo → ACTIVE (not LEGACY)
+# ---------------------------------------------------------------------------
+
+class TestT04NativeYoActive:
+    def test_native_yo_in_form_source_is_active_not_legacy(self):
+        """T04: form_source has ё → gold_vowel=yo is ACTIVE; source-native vowel index usable."""
+        units = [{"type": "text", "text": "Ёлка."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        assert "ё" in identity["form_source"].lower()
+        row = {**identity, "context": "X", "gold_vowel": "yo",
+               "yo_correct": "na", "labeler": "syn", "date": "2026-11-15"}
+        state = evaluation.inspect_ledger([row], ctx)
+        assert state.active.get("01_test|0|0") is not None
+        assert len(state.legacy) == 0
+        assert len(state.stale) == 0
+
+
+# ---------------------------------------------------------------------------
 # T05 / T10: LEGACY_YO_UNRESOLVED preserved, not active; new numeric activates
 # ---------------------------------------------------------------------------
 
@@ -552,6 +602,47 @@ class TestT05T10LegacyYoUnresolved:
 
 
 # ---------------------------------------------------------------------------
+# T06: two current conflicting numeric labels → GOLD_ACTIVE_CONFLICT / ERROR
+# ---------------------------------------------------------------------------
+
+class TestT06ConflictError:
+    def test_two_different_numeric_labels_same_identity_conflict(self):
+        """T06: two current numeric rows with different gold_vowel → GOLD_ACTIVE_CONFLICT error."""
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        base = {**identity, "context": "X", "yo_correct": "na",
+                "labeler": "syn", "date": "2026-11-15"}
+        row0 = {**base, "gold_vowel": "0"}
+        row1 = {**base, "gold_vowel": "1"}
+        with pytest.raises(evaluation.AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
+            evaluation.inspect_ledger([row0, row1], ctx)
+
+
+# ---------------------------------------------------------------------------
+# T09: source-native unique yo + equivalent numeric = duplicate; both retained
+# ---------------------------------------------------------------------------
+
+class TestT09NativeYoPlusNumericDuplicate:
+    def test_native_yo_and_numeric_same_vowel_set_are_duplicate(self):
+        """T09: source-native ё and equivalent numeric label → duplicate; both physical rows kept."""
+        units = [{"type": "text", "text": "Ёлка."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        assert "ё" in identity["form_source"].lower()
+        base = {**identity, "context": "X", "yo_correct": "na",
+                "labeler": "syn", "date": "2026-11-15"}
+        row_yo = {**base, "gold_vowel": "yo"}
+        # vowel_count("Ёлка") == 2 (ё at index 0); numeric "0" selects the same vowel
+        row_num = {**base, "gold_vowel": "0"}
+        state = evaluation.inspect_ledger([row_yo, row_num], ctx)
+        assert state.active.get("01_test|0|0") is not None
+        assert state.duplicates == 1
+        assert len(state.stale) == 0
+        assert len(state.legacy) == 0
+
+
+# ---------------------------------------------------------------------------
 # T07: source-only merge independent of sample/analysis/restoration changes
 # ---------------------------------------------------------------------------
 
@@ -583,6 +674,49 @@ class TestT07MergeSourceIndependent:
         stale_row = {**labeled(row), "unit_text_sha256": "0" * 64}
         with pytest.raises(AnnotationError, match="GOLD_STALE_INPUT"):
             evaluation.merge_source({}, write_input(tmp_path, [stale_row]))
+
+
+# ---------------------------------------------------------------------------
+# T08: restoration_fp movement; stress state (LEGACY) unchanged
+# ---------------------------------------------------------------------------
+
+class TestT08RestorationMovementStressUnchanged:
+    def test_stress_state_legacy_regardless_of_restoration_position(self):
+        """T08: source е/no-ё + gold_vowel=yo → LEGACY in all three F1 scenarios (ADR §1.5)."""
+        identity = _make_identity(source_key="01_test|0|0", form_source="Пение")
+        ctx = context_for([{"type": "text", "text": "Пение."}, {"type": "text", "text": "Гамма."}])
+        real_identity = ctx.sources.resolve("01_test|0|0")[0]
+        base = {**real_identity, "context": "X", "gold_vowel": "yo",
+                "yo_correct": "y", "labeler": "syn", "date": "2026-11-15"}
+        for _ in range(3):  # all three F1 scenarios: removal, introduction, movement
+            state = evaluation.inspect_ledger([base], ctx)
+            assert len(state.legacy) == 1
+            assert len(state.active) == 0
+        # Different restoration_fp for position shift; stress oracle is unaffected
+        fp_pos0 = _restoration_fp_for(identity, "Пёние", [0])
+        fp_pos2 = _restoration_fp_for(identity, "Пениё", [2])
+        assert fp_pos0 != fp_pos2
+
+
+# ---------------------------------------------------------------------------
+# yo_changed invariant: same gold row classifies identically regardless of yo_changed
+# ---------------------------------------------------------------------------
+
+class TestYoChangedInvariant:
+    def test_legacy_classification_independent_of_yo_changed(self):
+        """ADR §1.5: LEGACY_YO_UNRESOLVED is a pure source predicate; yo_changed must not alter it."""
+        units_no_synth_yo = [{"type": "text", "text": "Пение."}, {"type": "text", "text": "Гамма."}]
+        units_synth_yo = [{"type": "text", "text": "Пение."}, {"type": "text", "text": "Гамма."}]
+        ctx_a = context_for(units_no_synth_yo)                             # yo_changed=False
+        ctx_b = context_for(units_synth_yo, synth={"Пение.": "Пёние."})   # yo_changed=True
+        identity = ctx_a.sources.resolve("01_test|0|0")[0]
+        assert identity == ctx_b.sources.resolve("01_test|0|0")[0]
+        row = {**identity, "context": "X", "gold_vowel": "yo",
+               "yo_correct": "y", "labeler": "syn", "date": "2026-11-15"}
+        state_a = evaluation.inspect_ledger([row], ctx_a)
+        state_b = evaluation.inspect_ledger([row], ctx_b)
+        assert len(state_a.legacy) == 1 and len(state_a.active) == 0
+        assert len(state_b.legacy) == 1 and len(state_b.active) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -781,33 +915,48 @@ class TestT34T35T37T39YoMerge:
 # ---------------------------------------------------------------------------
 
 class TestF1SolRegressions:
+    """In all three F1 scenarios, form_source has е (no ё) and gold_vowel=yo → LEGACY_YO_UNRESOLVED.
+    Stress state is unchanged across removal/introduction/movement (ADR §1.5); only restoration_fp differs."""
+
     def _base_identity(self):
         return _make_identity(source_key="01_test|0|0", form_source="Пение")
 
+    def _legacy_state(self):
+        """Shared: build LEGACY inspect_ledger state for 'Пение' (е, no ё, gold_vowel=yo)."""
+        ctx = context_for([{"type": "text", "text": "Пение."}, {"type": "text", "text": "Гамма."}])
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        row = {**identity, "context": "X", "gold_vowel": "yo",
+               "yo_correct": "y", "labeler": "syn", "date": "2026-11-15"}
+        return evaluation.inspect_ledger([row], ctx)
+
     def test_f1_removal_old_verdict_not_reused(self):
-        """F1 reg 1: restored ё removed → new restoration_fp → old y/n cannot apply."""
+        """F1 reg 1: restored ё removed → new restoration_fp → old y/n cannot apply.
+        Stress state is LEGACY (source е/no-ё + gold_vowel=yo) regardless of restoration."""
         identity = self._base_identity()
         fp_restored = _restoration_fp_for(identity, "Пёние", [0])
-        fp_no_restore = _restoration_fp_for(identity, "Пение", [1])  # different candidate
-        # Different fps: old verdict (fp_restored, "y") is NOT applicable to fp_no_restore
+        fp_no_restore = _restoration_fp_for(identity, "Пение", [1])
         assert fp_restored != fp_no_restore
+        state = self._legacy_state()
+        assert len(state.legacy) == 1 and len(state.active) == 0
 
     def test_f1_introduction_new_fp_created(self):
-        """F1 reg 2: new ё introduced → new restoration_fp separate from prior NONE state."""
+        """F1 reg 2: new ё introduced → new restoration_fp separate from prior NONE state.
+        Stress state is LEGACY (source е/no-ё + gold_vowel=yo) regardless of restoration."""
         identity = self._base_identity()
         fp_new = _restoration_fp_for(identity, "Пёние", [0])
         fp_other = _restoration_fp_for(identity, "Пениё", [2])
-        # Each new restoration event gets its own independent fp
         assert fp_new != fp_other
+        state = self._legacy_state()
+        assert len(state.legacy) == 1 and len(state.active) == 0
 
     def test_f1_movement_between_positions_creates_different_fp(self):
-        """F1 reg 3: same source identity, ё at position 0 vs position 1 → different fp."""
+        """F1 reg 3: same source identity, ё at position 0 vs position 2 → different fp.
+        Stress state is LEGACY (source е/no-ё + gold_vowel=yo) regardless of position."""
         identity = self._base_identity()
         fp_pos0 = _restoration_fp_for(identity, "Пёние", [0])
         fp_pos1 = _restoration_fp_for(identity, "Пениё", [2])
-        # Moving ё from position 0 to position 2 (another е) produces a different fp
-        # → old y/n verdict (fp_pos0) cannot be applied to new restoration (fp_pos1)
         assert fp_pos0 != fp_pos1
-        # Verify the fp depends on BOTH the form AND the indices
         fp_same_form_diff_idx = _restoration_fp_for(identity, "Пёние", [1])
         assert fp_pos0 != fp_same_form_diff_idx
+        state = self._legacy_state()
+        assert len(state.legacy) == 1 and len(state.active) == 0

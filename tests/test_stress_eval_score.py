@@ -131,9 +131,14 @@ def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, corre
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
     result = evaluation.score({})
-    assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
-    assert result["metrics"]["overall"]["yo_precision"]["n"] == 1
-    assert result["gates"]["YO"] == "YO_NO_EVIDENCE"
+    if label == "yo":
+        # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
+        # Selected key has no active label → INCOMPLETE; metrics=null.
+        assert result["metrics"] is None
+    else:
+        assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
+        assert result["metrics"]["overall"]["yo_precision"]["n"] == 1
+        assert result["gates"]["YO"] == "YO_NO_EVIDENCE"
 
 
 def test_native_yo_position_and_unresolved_not_correct(tmp_path, monkeypatch):
