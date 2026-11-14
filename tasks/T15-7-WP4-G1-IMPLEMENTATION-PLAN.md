@@ -69,4 +69,6 @@ Allowed paths above are a proposed LIMIT, not a grant. Any change to other produ
 - **FUTURE S4 GO:** separately authorize each owner-local sample/todo/evidence write workflow, only after reviewed code and safeguards. No automatic legacy S4 migration.
 - **OTHER HOLD:** WP5, T16/T17 and full render remain prohibited even if later WP4 code receives a passing test run.
 
+**OWNER_APPROVAL_OF_PLAN: PENDING.** The architectural ADR approval and independent Sol PASS do not constitute this separate plan's approval or a CODE GO. A proposed code-go must identify the future implementation branch, allowed paths, synthetic-only scope and exit tests; S4 writes require a still later separate owner decision.
+
 **Final plan status:** NORMATIVE_ADR_APPROVED_AT_PINNED_SHA / IMPLEMENTATION_PLAN_READY / CODE_GO_NOT_GRANTED / WP4_BLOCKED / NO_S4_MIGRATION.
