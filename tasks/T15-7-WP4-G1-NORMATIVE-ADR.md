@@ -124,7 +124,7 @@ The new merge-yo validates exact current candidate fingerprint, owner y/n, obser
 
 ## 9. T01–T42 — complete proposed regression-oracle register
 
-**Provenance limitation:** The owner's architect handoff mentions an original T01–T42 table but did not supply that original table. The exact original 42-row numbering was not found in the inspected tracked repository files. **The 42 rows below are an independently reconstructed, self-contained proposed register, not an assertion of verbatim identity with the architect's unpublished table.** Independent Sol must reconcile meanings and numbering (especially T06/T27/T28) against the original if available, and mark differences explicitly. This is an ADR-review gate rather than license to guess provenance. All test inputs must be synthetic/invented, with no manuscript excerpts, source_key values, owner S4 rows or per-token hashes in reports.
+**Provenance limitation:** The owner's architect handoff mentions an original T01–T42 table but did not supply that original table. The exact original 42-row numbering was not found in the inspected tracked repository files. **The 42 rows below are an independently reconstructed, self-contained proposed register, not an assertion of verbatim identity with the architect's unpublished table.** Independent Sol must reconcile meanings and numbering (especially T06/T27/T28) against the original if available, and mark differences explicitly. This is an ADR-review gate rather than license to guess provenance. All test inputs must be synthetic/invented, with no manuscript excerpts, source_key values, owner S4 rows or per-token hashes in reports. Original architect-era summary specifically called out T06 adjudication, T27 stale-archive behavior and T28 source-return behavior under the **rejected** archive-authoritative alternative. In this retained-C3 revision: **T06** is conflict STOP pending separately approved owner adjudication; **T27** copies stale data to a *derived* archive via M4 while retaining all rows in gold; **T28** reactivates from gold, never from archive. F1 YO exclusions remain explicitly tested (T16, T18 and T29). Exact equivalence to any full original unpublished register still requires independent reconciliation.
 
 | ID | Synthetic stimulus | Exact required oracle |
 |---|---|---|
@@ -133,19 +133,19 @@ The new merge-yo validates exact current candidate fingerprint, owner y/n, obser
 | **T03** | Neighbor unit changes, same target token | Context_sha mismatch makes old row SOURCE_STALE; new owner-authored current annotation can append without deleting old |
 | **T04** | Unique native source ё with gold_vowel=yo | Source-native vowel index usable, independent of prepared/respell form |
 | **T05** | Source has no ё but historical synth-only gold_vowel=yo | LEGACY_YO_UNRESOLVED retained; selected stress L incomplete; no current form_synth inference |
-| **T06** | LEGACY_YO_UNRESOLVED same current five-field source identity plus new human numeric label | New numeric source-only row becomes uniquely ACTIVE, old legacy remains in authoritative stress ledger, no duplicate/conflict, historical yo_correct ignored; SOURCE_STALE never falsely inferred |
+| **T06** | Two different current numeric vowel sets for same identity | HUMAN_CONFLICT / OWNER_ADJUDICATION_REQUIRED ERROR, no newest-date or agent-based resolution |
 | **T07** | Numeric gold with yo_correct=na; later yo_restore toggle | Current numeric label remains valid; no GOLD_INVALID or forced stress re-label based on new post-respell YO |
 | **T08** | Restored ё moves between two different source е positions | Human source-vowel gold unchanged; old candidate y/n must NOT apply to new restoration_fp |
 | **T09** | Source-native unique yo and equivalent numeric label for same current identity | Equal canonical source-vowel sets => one logical ACTIVE with duplicate count; both physical rows retained |
-| **T10** | Two different current numeric vowel sets for same identity | HUMAN_CONFLICT ERROR, no newest-date or agent-based resolution |
+| **T10** | LEGACY_YO_UNRESOLVED same current five-field source identity plus new human numeric label | New numeric source-only row becomes uniquely ACTIVE, old legacy remains in authoritative stress ledger, no duplicate/conflict, historical yo_correct ignored; SOURCE_STALE never falsely inferred |
 | **T11** | Only ambiguous label for selected current source | L complete, U false, no inclusion in accuracy denominator; no false INCOMPLETE solely due ambiguity |
 | **T12** | Only unknown_name label for selected current source | L complete, U false, excluded from applicable stress accuracy; denominator=0 has null metric |
 | **T13** | No selected human gold and 320 blank owner todo | INCOMPLETE rc2, metrics/wilson/gates null; no generated human truth |
 | **T14** | Wrong header, invalid date or label, malformed TSV, partial filled row | Prevalidation ERROR before any write; preserve original S4 bytes |
 | **T15** | variants unsorted, duplicate or out-of-range; yo_unstressed label | All invalid ERROR; source vowels 0-based, strictly distinct ascending variants only |
-| **T16** | Current source context A→B→A with only one original A label | A reactivates as CURRENT on return, B becomes SOURCE_STALE; no date preference or data loss |
+| **T16** | Selected RESTORED with f1_rule non-null, f1_flag none | F1 rule-only: one F1 rule exclusion; excluded_union=1, excluded_f1_rule=1, excluded_flag=0; YO_EVALUABLE false; no mandatory y/n |
 | **T17** | A→B→A source return with two contradictory A judgments | HUMAN_CONFLICT ERROR; do not choose last, B or archive |
-| **T18** | Old B source row after change to current A and new valid A label | Only A scored; B retained in gold; derived archive includes B stale |
+| **T18** | Selected RESTORED with BOTH f1_rule non-null and f1_flag non-none; plus flag-only control | F1 rule+flag: both increments rule=1 flag=1 both=1 but union ONLY=1; flag-only increments flag=1 and union=1; never double-count; excluded from YO denominator and mandatory y/n |
 | **T19** | Archive missing/stale due crash after authoritative gold replacement | Scorer still trusts gold only; separate archive repair reproduces SOURCE_STALE export; no archive-first write |
 | **T20** | Archive contains historical row absent from authoritative gold | Read-only compatibility audit BLOCKED; do not import/archive-promote row or delete it |
 | **T21** | sample/1 selected keys and stratum counts identical but two selected assignments swap | sample/2 sorted key→stratum digest/fingerprint differs; old sample record rejected |
@@ -154,8 +154,8 @@ The new merge-yo validates exact current candidate fingerprint, owner y/n, obser
 | **T24** | Attempt sample regeneration while owner todo has filled unmerged labels | STOP TODO_HAS_UNMERGED_LABELS and no S4/sample overwrite |
 | **T25** | Existing 320 blank sample/1 todo when sample/2 is introduced | No silent overwrite or migration merely because blank; owner new sample GO required |
 | **T26** | Direct pre-respell yo.restore versus post-respell-only ё in form_synth | Only verified pre-respell forward change is RESTORED; post-respell addition not YO ground truth |
-| **T27** | Selected RESTORED with f1_rule non-null, f1_flag none | T27: one F1 rule exclusion; excluded_union=1, excluded_f1_rule=1, excluded_flag=0; YO_EVALUABLE false; no mandatory y/n |
-| **T28** | Selected RESTORED with BOTH f1_rule non-null and f1_flag non-none; plus flag-only control | T28: both increments rule=1 flag=1 both=1 but union ONLY=1; flag-only increments flag=1 and union=1; never double-count; excluded from YO denominator and mandatory y/n |
+| **T27** | Old B source row after change to current A and new valid A label | T27: only A scored; B remains in authoritative gold; M4 independently exports B as SOURCE_STALE into DERIVED archive; no transfer/authority switch |
+| **T28** | Current source context A→B→A with only one original A label | T28: A reactivates from authoritative gold on source/context return; B becomes SOURCE_STALE; archive is NOT consulted to choose ACTIVE, and is rebuilt derivatively; conflicting A rows still ERROR |
 | **T29** | Selected RESTORED with f1_rule null and f1_flag none | YO_EVALUABLE true; matching human y/n required or INCOMPLETE rc2 |
 | **T30** | Native source ё only; disabled yo_restore; later respell introduces ё | No new pre-respell restoration: NONE; not YO_EVALUABLE, no invented evidence |
 | **T31** | Exact source→chunk-word→fragment ordinal across single/two fragments, quotes/open_end/carrier | Word and offset agree exactly or UNSUPPORTED ERROR; never fuzzy match/guess based on final SUTrace |
