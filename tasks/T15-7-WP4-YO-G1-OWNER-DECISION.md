@@ -76,4 +76,10 @@ The owner explicitly approved preserving current **C3 version-ledger** and expli
 
 This explicit decision supersedes the earlier `DEFERRED_NOT_APPROVED` status, but **does not by itself approve a completed ADR revision or grant any implementation permission**. The eventual self-contained ADR must retain C3 and amend M1–M5 accordingly, cover T01–T42 including T06/T27/T28, source-only/legacy YO/C3 conflicts, sample/2, YO sidecar and two-ledger freshness; one independent Sol review is required.
 
+## Unified G1 normative ADR prepared for one independent review (2026-11-14)
+
+A self-contained replacement **proposal** covering source-only gold, LEGACY_YO_UNRESOLVED/SOURCE_STALE/C3 ACTIVE semantics, source-context reversions, M1–M5 with derived archive, sample/2, YO evidence, dual-ledger score freshness and 42 regression oracles is published as **draft PR #4**: https://github.com/Dannymor94/audiobook/pull/4. Proposed file: `tasks/T15-7-WP4-G1-NORMATIVE-ADR.md`; independent review instructions: `tasks/T15-7-WP4-G1-ADR-INDEPENDENT-REVIEW.md`.
+
+**Review status: REQUESTED / NOT COMPLETED.** Coordinator's structural self-check found 42 sequential test IDs and all required domain sections, but **this is NOT independent Sol signoff**. Original architect-authored T01–T42 table was not included in the owner handoff or located in inspected tracked sources; PR #4 contains a clearly labeled reconstructed 42-oracle register, and independent reviewer must flag any mismatch/provenance gap. Keep current `tasks/T15-7-FINAL-ADR.md` rev.2 untouched until reviewed ADR is separately adopted. No code, S4, H04, sample recreation, PR #3 merge, WP5/T16/T17 or render authorization.
+
 **Owner reply format:** `G1.1–G1.5: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ; G1.6 изменение C3: УТВЕРЖДАЮ/НЕ УТВЕРЖДАЮ`. The coordinator must update this register **only after** an actual owner response. Do not read approval into forwarding an architect handoff.
