@@ -72,3 +72,37 @@ Allowed paths above are a proposed LIMIT, not a grant. Any change to other produ
 **OWNER_APPROVAL_OF_PLAN: PENDING.** The architectural ADR approval and independent Sol PASS do not constitute this separate plan's approval or a CODE GO. A proposed code-go must identify the future implementation branch, allowed paths, synthetic-only scope and exit tests; S4 writes require a still later separate owner decision.
 
 **Final plan status:** NORMATIVE_ADR_APPROVED_AT_PINNED_SHA / IMPLEMENTATION_PLAN_READY / CODE_GO_NOT_GRANTED / WP4_BLOCKED / NO_S4_MIGRATION.
+
+## 5. Proposed limited CODE GO refinements — awaiting separate owner approval (2026-11-14)
+
+This section makes the future implementation proposal more precise; it does NOT authorize code execution or a read-only private-corpus run by itself. The normative ADR at a012c84240eb246b8072a735989f598b6ca566e2 is ALREADY owner-approved. Do not seek a redundant ADR approval. The next required decision is a separate limited CODE GO for I1→I2→I3.
+
+### 5.1 Exact future changed-file allowlist
+
+Production: src/audiobook/stress_eval.py; ONE new read-only observer module src/audiobook/stress_yo_observer.py; run.sh ONLY for strictly demonstrated necessary sample/merge-yo command routing (the current run.sh ALREADY forwards stress-eval subcommands, so prefer no change).
+
+Synthetic tests: tests/test_stress_eval_sample.py; tests/test_stress_eval_merge.py; tests/test_stress_eval_score.py; tests/test_stress_metrics_contract.py; ONE new tests/test_stress_yo_observer.py. Task documentation: this plan, tasks/T15-7-WP4-G1-IMPLEMENTATION-REPORT.md and related task review/status docs only.
+
+DENIED unless owner issues a separate exact-scope amendment: src/audiobook/voicecfg.py, synth.py, sutrace.py, pronounce.py, chunker.py, unitmap.py, stress_inventory.py, stress_metrics.py, manuscript, inventory publisher, source/manifest files, model, config affecting synthesis, audio and cache. No blanket "other necessary files" exception. Do not silently merge/cherry-pick PR #3.
+
+### 5.2 Required I1 owner-local read-only real-corpus checkpoint
+
+The FUTURE limited CODE GO must EXPLICITLY authorize this narrow offline inspection, or it remains forbidden. Execute the verified I1 observer on the owner's local validated source/manifest/config/S2 baseline using memory-only transformations and NO files written to S3/S4, no sample, merge, merge-yo, todo generation, H04, synthesized audio, cache or source changes. Never upload source/voice/private rows to any cloud agent. Disable incidental pycache/log/temp data writes into protected paths. Inspect before/after protected file hashes locally, output only aggregate numeric counts and statuses, never individual keys/digests/words/paths.
+
+Coordinator-only I1 checkpoint BEFORE I2:
+- 51,629/51,629 eligible mappings and 320/320 selected exact pre-respell mappings, unsupported 0 on the SAME fingerprint-pinned G0 snapshot.
+- FULL L3 composed_final UTF-8 byte equality and composed_phrase type/value equality against actual prepare_synth_text, for EVERY SU including NONE, mismatches 0 and unsupported 0. This is NEW evidence, not already proved by the old G0 counts.
+- Selected RESTORED=40, YO_EVALUABLE=40, F1 excluded_union=0 on the same verified snapshot.
+- All protected owner S4 and existing 320-row todo byte-identical; changed protected files=0.
+
+If corpus/config/map/source fingerprints legitimately changed or any count/parity diverges: STOP, report SNAPSHOT_DRIFT or exact safe error code, investigate; do not force numbers by regeneration or continue to I2. Coordinator may accept a substantiated new pinned snapshot only through an explicit corrected plan/gate, not silently. No second Sol review per phase; final combined Sol CODE review remains required.
+
+### 5.3 Three commits, focused evidence, full-S2 exit
+
+One exclusive implementation worktree with THREE ordered commits: I1, I2, I3, each containing only permitted changed paths. At EACH commit record base/head SHA, exact changed paths, focused test collected/PASS/FAIL/SKIP/XFAIL counts and relevant test node IDs, protected-file parity change count and any STOP. I1 needs the above read-only real-corpus coordinator PASS before I2 begins. I2 must pass C3/YO source-only merge, failure-injection and A→B→A synthetic tests before I3. I3 must pass dual-ledger, OS-lock, freshness and complete/incomplete/error synthetic tests.
+
+At final SHA, independently trace every adopted T01–T42 to synthetic node IDs and expected results; run the three original Sol F1 regressions; rerun earlier 52 G0 and 17 S4 synthetic cases, full pytest and PYTHONHASHSEED 1/2/3. The FIVE previously S2-baseline-dependent skipped cases MUST execute and PASS against the locally available valid S2 baseline: they cannot be accepted as SKIP. Missing S2 => BLOCKED_S2_BASELINE and no WP4 PASS. Other justified SKIPs must be enumerated with exact node IDs and reasons. One independent Sol CODE review only at combined final pinned SHA.
+
+### 5.4 Approval separation
+
+STATUS: REFINEMENTS_PROPOSED / OWNER_CODE_GO_PENDING. This addendum does NOT grant permission to modify code or run even read-only real-corpus probes. After owner approval of this exact plan, obtain a separate explicit CODE GO that names implementation branch, above exact allowlist and limited read-only corpus scope. Code GO still gives NO rights to write S4, to regenerate legacy sample/320-row todo, merge PR #3/#4, modify synthesis/cache/manifest/audio, launch WP5/T16/T17 or render.
