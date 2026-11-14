@@ -75,6 +75,10 @@ At reviewed SHA `c382723fae22d5cb903e46396628fd527eea1cf4`, independent Sol iden
 
 Owner's retained C3 version-ledger decision is unchanged; no migration, gold/todo rewrite, production implementation or ADR adoption is authorized. PR #4 remains draft, PR #3 unmerged, WP4 BLOCKED and WP5/T16/T17/full render HOLD.
 
+### Owner + auditor final alignment — G1 normative adopted, code GO pending (2026-11-14)
+
+At **PR #4 pinned SHA `a012c84240eb246b8072a735989f598b6ca566e2`**, owner explicitly **APPROVED** the reconstructed normative G1 ADR/T01–T42 after architect `ACCEPT_RECONSTRUCTED_T01_T42_AT_PINNED_SHA` and independent Sol `PASS` (both reported by owner; earlier GitHub text statuses are historical). O01–O42 covered. Retained authoritative stress C3 version-ledger, derived non-authoritative archive, no S4 migration. **This supersedes older review-pending architecture-status paragraphs without authorizing production changes.** The owner has commissioned only a bounded WP4 implementation **PLAN**, stored in `tasks/T15-7-WP4-G1-IMPLEMENTATION-PLAN.md`; this plan still requires a distinct owner approval/GO before any Sonnet production code. WP4 `BLOCKED_PENDING_CODE_GO`, WP5/T16/T17/render HOLD. PR #3/#4 draft, unmerged, and protected S4/todo unchanged.
+
 ## Workload and review strategy
 
 Package work into approximately two adjacent implementation tasks (up to three if tightly connected) and one observable output. A package should have a coherent data flow, bounded file scope and one major invariant risk. Sonnet must run focused tests at each internal step and full pytest before submitting a package. Work may continue within the package only if its local STOP gates pass.
