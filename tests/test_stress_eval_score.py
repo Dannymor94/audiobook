@@ -73,8 +73,12 @@ def test_complete_exact_schema_aggregates_and_owner_files_readonly(tmp_path, mon
     owner_before[archive] = archive.read_bytes()
     result = evaluation.score({})
     assert result["status"] == "COMPLETE"
-    assert set(result) == {"schema", "source_fp", "analysis_fp", "sample_fp", "gold_sha256",
-                           "yo_evidence_sha256", "counts", "metrics", "wilson", "gates", "status"}
+    assert set(result) == {"schema", "source_fp", "analysis_fp", "sample_fp",
+                           "eligible_assignment_sha256", "selected_by_stratum_sha256",
+                           "inventory_generation_fp", "observation_contract_version",
+                           "norm_content_sha256", "yo_map_sha256", "prep_config_sha256",
+                           "gold_sha256", "yo_evidence_sha256",
+                           "counts", "metrics", "wilson", "gates", "status"}
     assert result["schema"] == "stress-score/2"
     assert result["yo_evidence_sha256"] is None
     assert result["gold_sha256"] == hashlib.sha256((paths.TEXT / "stress_gold.tsv").read_bytes()).hexdigest()
@@ -817,3 +821,49 @@ def test_t13_reg_unsupported_obs_raises_in_yo_check(tmp_path, monkeypatch):
         evaluation.score({})
 
 
+
+
+# ---------------------------------------------------------------------------
+# Issue #11 regression: score result must include full ADR §5.5 schema fields
+# ---------------------------------------------------------------------------
+
+def test_t11_reg_score_result_has_full_schema(tmp_path, monkeypatch):
+    """T11-reg: score result must include eligible_assignment_sha256, inventory_generation_fp etc.
+
+    Before fix: these fields absent from result dict. After fix: present.
+    """
+    ready(tmp_path, monkeypatch)
+    complete(tmp_path)
+    result = evaluation.score({})
+    required = {"eligible_assignment_sha256", "selected_by_stratum_sha256",
+                "inventory_generation_fp", "observation_contract_version",
+                "norm_content_sha256", "yo_map_sha256", "prep_config_sha256"}
+    missing = required - set(result)
+    assert not missing, f"Missing fields in score result: {missing}"
+
+
+def test_t11_reg_stale_eligible_assignment_raises_sample_stale(tmp_path, monkeypatch):
+    """T11-reg: _verify_selection_fresh raises SAMPLE_STALE when stored and fresh sample_fp differ.
+
+    Directly unit-tests the function: stored sample_fp is intentionally wrong (simulates
+    any kind of staleness — observer change, assignment change, etc.).
+    """
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    ctx = context_for(units)
+    from audiobook.stress_yo_observer import NONE_obs
+    obs_map = {occ.source_key: NONE_obs()
+               for occ in ctx.rows
+               if occ.alignment_status == "aligned" and evaluation.vowel_count(occ.form_analysis) >= 2}
+    fresh_sel = evaluation.select_sample_v2(
+        ctx.rows, ctx.source_fp, ctx.analysis_fp,
+        homographs=ctx.homographs, names=ctx.names, obs_map=obs_map,
+        norm_digest="a" * 64, yo_map_digest="b" * 64, prep_config_digest="c" * 64,
+    )
+    stored = {**fresh_sel.record,
+              "sample_fp": "0" * 64,  # Corrupt fp: won't match fresh computation.
+              "observation_inputs": {"norm_content_sha256": "a" * 64,
+                                     "yo_map_sha256": "b" * 64, "prep_config_sha256": "c" * 64}}
+    monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+    with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        evaluation._verify_selection_fresh(stored, ctx, {})

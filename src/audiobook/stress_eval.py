@@ -382,6 +382,23 @@ def _selection(context, config):
     )
 
 
+def _verify_selection_fresh(stored, context, config):
+    """Recompute selection with stored observation inputs; raise SAMPLE_STALE if assignment changed."""
+    obs_inputs = stored["observation_inputs"]
+    obs_map = {occ.source_key: _yo_observe_key(occ, context.sources, config)
+               for occ in context.rows
+               if occ.alignment_status == "aligned" and vowel_count(occ.form_analysis) >= 2}
+    fresh = select_sample_v2(
+        context.rows, context.source_fp, context.analysis_fp,
+        homographs=context.homographs, names=context.names, obs_map=obs_map,
+        norm_digest=obs_inputs["norm_content_sha256"],
+        yo_map_digest=obs_inputs["yo_map_sha256"],
+        prep_config_digest=obs_inputs["prep_config_sha256"],
+    )
+    if fresh.record["sample_fp"] != stored["sample_fp"]:
+        _error("SAMPLE_STALE")
+
+
 def _assert_current(context, config):
     fresh = _load_context(config)
     if (fresh.generation, fresh.source_fp, fresh.analysis_fp) != (context.generation, context.source_fp, context.analysis_fp):
@@ -953,6 +970,8 @@ def score(config):
             "prep_config_sha256": compute_prep_config_digest(config),
         }:
             _error("SAMPLE_STALE")
+        # B5: verify eligible assignment unchanged (observer behavior may have changed).
+        _verify_selection_fresh(record, context, config)
         gold_path = paths.TEXT / "stress_gold.tsv"
         ledger, gold_before = _read_ledger(gold_path)
         yo_path = _yo_path()
@@ -973,6 +992,13 @@ def score(config):
             "schema": "stress-score/2",
             "source_fp": context.source_fp, "analysis_fp": context.analysis_fp,
             "sample_fp": record["sample_fp"],
+            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
+            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
+            "inventory_generation_fp": hashlib.sha256(context.generation).hexdigest(),
+            "observation_contract_version": "yo-observation/1",
+            "norm_content_sha256": record["observation_inputs"]["norm_content_sha256"],
+            "yo_map_sha256": record["observation_inputs"]["yo_map_sha256"],
+            "prep_config_sha256": record["observation_inputs"]["prep_config_sha256"],
             "gold_sha256": hashlib.sha256(gold_before).hexdigest() if gold_before is not None else None,
             "yo_evidence_sha256": hashlib.sha256(yo_data_before).hexdigest() if yo_data_before is not None else None,
             "counts": counts, "metrics": None, "wilson": None, "gates": None,
