@@ -7,6 +7,19 @@
 **Authority for technical contracts:** `tasks/T15-7-FINAL-ADR.md`. This operational plan does not silently supersede normative acceptance, safety, dependencies, or privacy requirements.  
 **Owner preference:** group Sonnet 4.6's implementable work and require independent Sol review at meaningful risk boundaries, not every tiny substep.
 
+## Latest WP4/I3 coordinator checkpoint — 2026-11-15
+
+**Authoritative operational state: `I3 COORDINATOR BLOCKED — CODE NOT PUBLISHED`; `SOL CODE REVIEW HOLD`.** The later owner-authorized **LIMITED CODE GO** for WP4 is recorded in [GitHub issue #5](https://github.com/Dannymor94/audiobook/issues/5), subject to exact G1 ADR, approved plan and stage gates. This supersedes the *historical* 2026-11-14 «CODE GO NOT GRANTED» sentence below, but does not broaden scope or authorize S4 data writes. I1 and I2 were **architect-reported PASS**, not independently reverified here; I3 is **reported preliminary** with 1,910 PASS / 6 SKIP / 42/42 oracles, still unverified by coordinator.
+
+**Direct GitHub evidence:** remote branch `task/T15-7-wp4-g1-implementation` is at exact base `201f0cd4e946f7f5405e47fe27153df9aeac17ef`, with **zero** implementation commits and **zero** changed files. Claimed local commit `1ceb9ad` is absent from GitHub. The coordinator's workspace does not contain the original Sonnet worktree. No implementation code, tests, private S4 files or audio were changed or executed by coordinator.
+
+**Registered task chain:**
+1. [#6 — Sonnet P0: publish original I1–I3 local commits](https://github.com/Dannymor94/audiobook/issues/6). Only verified fast-forward, no force/rebase, no protected file leaks; full remote SHA and actual test evidence required. **READY ON SONNET LOCAL MACHINE**.
+2. [#7 — ChatGPT coordinator P1: exact I3 code review](https://github.com/Dannymor94/audiobook/issues/7). Pending #6; inspect `observe_su` for all selected keys, current `restoration_fp`, F1 exclusions, UNSUPPORTED fail-closed, same-fp contradictory YO labels → score ERROR, exact conflict test ID, T01–T42, 3 Sol F1 regressions, S2 five PASS, 1/2/3 seeds, P1/P4, SKIP reasons, symlink, protected parity and §5.1 diff. Issue `COORDINATOR PASS` only with direct evidence on one full published SHA; otherwise `CHANGES_REQUIRED/BLOCKED`.
+3. [#8 — Independent Sol P2: final CODE QA](https://github.com/Dannymor94/audiobook/issues/8). **HOLD** until exact #7 PASS and pinned final published SHA.
+
+**STOP bounds unchanged:** private S4/stress gold/YO history/320-row todo, H04, PR #3/#4 merges, production synthesis, WP5, T16/T17 and full render all HOLD. No conclusion may rely on author-reported test arithmetic alone. The pinned ADR and approved implementation plan are not amended by this operational status entry.
+
 ## Owner role update — 2026-11-15 (operational only)
 
 **ChatGPT acts as COORDINATOR + LEAD DEVELOPER.** For any specifically authorized safe work, the coordinator directly implements source code, synthetic tests, documentation, commits and publishes isolated task branches/draft PRs, verifies results with available tools, and updates task status. Delegate only work that genuinely needs another environment, protected private input, parallel non-overlapping implementation, human judgment, architect resolution or independent QA. Do not make the owner a manual runner for normal repo operations. One independent Sol review remains required at the designated final CODE QA boundary; self-testing cannot replace it.
