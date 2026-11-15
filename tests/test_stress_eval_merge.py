@@ -618,6 +618,30 @@ class TestT06ConflictError:
         with pytest.raises(evaluation.AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
             evaluation.inspect_ledger([row0, row1], ctx)
 
+    def test_T06_numeric_vs_ambiguous_conflict(self):
+        """T06: numeric label then ambiguous for same identity → OWNER_ADJUDICATION_REQUIRED / GOLD_ACTIVE_CONFLICT."""
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        base = {**identity, "context": "X", "yo_correct": "na",
+                "labeler": "syn", "date": "2026-11-15"}
+        row0 = {**base, "gold_vowel": "0"}
+        row1 = {**base, "gold_vowel": "ambiguous"}
+        with pytest.raises(evaluation.AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
+            evaluation.inspect_ledger([row0, row1], ctx)
+
+    def test_T06_ambiguous_vs_unknown_name_conflict(self):
+        """T06: ambiguous then unknown_name for same identity → OWNER_ADJUDICATION_REQUIRED / GOLD_ACTIVE_CONFLICT."""
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        ctx = context_for(units)
+        identity = ctx.sources.resolve("01_test|0|0")[0]
+        base = {**identity, "context": "X", "yo_correct": "na",
+                "labeler": "syn", "date": "2026-11-15"}
+        row0 = {**base, "gold_vowel": "ambiguous"}
+        row1 = {**base, "gold_vowel": "unknown_name"}
+        with pytest.raises(evaluation.AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
+            evaluation.inspect_ledger([row0, row1], ctx)
+
 
 # ---------------------------------------------------------------------------
 # T09: source-native unique yo + equivalent numeric = duplicate; both retained

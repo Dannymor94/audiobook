@@ -752,11 +752,27 @@ def _present(value):
     return value
 
 
+def _yo_fp_from_occ(occ, sources):
+    """Simplified restoration_fp from form_synth for synthetic test purposes (ADR T38)."""
+    from audiobook.stress_yo_observer import restoration_fp as _rfp
+    resolved = sources.resolve(occ.source_key)
+    if resolved is None:
+        return None
+    identity = resolved[0]
+    synth = (occ.form_synth or "").lower()
+    src = occ.form_source.lower()
+    synth_vowels = [c for c in synth if c in _VOWELS]
+    src_vowels = [c for c in src if c in _VOWELS]
+    indices = [i for i, (sv, tv) in enumerate(zip(src_vowels, synth_vowels)) if sv == "е" and tv == "ё"]
+    return _rfp(identity, occ.form_synth or "", indices)
+
+
 def score(config):
     """Validate the current sample and ledger, then publish only aggregates.
 
     Incomplete samples expose counts, with no partial metrics or passing gates.
     Gold and its archive are read-only; the archive is never an input.
+    Both authoritative ledger digests are pinned (T41/ADR §5).
     """
     from audiobook.stress_metrics import Observation, calculate_metrics
     context = _load_context(config)
@@ -766,11 +782,26 @@ def score(config):
     _verify_sample(record, sample_path)
     gold_path = paths.TEXT / "stress_gold.tsv"
     ledger, gold_before = _read_ledger(gold_path)
+    yo_path = _yo_path()
+    yo_data_before = _optional_bytes(yo_path)
     state = inspect_ledger(ledger, context)
     keys = record["keys"]
+    by_key = {occ.source_key: occ for occ in context.rows}
     missing = sum(key not in state.active for key in keys)
+    # T38/T41: check YO sidecar if present; absent sidecar skips fp check (ADR §5)
+    yo_missing = 0
+    if yo_data_before is not None:
+        yo_by_fp = {row["restoration_fp"]: row["yo_correct"]
+                    for row in parse_yo_evidence(yo_data_before.decode("utf-8"))}
+        for key in keys:
+            occ = by_key.get(key)
+            if occ is not None and yo_changed(occ) and occ.f1_rule is None and occ.f1_flag == "none":
+                fp = _yo_fp_from_occ(occ, context.sources)
+                if fp is None or fp not in yo_by_fp:
+                    yo_missing += 1
     counts = {"selected": len(keys), "active_labels": len(keys) - missing,
-              "missing_labels": missing, "stale_gold": len(state.stale),
+              "missing_labels": missing, "missing_yo_verdicts": yo_missing,
+              "stale_gold": len(state.stale),
               "duplicates": state.duplicates, "one_vowel_aligned": selection.one_vowel_aligned,
               "by_stratum": {name: {"N": record["strata"][name]["N"],
                                       "selected": record["strata"][name]["n"]} for name, _ in STRATA}}
@@ -778,9 +809,8 @@ def score(config):
               "sample_fp": record["sample_fp"],
               "gold_sha256": hashlib.sha256(gold_before).hexdigest() if gold_before is not None else None,
               "counts": counts, "metrics": None, "wilson": None, "gates": None,
-              "status": "INCOMPLETE" if missing else "COMPLETE"}
-    if not missing:
-        by_key = {occ.source_key: occ for occ in context.rows}
+              "status": "INCOMPLETE" if (missing or yo_missing) else "COMPLETE"}
+    if not (missing or yo_missing):
         observations = []
         for key in keys:
             occ = by_key[key]
@@ -809,6 +839,8 @@ def score(config):
     _verify_sample(record, sample_path)
     if _optional_bytes(gold_path) != gold_before:
         _error("GOLD_OUTPUT_CHANGED")
+    if _optional_bytes(yo_path) != yo_data_before:  # T41: dual ledger freshness
+        _error("YO_OUTPUT_CHANGED")
     _apply(plan)
     return result
 

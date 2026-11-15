@@ -133,7 +133,8 @@ def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, corre
     result = evaluation.score({})
     if label == "yo":
         # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
-        # Selected key has no active label → INCOMPLETE; metrics=null.
+        # Selected key has no active label → INCOMPLETE; metrics=null; CLI rc=2.
+        assert result["status"] == "INCOMPLETE"
         assert result["metrics"] is None
     else:
         assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
@@ -318,3 +319,177 @@ with MonkeyPatch.context() as patch:
         assert run.returncode == 0, run.stderr
         outputs.append(run.stdout)
     assert outputs[0] == outputs[1] == outputs[2]
+
+
+# ---------------------------------------------------------------------------
+# I3 oracles: T11, T12, T13, T29, T38, T41, T42 (ADR §5, §7)
+# ---------------------------------------------------------------------------
+
+def _make_yo_sidecar_row(restoration_fp):
+    """Build a minimal valid YO sidecar row for synthetic tests (T38/T41)."""
+    h = hashlib.sha256(b"test").hexdigest()
+    return {
+        "schema_version": "yo-evidence/1",
+        "source_key": "01_test|0|0",
+        "form_source": "Елка",
+        "unit_text_sha256": h,
+        "unit_kind": "text",
+        "context_sha256": h,
+        "restored_form_pre_respell": "Ёлка",
+        "restored_vowel_indices": "0",
+        "observation_contract_version": "yo-observation/1",
+        "restoration_fp": restoration_fp,
+        "norm_content_sha256": h,
+        "yo_map_sha256": h,
+        "prep_config_sha256": h,
+        "yo_correct": "y",
+        "labeler": "test",
+        "date": "2026-11-15",
+    }
+
+
+class TestT11AmbiguousOnly:
+    def test_ambiguous_gold_is_complete_with_inconclusive_hint(self, tmp_path, monkeypatch):
+        """T11: only ambiguous labels → COMPLETE; usable_gold=0; G_hint=INCONCLUSIVE (n=0)."""
+        units = [{"type": "text", "text": "Слово."}]
+        ready(tmp_path, monkeypatch, units=units)
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "ambiguous")]))
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_labels"] == 0
+        assert result["metrics"]["overall"]["accuracy_resolved"]["n"] == 0
+        assert result["gates"]["G_hint"] == "INCONCLUSIVE"
+
+
+class TestT12UnknownNameOnly:
+    def test_unknown_name_gold_is_complete_zero_accuracy_denominator(self, tmp_path, monkeypatch):
+        """T12: only unknown_name labels → COMPLETE; usable_gold=0; accuracy_resolved.n=0."""
+        units = [{"type": "text", "text": "Слово."}]
+        ready(tmp_path, monkeypatch, units=units)
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "unknown_name")]))
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_labels"] == 0
+        assert result["metrics"]["overall"]["accuracy_resolved"]["n"] == 0
+        assert result["metrics"]["overall"]["accuracy_resolved"]["rate"] is None
+
+
+class TestT13NoGold:
+    def test_no_gold_labels_is_incomplete(self, tmp_path, monkeypatch):
+        """T13: selected key has no gold label → INCOMPLETE; metrics/wilson/gates=None."""
+        units = [{"type": "text", "text": "Слово."}]
+        ready(tmp_path, monkeypatch, units=units)
+        # Intentionally skip merge → missing gold label
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_labels"] == 1
+        assert result["metrics"] is None
+        assert result["wilson"] is None
+        assert result["gates"] is None
+
+
+class TestT29YoEvaluableNoLabel:
+    def test_yo_evaluable_key_without_gold_label_is_incomplete(self, tmp_path, monkeypatch):
+        """T29: YO_EVALUABLE word (yo_changed, f1_rule=None, f1_flag='none') with no gold → INCOMPLETE."""
+        units = [{"type": "text", "text": "Елка."}]
+        setup_book(tmp_path, monkeypatch, units)
+        monkeypatch.setattr(evaluation, "_load_context",
+                            lambda _: predictions(context_for(units, synth={"Елка.": "Ёлка."})))
+        evaluation.sample({})
+        # Intentionally skip merge → missing gold label
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_labels"] == 1
+        assert result["counts"]["missing_yo_verdicts"] == 0  # sidecar absent → no fp check
+        assert result["metrics"] is None
+
+
+class TestT38YoSidecarFpCheck:
+    def _setup_yo_evaluable(self, tmp_path, monkeypatch):
+        units = [{"type": "text", "text": "Елка."}]
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        evaluation.sample({})
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
+        return ctx
+
+    def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
+        """T38a: sidecar present but restoration_fp doesn't match computed occ fp → INCOMPLETE."""
+        self._setup_yo_evaluable(tmp_path, monkeypatch)
+        wrong_fp = hashlib.sha256(b"deliberately_wrong_fp").hexdigest()
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence([_make_yo_sidecar_row(wrong_fp)]),
+                           encoding="utf-8")
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 1
+        assert result["metrics"] is None
+
+    def test_sidecar_present_correct_fp_is_complete(self, tmp_path, monkeypatch):
+        """T38b: sidecar present with correct restoration_fp → COMPLETE."""
+        ctx = self._setup_yo_evaluable(tmp_path, monkeypatch)
+        occ = next(iter(ctx.rows))
+        actual_fp = evaluation._yo_fp_from_occ(occ, ctx.sources)
+        assert actual_fp is not None, "_yo_fp_from_occ must resolve for synthetic test"
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence([_make_yo_sidecar_row(actual_fp)]),
+                           encoding="utf-8")
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 0
+        assert result["metrics"] is not None
+
+
+class TestT41YoSidecarMutation:
+    def test_yo_sidecar_mutated_during_score_errors_no_overwrite(self, tmp_path, monkeypatch):
+        """T41: yo sidecar mutated between pin and freshness check → YO_OUTPUT_CHANGED; score not overwritten."""
+        units = [{"type": "text", "text": "Слово."}]
+        ready(tmp_path, monkeypatch, units=units)
+        complete(tmp_path)
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text("\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
+        evaluation.score({})
+        old_score = score_path().read_bytes()
+        original_assert = evaluation._assert_current
+        def mutate_and_assert(context, config):
+            yo_path.write_bytes(b"mutated by test")
+            original_assert(context, config)
+        monkeypatch.setattr(evaluation, "_assert_current", mutate_and_assert)
+        with pytest.raises(AnnotationError, match="YO_OUTPUT_CHANGED"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_score
+
+
+class TestT42Oracles:
+    def test_all_ambiguous_complete_inconclusive(self, tmp_path, monkeypatch):
+        """T42a: all ambiguous/unknown_name gold → COMPLETE, G_hint=INCONCLUSIVE."""
+        units = [{"type": "text", "text": "Слово."}, {"type": "text", "text": "Имя."}]
+        ready(tmp_path, monkeypatch, units=units)
+        rows = todo_rows()
+        evaluation.merge({}, write_input(tmp_path, [
+            labeled(rows[0], "ambiguous"), labeled(rows[1], "unknown_name")
+        ]))
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["gates"]["G_hint"] == "INCONCLUSIVE"
+
+    def test_no_yo_evaluable_no_sidecar_gives_yo_no_evidence(self, tmp_path, monkeypatch):
+        """T42b: zero YO_EVALUABLE words, absent sidecar → COMPLETE, YO==YO_NO_EVIDENCE."""
+        units = [{"type": "text", "text": "Слово."}]
+        ready(tmp_path, monkeypatch, units=units)
+        complete(tmp_path)
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["gates"]["YO"] == "YO_NO_EVIDENCE"
+
+    @pytest.mark.parametrize("k,n,expected_lower", [
+        (40, 40, 0.9124),
+        (92, 100, 0.8500),
+        (91, 100, 0.8377),
+        (73, 73, 0.9500),
+    ])
+    def test_wilson_lower_bound_matches_adr_reference(self, k, n, expected_lower):
+        """T42c: Wilson 95% lower bound matches ADR §7 reference values (4-decimal rounding)."""
+        lo, _ = stress_metrics.wilson_interval(k, n)
+        assert round(lo, 4) == expected_lower
