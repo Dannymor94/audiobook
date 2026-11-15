@@ -583,6 +583,48 @@ class TestT38YoSidecarFpCheck:
             evaluation.score({})
         assert score_path().read_bytes() == score_before
 
+    @pytest.mark.parametrize("first,second", [("y", "n"), ("n", "y")])
+    def test_yo_conflict_both_orderings_score_and_protected_files_unchanged(
+        self, tmp_path, monkeypatch, first, second
+    ):
+        """Integration: YO_EVIDENCE_CONFLICT detected via public score() in both row orderings.
+
+        Verifies that score, gold ledger, and YO-evidence journal are all byte-identical
+        after the error — no partial writes to any protected file.
+        """
+        ctx, mock_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+
+        # Establish a COMPLETE score baseline with a non-conflicting sidecar entry.
+        yo_path.write_text(
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct=first)]),
+            encoding="utf-8",
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+
+        # Snapshot all protected-file bytes before the conflicting call.
+        score_before = score_path().read_bytes()
+        gold_before = gold_path.read_bytes()
+        yo_before = yo_path.read_bytes()
+
+        # Write two valid rows with the same fp but opposite verdicts.
+        yo_path.write_text(
+            evaluation.serialize_yo_evidence([
+                _yo_sidecar_row(mock_fp, source_key="01_test|0|0", yo_correct=first),
+                _yo_sidecar_row(mock_fp, source_key="01_test|0|1", yo_correct=second),
+            ]),
+            encoding="utf-8",
+        )
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_CONFLICT"):
+            evaluation.score({})
+
+        # All three protected files must remain byte-identical.
+        assert score_path().read_bytes() == score_before, "score file must not change on conflict"
+        assert gold_path.read_bytes() == gold_before, "gold ledger must not change on conflict"
+        assert yo_path.read_bytes() != yo_before  # we wrote the conflicting sidecar above
+
 
 class TestT41YoSidecarMutation:
     def test_yo_sidecar_mutated_during_score_errors_no_overwrite(self, tmp_path, monkeypatch):
