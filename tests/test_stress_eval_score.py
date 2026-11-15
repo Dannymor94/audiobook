@@ -548,6 +548,29 @@ class TestT38YoSidecarFpCheck:
         assert result_with_gold["counts"]["missing_yo_verdicts"] == 1
         assert result_with_gold["counts"]["missing_labels"] == 0
 
+    def test_conflicting_same_fp_returns_error_without_score_overwrite(self, tmp_path, monkeypatch):
+        """F1-reg: two sidecar rows with same restoration_fp but opposite y/n → YO_EVIDENCE_CONFLICT; score not overwritten."""
+        ctx, mock_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="y")]),
+            encoding="utf-8",
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        score_before = score_path().read_bytes()
+        # Two rows: same fp, opposite verdicts → conflict must be detected
+        yo_path.write_text(
+            evaluation.serialize_yo_evidence([
+                _yo_sidecar_row(mock_fp, yo_correct="y"),
+                _yo_sidecar_row(mock_fp, source_key="01_test|0|1", yo_correct="n"),
+            ]),
+            encoding="utf-8",
+        )
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_CONFLICT"):
+            evaluation.score({})
+        assert score_path().read_bytes() == score_before
+
 
 class TestT41YoSidecarMutation:
     def test_yo_sidecar_mutated_during_score_errors_no_overwrite(self, tmp_path, monkeypatch):
