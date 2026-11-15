@@ -7,6 +7,16 @@
 **Authority for technical contracts:** `tasks/T15-7-FINAL-ADR.md`. This operational plan does not silently supersede normative acceptance, safety, dependencies, or privacy requirements.  
 **Owner preference:** group Sonnet 4.6's implementable work and require independent Sol review at meaningful risk boundaries, not every tiny substep.
 
+## Latest I3 coordinator CODE review — 2026-11-15 (supersedes prior publication blocker)
+
+**PUBLICATION P0: CLOSED (#6). I3 COORDINATOR: CHANGES_REQUIRED (#7). SONNET REPAIR: OPEN (#9). SOL CODE QA: HOLD (#8).**
+
+Remote implementation branch `task/T15-7-wp4-g1-implementation` is now at pinned `1ceb9ad039b7dfa938e243dbc29a546c922cc207`. GitHub compare with base `201f0cd4e946f7f5405e47fe27153df9aeac17ef` confirms **7 commits, 6 changed source/synthetic test paths, all inside §5.1 allowlist**. No tracked protected files in diff. Owner-local ignored S4 byte parity is not independently verified by coordinator. Sonnet reports 1,910 PASS / 2 SKIP; coordinator did NOT independently run pytest, and GitHub returned no workflow statuses/runs for this SHA.
+
+Direct code inspection found *blocking contract failures*: `score()` silently collapses same-fp opposite YO labels rather than ERROR, with no score-level regression test; production `sample()`/`score()` still use sample/1, not sample/2; YO metric trusts old stress-gold y/n and post-respell `form_synth` rather than verified YO sidecar; observer receives normalized unit text and fake placeholder L3 inputs rather than source→raw-fragment witness; OS lock functions are never acquired by operational paths; source-only gold and merge-yo retain legacy/stale candidate coupling; stored score lacks required stress-score/2 schema and observer/dual-ledger fingerprints. Exact code locations and the required separate conflict-test commit are documented in [#7 review](https://github.com/Dannymor94/audiobook/issues/7) and [#9 corrective task](https://github.com/Dannymor94/audiobook/issues/9).
+
+**Next:** Sonnet fixes only within existing narrow CODE GO/§5.1, publishes distinct fast-forward corrective commits, reports actual 5 S2 PASS IDs, all oracle/F1 results, seeds, P1/P4, skipped test reasons, `out/sections` symlink and protected-file parity; then STOP for coordinator re-review on the NEW exact HEAD. No Sol until coordinator PASS. S4/H04, PR #3/#4 merge, WP5, T16/T17, production synthesis and full render remain HOLD.
+
 ## Latest WP4/I3 coordinator checkpoint — 2026-11-15
 
 **Authoritative operational state: `I3 COORDINATOR BLOCKED — CODE NOT PUBLISHED`; `SOL CODE REVIEW HOLD`.** The later owner-authorized **LIMITED CODE GO** for WP4 is recorded in [GitHub issue #5](https://github.com/Dannymor94/audiobook/issues/5), subject to exact G1 ADR, approved plan and stage gates. This supersedes the *historical* 2026-11-14 «CODE GO NOT GRANTED» sentence below, but does not broaden scope or authorize S4 data writes. I1 and I2 were **architect-reported PASS**, not independently reverified here; I3 is **reported preliminary** with 1,910 PASS / 6 SKIP / 42/42 oracles, still unverified by coordinator.
