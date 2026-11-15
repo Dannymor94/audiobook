@@ -15,6 +15,31 @@ from test_stress_eval_sample import context_for, setup_book
 from test_stress_eval_merge import labeled, todo_rows, write_input, snapshot
 
 
+def _yo_sidecar_row(fp, *, source_key="01_test|0|0", yo_correct="y"):
+    """Return a minimal valid yo_evidence sidecar row with the given restoration_fp."""
+    h = hashlib.sha256(b"test").hexdigest()
+    return {
+        "schema_version": "yo-evidence/1", "source_key": source_key,
+        "form_source": "Елка", "unit_text_sha256": h, "unit_kind": "text",
+        "context_sha256": h, "restored_form_pre_respell": "Ёлка",
+        "restored_vowel_indices": "0", "observation_contract_version": "yo-observation/1",
+        "restoration_fp": fp, "norm_content_sha256": h, "yo_map_sha256": h,
+        "prep_config_sha256": h, "yo_correct": yo_correct, "labeler": "test",
+        "date": "2026-11-15",
+    }
+
+
+def _patch_yo_obs(monkeypatch, ctx):
+    """Monkeypatch _yo_observe_key to return RESTORED_obs for the first occurrence; return mock_fp."""
+    from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+    occ = next(iter(ctx.rows))
+    identity = ctx.sources.resolve(occ.source_key)[0]
+    mock_fp = _rfp(identity, "Ёлка", [0])
+    monkeypatch.setattr(evaluation, "_yo_observe_key",
+                        lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+    return mock_fp
+
+
 def predictions(context, changes=None, *, homographs=None):
     changes = changes or {}
     rows = tuple(type(occ)(**{**asdict(occ), "f6_status": "resolved", "f6_vowel": 0,
@@ -127,10 +152,14 @@ def test_complete_ambiguous_human_gold_never_considered_correct(tmp_path, monkey
 def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, correct):
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
-    monkeypatch.setattr(evaluation, "_load_context", lambda _: predictions(context_for(units, synth={"Елка.": "Ёлка."})))
+    ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+    monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
-    # config={} → yo_restore=False → observer returns NONE_obs → not YO_EVALUABLE → yo_missing=0
+    # YO restoration enabled: observer confirms RESTORED_obs; sidecar verdict present → yo_missing=0.
+    mock_fp = _patch_yo_obs(monkeypatch, ctx)
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp)]), encoding="utf-8")
     result = evaluation.score({})
     if label == "yo":
         # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
@@ -182,7 +211,12 @@ def test_adapter_mapping_y_property_override_and_population_weights(tmp_path, mo
     evaluation.sample({})
     annotated = [labeled(row, yo_correct="n" if row["form_source"] == "Елка" else "na") for row in todo_rows()]
     evaluation.merge({}, write_input(tmp_path, annotated))
-    # config={} → yo_restore=False → observer returns NONE_obs → not YO_EVALUABLE → yo_missing=0
+    # YO restoration enabled: Елка is in sample (omograph stratum); observer confirms RESTORED_obs.
+    # Sidecar verdict present → yo_missing=0. YO_WARN comes from yo_correct="n" in gold (wrong verdict).
+    mock_fp = _patch_yo_obs(monkeypatch, context)
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="n")]),
+                       encoding="utf-8")
     result = evaluation.score({})
     metrics = result["metrics"]["overall"]
     assert (metrics["suggestion_precision"]["k"], metrics["suggestion_precision"]["n"]) == (0, 1)
@@ -372,17 +406,22 @@ class TestT13NoGold:
 
 class TestT29YoEvaluableNoLabel:
     def test_yo_evaluable_key_without_gold_label_is_incomplete(self, tmp_path, monkeypatch):
-        """T29: YO_EVALUABLE word (yo_changed, f1_rule=None, f1_flag='none') with no gold → INCOMPLETE."""
+        """T29: YO_EVALUABLE word (RESTORED_obs, f1_rule=None, f1_flag='none') with no gold → INCOMPLETE.
+
+        Both missing_labels=1 (no stress label) and missing_yo_verdicts=1 (no sidecar verdict) are 1.
+        """
         units = [{"type": "text", "text": "Елка."}]
         setup_book(tmp_path, monkeypatch, units)
-        monkeypatch.setattr(evaluation, "_load_context",
-                            lambda _: predictions(context_for(units, synth={"Елка.": "Ёлка."})))
+        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
         evaluation.sample({})
+        # Observer returns RESTORED_obs → YO_EVALUABLE; no sidecar → yo_missing=1.
+        _patch_yo_obs(monkeypatch, ctx)
         # Intentionally skip merge → missing gold label
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_labels"] == 1
-        assert result["counts"]["missing_yo_verdicts"] == 0  # config={} → NONE_obs → not YO_EVALUABLE
+        assert result["counts"]["missing_yo_verdicts"] == 1  # RESTORED_obs, no sidecar verdict
         assert result["metrics"] is None
 
 
@@ -412,25 +451,7 @@ class TestT38YoSidecarFpCheck:
 
     def _make_sidecar_with_fp(self, fp, pre_respell="Ёлка", indices="0"):
         """Return a valid sidecar row dict with given restoration_fp."""
-        h = hashlib.sha256(b"test").hexdigest()
-        return {
-            "schema_version": "yo-evidence/1",
-            "source_key": "01_test|0|0",
-            "form_source": "Елка",
-            "unit_text_sha256": h,
-            "unit_kind": "text",
-            "context_sha256": h,
-            "restored_form_pre_respell": pre_respell,
-            "restored_vowel_indices": indices,
-            "observation_contract_version": "yo-observation/1",
-            "restoration_fp": fp,
-            "norm_content_sha256": h,
-            "yo_map_sha256": h,
-            "prep_config_sha256": h,
-            "yo_correct": "y",
-            "labeler": "test",
-            "date": "2026-11-15",
-        }
+        return _yo_sidecar_row(fp)
 
     def test_T38a_sidecar_absent_yo_evaluable_is_incomplete(self, tmp_path, monkeypatch):
         """T38a: journal absent when |Y|>0 → treated as empty → no verdict → INCOMPLETE rc 2."""
