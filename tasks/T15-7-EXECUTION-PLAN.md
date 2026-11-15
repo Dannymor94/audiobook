@@ -7,6 +7,12 @@
 **Authority for technical contracts:** `tasks/T15-7-FINAL-ADR.md`. This operational plan does not silently supersede normative acceptance, safety, dependencies, or privacy requirements.  
 **Owner preference:** group Sonnet 4.6's implementable work and require independent Sol review at meaningful risk boundaries, not every tiny substep.
 
+## Owner role update — 2026-11-15 (operational only)
+
+**ChatGPT acts as COORDINATOR + LEAD DEVELOPER.** For any specifically authorized safe work, the coordinator directly implements source code, synthetic tests, documentation, commits and publishes isolated task branches/draft PRs, verifies results with available tools, and updates task status. Delegate only work that genuinely needs another environment, protected private input, parallel non-overlapping implementation, human judgment, architect resolution or independent QA. Do not make the owner a manual runner for normal repo operations. One independent Sol review remains required at the designated final CODE QA boundary; self-testing cannot replace it.
+
+**No implied scope expansion.** This role update is not an implementation CODE GO, S4 DATA GO, H04 GO, full-render GO or PR merge permission. Honor the most recent explicit owner authorization, exact pinned plan/ADR, I1→I2→I3 gates and STOP/CHANGES_REQUIRED status. Protected S4, original 320 todo rows, historical ledgers, audio/voice/model/cache and held PR #3/#4, WP5, T16/T17/full render remain protected until explicitly released. If a later dated owner decision grants a narrower CODE GO, follow that exact decision. See `AGENTS.md`, `CLAUDE.md`, `tasks/README.md`.
+
 ## Roles and workflow
 
 - **Owner:** approves sound quality, snapshot authority, external compute, and any full-book render or merge.
