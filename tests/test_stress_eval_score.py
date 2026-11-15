@@ -102,6 +102,7 @@ def test_incomplete_never_computes_partial_metrics_or_passing_gates(tmp_path, mo
         evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[1])]))
         if mode == "stale":
             units[0]["text"] = "Дельта."
+            _update_manifest(units)
             evaluation.sample({})
     def forbidden(*args, **kwargs):
         pytest.fail("Incomplete gold must not produce partial metrics")
@@ -119,6 +120,7 @@ def test_stale_relabel_archive_score_uses_only_new_active_version(tmp_path, monk
     complete(tmp_path)
     assert evaluation.score({})["metrics"]["overall"]["accuracy_resolved"]["k"] == 3
     units[0]["text"] = "Дельта."
+    _update_manifest(units)
     evaluation.sample({})
     assert evaluation.score({})["status"] == "INCOMPLETE"
     new = [labeled(row, "1" if row["source_key"] == "01_test|1|0" else "0") for row in todo_rows()]
@@ -417,9 +419,9 @@ class TestT29YoEvaluableNoLabel:
         setup_book(tmp_path, monkeypatch, units)
         ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
-        evaluation.sample({})
-        # Observer returns RESTORED_obs → YO_EVALUABLE; no sidecar → yo_missing=1.
+        # Observer patched BEFORE sample so stored assignment matches fresh recompute.
         _patch_yo_obs(monkeypatch, ctx)
+        evaluation.sample({})
         # Intentionally skip merge → missing gold label
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
@@ -441,15 +443,17 @@ class TestT38YoSidecarFpCheck:
         setup_book(tmp_path, monkeypatch, units)
         ctx = predictions(context_for(units, synth={"Елка.": form_synth}))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
-        evaluation.sample({})
-        if merge_gold:
-            evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
         occ = next(iter(ctx.rows))
         from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
         identity = ctx.sources.resolve(occ.source_key)[0]
         mock_fp = _rfp(identity, "Ёлка", [0])
+        # Patch BEFORE sample so stored eligible assignment includes "yo_changed" stratum,
+        # matching what _verify_selection_fresh recomputes at score time.
         monkeypatch.setattr(evaluation, "_yo_observe_key",
                             lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+        evaluation.sample({})
+        if merge_gold:
+            evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
         return ctx, mock_fp
 
     def _make_sidecar_with_fp(self, fp, pre_respell="Ёлка", indices="0"):
@@ -534,13 +538,14 @@ class TestT38YoSidecarFpCheck:
         setup_book(tmp_path, monkeypatch, units)
         ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
-        evaluation.sample({})
         occ = next(iter(ctx.rows))
         from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
         identity = ctx.sources.resolve(occ.source_key)[0]
         mock_fp = _rfp(identity, "Ёлка", [0])
+        # Patch BEFORE sample so stored and fresh assignments agree.
         monkeypatch.setattr(evaluation, "_yo_observe_key",
                             lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+        evaluation.sample({})
         # WITHOUT gold label: both missing_labels and missing_yo_verdicts are 1
         result_no_gold = evaluation.score({})
         assert result_no_gold["counts"]["missing_yo_verdicts"] == 1
@@ -742,3 +747,52 @@ def test_b4_score_rejects_sample_with_stale_observation_inputs(tmp_path, monkeyp
         evaluation.score({})
     # Score file must not have been written.
     assert not score_dir.exists() or not any(score_dir.glob("s2-*.json"))
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by #13 / #10 / #11 regression tests
+# ---------------------------------------------------------------------------
+
+def _update_manifest(units):
+    """Rewrite manifest.jsonl in paths.OUT/sections/01_test to match current units."""
+    mdir = paths.OUT / "sections" / "01_test"
+    mdir.mkdir(parents=True, exist_ok=True)
+    with (mdir / "manifest.jsonl").open("w", encoding="utf-8") as mf:
+        for i, unit in enumerate(units):
+            mf.write(json.dumps({"id": f"{i+1:04d}", "n": i + 1,
+                                 "text": unit["text"], "pause_after_ms": 900}) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Issue #13 regression: _yo_observe_key must use manifest, not unit text
+# ---------------------------------------------------------------------------
+
+def test_t13_reg_yo_observe_key_uses_manifest_not_stub(tmp_path, monkeypatch):
+    """T13-reg: _yo_observe_key returns RESTORED_obs from manifest when YO map active.
+
+    Before fix this returned UNSUPPORTED_obs("RAW_FRAGMENT_UNAVAILABLE").
+    """
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    # norm.txt that makes build_map return {"елка": "ёлка"}.
+    (paths.TEXT / "yo.norm.txt").write_text("елка ёлка ёлка\n", encoding="utf-8")
+    from audiobook.stress_yo_observer import RESTORED_obs
+    ctx = context_for(units)
+    occ = ctx.rows[0]
+    config = {"text_prep": {"yo_restore": True}}
+    result = evaluation._yo_observe_key(occ, ctx.sources, config)
+    assert isinstance(result, RESTORED_obs), f"Expected RESTORED_obs, got {result}"
+
+
+def test_t13_reg_unsupported_obs_raises_in_yo_check(tmp_path, monkeypatch):
+    """T13-reg: UNSUPPORTED from _yo_observe_key → score() raises YO_OBSERVER_UNSUPPORTED (fail closed)."""
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    from audiobook import stress_yo_observer as _obs
+    monkeypatch.setattr(evaluation, "_yo_observe_key",
+                        lambda o, s, c: _obs.UNSUPPORTED_obs("MANIFEST_UNAVAILABLE"))
+    evaluation.sample({})
+    with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+        evaluation.score({})
+
+

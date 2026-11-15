@@ -837,13 +837,57 @@ def _present(value):
 def _yo_observe_key(occ, sources, config):
     """Call stress_yo_observer.observe_su for one occurrence (monkeypatchable in tests).
 
-    WordOcc carries no raw production fragment field; raw_text must come from the
-    chunk manifest (not stored in WordOcc). Until a raw_fragment field is added to
-    WordOcc sourced from the chunk manifest, every call returns UNSUPPORTED_obs.
-    # ponytail: returns UNSUPPORTED until WordOcc gains raw_fragment from chunk manifest
+    Reads exact production SU fragment from chunk manifest at
+    paths.OUT/sections/{section}/manifest.jsonl. UNSUPPORTED on any missing or
+    ambiguous data; never skips — UNSUPPORTED → ERROR in _yo_check.
     """
-    from audiobook.stress_yo_observer import UNSUPPORTED_obs
-    return UNSUPPORTED_obs("RAW_FRAGMENT_UNAVAILABLE")
+    from audiobook import leadin
+    from audiobook.pronounce import load_table
+    from audiobook.stress_yo_observer import observe_su, UNSUPPORTED_obs
+    resolved = sources.resolve(occ.source_key)
+    if resolved is None:
+        return UNSUPPORTED_obs("SOURCE_NOT_FOUND")
+    identity, _, _ = resolved
+    if occ.su_chunk_id is None:
+        return UNSUPPORTED_obs("SU_ALIGNMENT_MISSING")
+    manifest_path = paths.OUT / "sections" / occ.section / "manifest.jsonl"
+    try:
+        rows = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, ValueError, UnicodeError):
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    row = next((r for r in rows if r.get("id") == occ.su_chunk_id), None)
+    if row is None:
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    if occ.su_fragment is None:
+        from audiobook.synth import row_leadin
+        raw_text = row["text"]
+        phrase = row_leadin(row)
+        open_end = row.get("open_end", False)
+    else:
+        from audiobook.synth import chunk_fragments
+        try:
+            frags = chunk_fragments(row["text"], config)
+        except Exception:
+            return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+        fi = occ.su_fragment
+        if fi >= len(frags):
+            return UNSUPPORTED_obs("FRAGMENT_ORDINAL_MISMATCH")
+        frag_text, _pause, is_enum = frags[fi]
+        raw_text = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+        phrase = leadin.AUTO
+        open_end = False
+    yo_map = _load_yo_map(config)
+    table = load_table(paths.TEXT / "pronounce.yaml")
+    sentinel = (config.get("model") or {}).get("sentinel", "")
+    return observe_su(
+        source_token=occ.form_source,
+        raw_text=raw_text,
+        token_idx=occ.su_token_index if occ.su_token_index is not None else 0,
+        config=config or {},
+        yo_map=yo_map, table=table, sentinel=sentinel,
+        phrase=phrase, open_end=open_end,
+        source_identity=identity,
+    )
 
 
 def _yo_check(keys, by_key, context, config, yo_data_before):
@@ -870,7 +914,7 @@ def _yo_check(keys, by_key, context, config, yo_data_before):
         obs = _yo_observe_key(occ, context.sources, config)
         obs_by_key[key] = obs
         if isinstance(obs, UNSUPPORTED_obs):
-            continue  # B2: not yo_evaluable; skip
+            _error("YO_OBSERVER_UNSUPPORTED")  # Fail closed: never silently skip.
         if not isinstance(obs, RESTORED_obs):
             continue
         if occ.f1_rule is not None or occ.f1_flag != "none":

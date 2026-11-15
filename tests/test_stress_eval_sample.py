@@ -50,6 +50,12 @@ def setup_book(tmp_path, monkeypatch, units=None):
     monkeypatch.setattr(paths, "OUT", out)
     monkeypatch.setattr(evaluation, "private_output_guard", lambda path: None)
     monkeypatch.setattr(evaluation, "_load_context", lambda _: context_for(units))
+    manifest_dir = out / "sections" / "01_test"
+    manifest_dir.mkdir(parents=True)
+    with (manifest_dir / "manifest.jsonl").open("w", encoding="utf-8") as mf:
+        for i, unit in enumerate(units):
+            mf.write(json.dumps({"id": f"{i+1:04d}", "n": i + 1,
+                                 "text": unit["text"], "pause_after_ms": 900}) + "\n")
     return units
 
 
@@ -155,9 +161,11 @@ def test_p1_failure_prevents_all_writes(tmp_path, monkeypatch):
     monkeypatch.setattr(evaluation, "private_output_guard", reject)
     with pytest.raises(AnnotationError, match="PRIVATE_OUTPUT_REQUIRED"):
         evaluation.sample({})
-    # The eval lock-file (.wp4.lock) is infrastructure; skip it from the check.
+    # The eval lock-file and test-fixture manifests are infrastructure; skip them.
     lock = paths.OUT / "stress" / "eval" / evaluation._EVAL_LOCK_NAME
-    assert not any(p.is_file() for p in tmp_path.rglob("*") if p != lock)
+    sections_dir = paths.OUT / "sections"
+    assert not any(p.is_file() for p in tmp_path.rglob("*")
+                   if p != lock and not str(p).startswith(str(sections_dir)))
 
 
 def test_b1_sample_uses_only_versioned_todo_never_legacy(tmp_path, monkeypatch):
