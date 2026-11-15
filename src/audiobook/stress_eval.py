@@ -245,7 +245,7 @@ def _check_todo_v2(todo_path: Path, requested_rows, gold_rows):
             sig = tuple(row[n] for n in GOLD_FIELDS)
             if sig not in saved_sigs:
                 _error("TODO_HAS_UNMERGED_LABELS")
-    return "create"  # All labels merged; safe to regenerate.
+    _error("OWNER_TODO_PROTECTED")  # Different bytes: protected regardless of label state.
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +805,12 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
         _assert_current(context, config)
         for plan in plans:
             _apply(plan)
+        # Retire the s2 todo after a successful merge so sample() can create a fresh one.
+        todo_path = _todo_path_v2(selection.record["sample_fp"])
+        try:
+            todo_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return {"added": len(additions), "skipped": skipped, "unlabeled": blank,
                 "active": len(updated_state.active), "stale": len(updated_state.stale),
                 "duplicates": updated_state.duplicates}

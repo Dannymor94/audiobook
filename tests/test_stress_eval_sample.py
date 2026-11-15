@@ -479,22 +479,20 @@ class TestT24T25TodoProtection:
         status = ev._check_todo_v2(todo_path, [], [])
         assert status == "noop"
 
-    def test_different_bytes_no_unmerged_labels_allows_regenerate(self, tmp_path, monkeypatch):
-        """T24a: existing todo with different bytes and no unmerged labels → 'create' (safe regenerate)."""
+    def test_different_bytes_no_unmerged_labels_raises_protected(self, tmp_path, monkeypatch):
+        """T24a / Issue #10: existing todo with different bytes → OWNER_TODO_PROTECTED, even with no unmerged labels."""
         import audiobook.stress_eval as ev
         monkeypatch.setattr(ev, "private_output_guard", lambda p: None)
         todo_path = tmp_path / "stress_gold.todo.s2-fp16.tsv"
-        # Write a different (but valid) todo with no labels.
-        from audiobook.stress_eval import GOLD_FIELDS, LABEL_FIELDS, serialize_gold
+        from audiobook.stress_eval import GOLD_FIELDS, serialize_gold
         blank_row = {f: "" for f in GOLD_FIELDS}
         blank_row.update(source_key="01_test|0|0", form_source="слово",
                          unit_text_sha256="a" * 64, unit_kind="text",
                          context_sha256="b" * 64, context="тест")
         content = serialize_gold([blank_row], allow_blank=True)
         todo_path.write_bytes(content.encode("utf-8"))
-        # No unmerged labels → safe to regenerate.
-        status = ev._check_todo_v2(todo_path, [], [])
-        assert status == "create"
+        with pytest.raises(AnnotationError, match="OWNER_TODO_PROTECTED"):
+            ev._check_todo_v2(todo_path, [], [])
 
     def test_corrupt_todo_raises_owner_todo_protected(self, tmp_path, monkeypatch):
         """T24a-corrupt: corrupt todo file (unparseable) → OWNER_TODO_PROTECTED."""

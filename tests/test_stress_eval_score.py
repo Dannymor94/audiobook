@@ -764,6 +764,27 @@ def _update_manifest(units):
 
 
 # ---------------------------------------------------------------------------
+# Issue #10 regression: _check_todo_v2 must reject different bytes unconditionally
+# ---------------------------------------------------------------------------
+
+def test_t10_reg_different_bytes_blank_todo_raises_protected(tmp_path, monkeypatch):
+    """T10-reg: existing todo with different bytes and no unmerged labels → OWNER_TODO_PROTECTED.
+
+    Before fix: returned 'create'. After fix: raises OWNER_TODO_PROTECTED.
+    """
+    monkeypatch.setattr(evaluation, "private_output_guard", lambda p: None)
+    todo_path = tmp_path / "stress_gold.todo.s2-fp16.tsv"
+    blank_row = {f: "" for f in evaluation.GOLD_FIELDS}
+    blank_row.update(source_key="01_test|0|0", form_source="слово",
+                     unit_text_sha256="a" * 64, unit_kind="text",
+                     context_sha256="b" * 64, context="тест")
+    content = evaluation.serialize_gold([blank_row], allow_blank=True)
+    todo_path.write_bytes(content.encode("utf-8"))
+    with pytest.raises(AnnotationError, match="OWNER_TODO_PROTECTED"):
+        evaluation._check_todo_v2(todo_path, [], [])
+
+
+# ---------------------------------------------------------------------------
 # Issue #13 regression: _yo_observe_key must use manifest, not unit text
 # ---------------------------------------------------------------------------
 
