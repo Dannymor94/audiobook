@@ -10,7 +10,8 @@ from test_stress_eval_sample import context_for, setup_book
 
 
 def todo_rows():
-    return evaluation.parse_gold((paths.TEXT / "stress_gold.todo.tsv").read_text(encoding="utf-8"), allow_blank=True)
+    todos = sorted(paths.TEXT.glob("stress_gold.todo.s2-*.tsv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return evaluation.parse_gold(todos[0].read_text(encoding="utf-8"), allow_blank=True)
 
 
 def labeled(row, value="0", **changes):
@@ -190,9 +191,9 @@ def test_semantic_duplicates_and_source_reversion(tmp_path, monkeypatch):
 
 def test_owner_edited_todo_retained_until_saved_then_regenerated(tmp_path, monkeypatch):
     setup_book(tmp_path, monkeypatch)
-    evaluation.sample({})
+    result = evaluation.sample({})
     rows = todo_rows()
-    todo = paths.TEXT / "stress_gold.todo.tsv"
+    todo = evaluation._todo_path_v2(result["sample_fp"])
     todo.write_text(evaluation.serialize_gold([labeled(rows[0]), *rows[1:]], allow_blank=True), encoding="utf-8")
     before = snapshot(tmp_path)
     with pytest.raises(AnnotationError, match="TODO_HAS_UNMERGED_LABELS"):
@@ -816,6 +817,12 @@ class TestT34T35T37T39YoMerge:
         ctx = context_for(units)
         return ctx.sources.resolve("01_test|0|0")[0]
 
+    def _patch_obs(self, monkeypatch, fp, form, indices):
+        """B3: monkeypatch observer to return RESTORED_obs with given fp for all calls."""
+        from audiobook.stress_yo_observer import RESTORED_obs
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, s, c: RESTORED_obs(form, tuple(indices), fp))
+
     def test_T34a_same_fp_accepted_despite_no_sample(self, tmp_path, monkeypatch):
         """T34a: merge_yo accepts same restoration_fp regardless of sample identity."""
         self._setup(tmp_path, monkeypatch)
@@ -824,6 +831,7 @@ class TestT34T35T37T39YoMerge:
         row = _yo_row(identity["source_key"], identity["form_source"],
                       identity["unit_text_sha256"], identity["unit_kind"],
                       identity["context_sha256"], "Бёта", [0], fp, "y")
+        self._patch_obs(monkeypatch, fp, "Бёта", [0])
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         assert result["added"] == 1 and result["skipped"] == 0
 
@@ -835,6 +843,7 @@ class TestT34T35T37T39YoMerge:
         row = _yo_row(identity["source_key"], identity["form_source"],
                       identity["unit_text_sha256"], identity["unit_kind"],
                       identity["context_sha256"], "Бёта", [0], fp, "y")
+        self._patch_obs(monkeypatch, fp, "Бёта", [0])
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         assert result["added"] == 0 and result["skipped"] == 1
@@ -851,6 +860,10 @@ class TestT34T35T37T39YoMerge:
         row_b = _yo_row(identity["source_key"], identity["form_source"],
                         identity["unit_text_sha256"], identity["unit_kind"],
                         identity["context_sha256"], "Бетё", [1], fp_b, "n")
+        # B3: use stateful observer to return the right fp per merge_yo call.
+        from audiobook.stress_yo_observer import RESTORED_obs
+        obs_sequence = iter([RESTORED_obs("Бёта", (0,), fp_a), RESTORED_obs("Бетё", (1,), fp_b)])
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: next(obs_sequence))
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_a]))
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_b]))
         assert result["added"] == 1  # new entry for different fp
@@ -863,6 +876,7 @@ class TestT34T35T37T39YoMerge:
         row = _yo_row(identity["source_key"], identity["form_source"],
                       identity["unit_text_sha256"], identity["unit_kind"],
                       identity["context_sha256"], "Бёта", [0], fp, "y")
+        self._patch_obs(monkeypatch, fp, "Бёта", [0])
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         # Simulate A→B→A: same fp reappears with same verdict
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
@@ -876,6 +890,7 @@ class TestT34T35T37T39YoMerge:
         row = _yo_row(identity["source_key"], identity["form_source"],
                       identity["unit_text_sha256"], identity["unit_kind"],
                       identity["context_sha256"], "Бёта", [0], fp, "n")
+        self._patch_obs(monkeypatch, fp, "Бёта", [0])
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row]))
         assert result["added"] == 0
@@ -891,6 +906,7 @@ class TestT34T35T37T39YoMerge:
         row_n = _yo_row(identity["source_key"], identity["form_source"],
                         identity["unit_text_sha256"], identity["unit_kind"],
                         identity["context_sha256"], "Бёта", [0], fp, "n")
+        self._patch_obs(monkeypatch, fp, "Бёта", [0])
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_y]))
         with pytest.raises(AnnotationError, match="YO_EVIDENCE_CONFLICT"):
             evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_n]))

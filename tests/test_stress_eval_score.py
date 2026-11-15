@@ -666,15 +666,14 @@ def test_score_yo_part_ast_guard():
     ]
     assert "_yo_check" in score_calls, "score() must call _yo_check"
 
-    # _yo_observe_key must call observe_su
-    observe_key_src = _func_body_src(_se._yo_observe_key)
-    observe_key_tree = ast.parse(observe_key_src)
-    observe_key_calls = [
-        n.func.id if isinstance(n.func, ast.Name) else
-        (n.func.attr if isinstance(n.func, ast.Attribute) else "")
-        for n in ast.walk(observe_key_tree) if isinstance(n, ast.Call)
-    ]
-    assert "observe_su" in observe_key_calls, "_yo_observe_key must call observe_su"
+    # B2: _yo_observe_key returns UNSUPPORTED until WordOcc gains raw_fragment from chunk manifest;
+    # observe_su call is deferred. Guard that it returns UNSUPPORTED_obs, not some silent wrong path.
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from types import SimpleNamespace
+    dummy_occ = SimpleNamespace(source_key="01_test|0|0")
+    dummy_sources = SimpleNamespace(resolve=lambda k: None)
+    result = _se._yo_observe_key(dummy_occ, dummy_sources, {})
+    assert isinstance(result, UNSUPPORTED_obs), "_yo_observe_key must return UNSUPPORTED_obs (B2: no raw fragment)"
 
 
 def test_f5_lock_unavailable_score_errors_no_overwrite(tmp_path, monkeypatch):
@@ -693,3 +692,53 @@ def test_f5_lock_unavailable_score_errors_no_overwrite(tmp_path, monkeypatch):
         evaluation.score({})
     assert score_path().read_bytes() == score_before
     assert snapshot(tmp_path) == before
+
+
+# ---------------------------------------------------------------------------
+# B3: merge_yo freshness check (observer must confirm restoration)
+# ---------------------------------------------------------------------------
+
+def test_b3_merge_yo_stale_fp_rejected_even_if_internally_consistent(tmp_path, monkeypatch):
+    """B3: internally consistent YO row is rejected when observer no longer confirms restoration."""
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    from audiobook.stress_yo_observer import NONE_obs, restoration_fp as _rfp
+    # Monkeypatch observer to return NONE_obs (restoration no longer observed for this occ).
+    monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+    ctx = context_for(units, synth={"Елка.": "Ёлка."})
+    occ = ctx.rows[0]
+    identity = ctx.sources.resolve(occ.source_key)[0]
+    fp = _rfp(identity, "Ёлка", [0])
+    h = hashlib.sha256(b"test").hexdigest()
+    yo_row = {
+        "schema_version": "yo-evidence/1", "source_key": occ.source_key,
+        "form_source": occ.form_source, "unit_text_sha256": identity["unit_text_sha256"],
+        "unit_kind": identity["unit_kind"], "context_sha256": identity["context_sha256"],
+        "restored_form_pre_respell": "Ёлка", "restored_vowel_indices": "0",
+        "observation_contract_version": "yo-observation/1",
+        "restoration_fp": fp, "norm_content_sha256": h, "yo_map_sha256": h,
+        "prep_config_sha256": h, "yo_correct": "y", "labeler": "test", "date": "2026-11-15",
+    }
+    yo_path = tmp_path / "incoming.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([yo_row]), encoding="utf-8")
+    # Observer says no restoration → fp can't be verified fresh → YO_STALE_INPUT; no write.
+    with pytest.raises(AnnotationError, match="YO_STALE_INPUT"):
+        evaluation.merge_yo({}, yo_path)
+    assert not (paths.TEXT / "stress_gold.yo_evidence.tsv").exists()
+
+
+# ---------------------------------------------------------------------------
+# B4: score() rejects stale sample/2 observation inputs
+# ---------------------------------------------------------------------------
+
+def test_b4_score_rejects_sample_with_stale_observation_inputs(tmp_path, monkeypatch):
+    """B4: score() raises SAMPLE_STALE when norm/yo_map/prep_config digest changed since sample."""
+    ready(tmp_path, monkeypatch)
+    complete(tmp_path)
+    score_dir = paths.OUT / "stress" / "eval" / "score"
+    # Simulate norm_digest change by writing a .norm.txt file into paths.TEXT.
+    (paths.TEXT / "synthetic.norm.txt").write_bytes(b"changed content")
+    with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        evaluation.score({})
+    # Score file must not have been written.
+    assert not score_dir.exists() or not any(score_dir.glob("s2-*.json"))

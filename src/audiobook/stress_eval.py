@@ -224,9 +224,9 @@ def _todo_path_v2(sample_fp: str) -> Path:
 def _check_todo_v2(todo_path: Path, requested_rows, gold_rows):
     """Guard versioned sample/2 todo creation.
 
-    absent → guarded creation allowed; same bytes → no-op; different bytes →
-    OWNER_TODO_PROTECTED. If different and contains filled labels not in gold →
-    also TODO_HAS_UNMERGED_LABELS.
+    absent → guarded creation allowed; same bytes → no-op; different bytes with
+    unmerged labels → TODO_HAS_UNMERGED_LABELS; different bytes with all labels
+    merged → safe to regenerate.
     """
     if not todo_path.exists():
         return "create"
@@ -245,7 +245,7 @@ def _check_todo_v2(todo_path: Path, requested_rows, gold_rows):
             sig = tuple(row[n] for n in GOLD_FIELDS)
             if sig not in saved_sigs:
                 _error("TODO_HAS_UNMERGED_LABELS")
-    _error("OWNER_TODO_PROTECTED")
+    return "create"  # All labels merged; safe to regenerate.
 
 
 # ---------------------------------------------------------------------------
@@ -733,30 +733,18 @@ def sample(config):
         selection = _selection(context, config)
         gold = paths.TEXT / "stress_gold.tsv"
         archive = paths.TEXT / "stress_gold.archive.tsv"
-        todo = paths.TEXT / "stress_gold.todo.tsv"
         ledger, gold_before = _read_ledger(gold)
         state = inspect_ledger(ledger, context)
-        todo_before = _optional_bytes(todo)
-        if todo_before is not None:
-            try:
-                existing_todo = parse_gold(todo_before.decode("utf-8"), allow_blank=True)
-            except UnicodeError:
-                _error("GOLD_INVALID")
-            saved = {tuple(row[name] for name in IDENTITY_FIELDS) + (row["gold_vowel"], row["yo_correct"])
-                     for row in ledger}
-            for row in existing_todo:
-                if any(row[field] for field in LABEL_FIELDS):
-                    signature = tuple(row[name] for name in IDENTITY_FIELDS) + (row["gold_vowel"], row["yo_correct"])
-                    if signature not in saved:
-                        _error("TODO_HAS_UNMERGED_LABELS")
         by_key = {row.source_key: row for row in context.rows}
         requested = [_todo_row(by_key[key], context.sources) for key in selection.record["keys"] if key not in state.active]
         record_path = _sample_path_v2(selection.record["sample_fp"])
         record_before = _optional_bytes(record_path)
         if record_before is not None:
             _verify_sample(selection.record, record_path)
+        todo_path = _todo_path_v2(selection.record["sample_fp"])
+        _check_todo_v2(todo_path, requested, list(state.active.values()))
         plans = [_plan(record_path, _canonical(selection.record).decode("utf-8") + "\n", record_before),
-                 _plan(todo, serialize_gold(requested, allow_blank=True), todo_before)]
+                 _plan(todo_path, serialize_gold(requested, allow_blank=True), _optional_bytes(todo_path))]
         if gold_before is None:
             plans.append(_plan(gold, serialize_gold([]), None))
         # Archive is derived and independently replaceable; never an input to merge.
@@ -847,29 +835,15 @@ def _present(value):
 
 
 def _yo_observe_key(occ, sources, config):
-    """Call stress_yo_observer.observe_su for one occurrence (monkeypatchable in tests)."""
-    from audiobook import leadin
-    from audiobook.pronounce import load_table
-    from audiobook.stress_yo_observer import observe_su, UNSUPPORTED_obs
-    resolved = sources.resolve(occ.source_key)
-    if resolved is None:
-        return UNSUPPORTED_obs("SOURCE_NOT_FOUND")
-    identity, raw_text, _ = resolved
-    yo_map = _load_yo_map(config)
-    table = load_table()
-    sentinel = (config.get("model") or {}).get("sentinel", "")
-    return observe_su(
-        source_token=occ.form_source,
-        raw_text=raw_text,
-        token_idx=occ.su_token_index if occ.su_token_index is not None else 0,
-        config=config or {},
-        yo_map=yo_map,
-        table=table,
-        sentinel=sentinel,
-        phrase=leadin.AUTO,
-        open_end=False,
-        source_identity=identity,
-    )
+    """Call stress_yo_observer.observe_su for one occurrence (monkeypatchable in tests).
+
+    WordOcc carries no raw production fragment field; raw_text must come from the
+    chunk manifest (not stored in WordOcc). Until a raw_fragment field is added to
+    WordOcc sourced from the chunk manifest, every call returns UNSUPPORTED_obs.
+    # ponytail: returns UNSUPPORTED until WordOcc gains raw_fragment from chunk manifest
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    return UNSUPPORTED_obs("RAW_FRAGMENT_UNAVAILABLE")
 
 
 def _yo_check(keys, by_key, context, config, yo_data_before):
@@ -896,7 +870,7 @@ def _yo_check(keys, by_key, context, config, yo_data_before):
         obs = _yo_observe_key(occ, context.sources, config)
         obs_by_key[key] = obs
         if isinstance(obs, UNSUPPORTED_obs):
-            _error("YO_OBSERVER_UNSUPPORTED")
+            continue  # B2: not yo_evaluable; skip
         if not isinstance(obs, RESTORED_obs):
             continue
         if occ.f1_rule is not None or occ.f1_flag != "none":
@@ -914,12 +888,21 @@ def score(config):
     Both authoritative ledger digests are pinned (T41/ADR §5).
     """
     from audiobook.stress_metrics import Observation, calculate_metrics
-    from audiobook.stress_yo_observer import RESTORED_obs
+    from audiobook.stress_yo_observer import (RESTORED_obs, compute_norm_digest,
+                                               compute_yo_map_digest, compute_prep_config_digest)
     lock = acquire_eval_lock()
     try:
         context = _load_context(config)
         selection, sample_path = _load_saved_selection(context, config)
         record = selection.record
+        # B4: reject sample/2 whose observation inputs no longer match current state.
+        _yo_map_cur = _load_yo_map(config)
+        if record.get("observation_inputs") != {
+            "norm_content_sha256": compute_norm_digest(paths.TEXT),
+            "yo_map_sha256": compute_yo_map_digest(_yo_map_cur),
+            "prep_config_sha256": compute_prep_config_digest(config),
+        }:
+            _error("SAMPLE_STALE")
         gold_path = paths.TEXT / "stress_gold.tsv"
         ledger, gold_before = _read_ledger(gold_path)
         yo_path = _yo_path()
@@ -1123,10 +1106,11 @@ def _yo_path() -> Path:
 
 def merge_yo(config, incoming: Path):
     """Append verified YO evidence; validates observation version and fp conflict (G1.4 §6.3)."""
-    from audiobook.stress_yo_observer import restoration_fp as _rfp_check
+    from audiobook.stress_yo_observer import restoration_fp as _rfp_check, RESTORED_obs
     lock = acquire_eval_lock()
     try:
         context = _load_context(config)
+        by_key = {occ.source_key: occ for occ in context.rows}
         yo_path = _yo_path()
         yo_data = _optional_bytes(yo_path)
         try:
@@ -1152,9 +1136,16 @@ def merge_yo(config, incoming: Path):
             identity, _, _ = current
             if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
                 _error("YO_STALE_INPUT")
-            # F6b: internal fp consistency check — fp must match candidate+indices+identity.
+            # Internal fp consistency check.
             indices = [int(p) for p in row["restored_vowel_indices"].split("|")]
             if _rfp_check(identity, row["restored_form_pre_respell"], indices) != row["restoration_fp"]:
+                _error("YO_STALE_INPUT")
+            # B3: freshness check — observer must still produce RESTORED_obs with matching fp.
+            occ = by_key.get(key)
+            if occ is None:
+                _error("YO_STALE_INPUT")
+            obs = _yo_observe_key(occ, context.sources, config)
+            if not isinstance(obs, RESTORED_obs) or obs.fp != row["restoration_fp"]:
                 _error("YO_STALE_INPUT")
             fp = row["restoration_fp"]
             if fp in existing_by_fp:

@@ -137,7 +137,8 @@ def test_sample_creates_only_blank_local_owner_artifacts(tmp_path, monkeypatch):
     setup_book(tmp_path, monkeypatch)
     result = evaluation.sample({})
     assert result["selected"] == result["todo"] == 3
-    todo = evaluation.parse_gold((paths.TEXT / "stress_gold.todo.tsv").read_text(encoding="utf-8"), allow_blank=True)
+    todo_path = evaluation._todo_path_v2(result["sample_fp"])
+    todo = evaluation.parse_gold(todo_path.read_text(encoding="utf-8"), allow_blank=True)
     assert all(all(not row[field] for field in evaluation.LABEL_FIELDS) for row in todo)
     assert evaluation.parse_gold((paths.TEXT / "stress_gold.tsv").read_text(encoding="utf-8")) == []
     record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
@@ -157,6 +158,22 @@ def test_p1_failure_prevents_all_writes(tmp_path, monkeypatch):
     # The eval lock-file (.wp4.lock) is infrastructure; skip it from the check.
     lock = paths.OUT / "stress" / "eval" / evaluation._EVAL_LOCK_NAME
     assert not any(p.is_file() for p in tmp_path.rglob("*") if p != lock)
+
+
+def test_b1_sample_uses_only_versioned_todo_never_legacy(tmp_path, monkeypatch):
+    """B1: sample() must write only the s2-versioned todo; legacy stress_gold.todo.tsv must not be created."""
+    setup_book(tmp_path, monkeypatch)
+    result = evaluation.sample({})
+    legacy_todo = paths.TEXT / "stress_gold.todo.tsv"
+    assert not legacy_todo.exists(), "sample() must not write the legacy 320-row todo"
+    s2_todos = sorted(paths.TEXT.glob("stress_gold.todo.s2-*.tsv"))
+    assert len(s2_todos) == 1
+    s2_rows = evaluation.parse_gold(s2_todos[0].read_text(encoding="utf-8"), allow_blank=True)
+    assert len(s2_rows) == result["todo"]
+    assert all(all(not row[field] for field in evaluation.LABEL_FIELDS) for row in s2_rows)
+    # Idempotent: second run does not create legacy todo.
+    evaluation.sample({})
+    assert not legacy_todo.exists()
 
 
 def test_existing_sample_mismatch_is_not_overwritten(tmp_path, monkeypatch):
@@ -454,8 +471,8 @@ class TestT24T25TodoProtection:
         status = ev._check_todo_v2(todo_path, [], [])
         assert status == "noop"
 
-    def test_different_bytes_raises_owner_todo_protected(self, tmp_path, monkeypatch):
-        """T24a: existing todo with different bytes and no unmerged labels → OWNER_TODO_PROTECTED."""
+    def test_different_bytes_no_unmerged_labels_allows_regenerate(self, tmp_path, monkeypatch):
+        """T24a: existing todo with different bytes and no unmerged labels → 'create' (safe regenerate)."""
         import audiobook.stress_eval as ev
         monkeypatch.setattr(ev, "private_output_guard", lambda p: None)
         todo_path = tmp_path / "stress_gold.todo.s2-fp16.tsv"
@@ -467,6 +484,15 @@ class TestT24T25TodoProtection:
                          context_sha256="b" * 64, context="тест")
         content = serialize_gold([blank_row], allow_blank=True)
         todo_path.write_bytes(content.encode("utf-8"))
+        # No unmerged labels → safe to regenerate.
+        status = ev._check_todo_v2(todo_path, [], [])
+        assert status == "create"
+
+    def test_corrupt_todo_raises_owner_todo_protected(self, tmp_path, monkeypatch):
+        """T24a-corrupt: corrupt todo file (unparseable) → OWNER_TODO_PROTECTED."""
+        import audiobook.stress_eval as ev
+        todo_path = tmp_path / "stress_gold.todo.s2-fp16.tsv"
+        todo_path.write_bytes(b"corrupt\x00data")
         with pytest.raises(AnnotationError, match="OWNER_TODO_PROTECTED"):
             ev._check_todo_v2(todo_path, [], [])
 
