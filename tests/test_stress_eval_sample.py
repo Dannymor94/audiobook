@@ -140,8 +140,8 @@ def test_sample_creates_only_blank_local_owner_artifacts(tmp_path, monkeypatch):
     todo = evaluation.parse_gold((paths.TEXT / "stress_gold.todo.tsv").read_text(encoding="utf-8"), allow_blank=True)
     assert all(all(not row[field] for field in evaluation.LABEL_FIELDS) for row in todo)
     assert evaluation.parse_gold((paths.TEXT / "stress_gold.tsv").read_text(encoding="utf-8")) == []
-    record = next((paths.OUT / "stress" / "eval" / "sample").glob("*.json"))
-    assert set(json.loads(record.read_text(encoding="utf-8"))) == {"sample_fp", "source_fp", "analysis_fp", "strata", "keys"}
+    record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+    assert set(json.loads(record.read_text(encoding="utf-8"))) == evaluation._V2_SAMPLE_FIELDS
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     assert evaluation.sample({}) == result
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
@@ -154,13 +154,15 @@ def test_p1_failure_prevents_all_writes(tmp_path, monkeypatch):
     monkeypatch.setattr(evaluation, "private_output_guard", reject)
     with pytest.raises(AnnotationError, match="PRIVATE_OUTPUT_REQUIRED"):
         evaluation.sample({})
-    assert not any(p.is_file() for p in tmp_path.rglob("*"))
+    # The eval lock-file (.wp4.lock) is infrastructure; skip it from the check.
+    lock = paths.OUT / "stress" / "eval" / evaluation._EVAL_LOCK_NAME
+    assert not any(p.is_file() for p in tmp_path.rglob("*") if p != lock)
 
 
 def test_existing_sample_mismatch_is_not_overwritten(tmp_path, monkeypatch):
     setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
-    record = next((paths.OUT / "stress" / "eval" / "sample").glob("*.json"))
+    record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
     record.write_text("{}", encoding="utf-8")
     with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
         evaluation.sample({})

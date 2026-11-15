@@ -218,7 +218,7 @@ def test_archive_never_input_and_corrupt_export_repaired(tmp_path, monkeypatch):
 def test_wrong_sample_refused_before_writes(tmp_path, monkeypatch, mutation):
     setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
-    record = next((paths.OUT / "stress" / "eval" / "sample").glob("*.json"))
+    record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
     value = json.loads(record.read_text(encoding="utf-8"))
     value[mutation] = [] if mutation == "keys" else "corrupt"
     record.write_text(json.dumps(value), encoding="utf-8")
@@ -362,7 +362,7 @@ def test_generation_change_between_validation_and_write(tmp_path, monkeypatch):
 def test_sample_json_duplicate_keys_and_boolean_counts_refused(tmp_path, monkeypatch):
     setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
-    path = next((paths.OUT / "stress" / "eval" / "sample").glob("*.json"))
+    path = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
     record = json.loads(path.read_text(encoding="utf-8"))
     text = json.dumps(record)
     path.write_text('{"sample_fp":"duplicate",' + text[1:], encoding="utf-8")
@@ -677,7 +677,7 @@ class TestT07MergeSourceIndependent:
         evaluation.sample({})
         # Simulate a sample change by modifying the sample record on disk
         sample_dir = paths.OUT / "stress" / "eval" / "sample"
-        old_path = next(sample_dir.glob("*.json"))
+        old_path = next(sample_dir.glob("s2-*.json"))
         import json as _json
         old_record = _json.loads(old_path.read_text(encoding="utf-8"))
         # Change source_fp in the sample record to simulate a stale sample
@@ -929,6 +929,21 @@ class TestT34T35T37T39YoMerge:
                 "prep_config_sha256": "f" * 64,
                 "yo_correct": "y", "labeler": "syn", "date": "2026-11-15",
             })
+
+    def test_f6b_fp_mismatch_between_candidate_and_claimed_fp_error(self, tmp_path, monkeypatch):
+        """F6b: restoration_fp doesn't match rfp(identity, form, indices) → YO_STALE_INPUT; no ledger write."""
+        self._setup(tmp_path, monkeypatch)
+        identity = self._identity()
+        fp_for_beta = _restoration_fp_for(identity, "Бёта", [0])
+        # Row claims form "Бетё"[1] but fp was computed for "Бёта"[0] → mismatch.
+        row = _yo_row(identity["source_key"], identity["form_source"],
+                      identity["unit_text_sha256"], identity["unit_kind"],
+                      identity["context_sha256"], "Бетё", [1], fp_for_beta, "y")
+        yo_input = _write_yo_input(tmp_path, [row])
+        before = snapshot(tmp_path)  # snapshot after input file, before merge_yo
+        with pytest.raises(AnnotationError, match="YO_STALE_INPUT"):
+            evaluation.merge_yo({}, yo_input)
+        assert snapshot(tmp_path) == before
 
 
 # ---------------------------------------------------------------------------

@@ -60,7 +60,7 @@ def complete(tmp_path):
 
 
 def score_path():
-    return next((paths.OUT / "stress" / "eval" / "score").glob("*.json"))
+    return next((paths.OUT / "stress" / "eval" / "score").glob("s2-*.json"))
 
 
 def test_complete_exact_schema_aggregates_and_owner_files_readonly(tmp_path, monkeypatch):
@@ -73,7 +73,10 @@ def test_complete_exact_schema_aggregates_and_owner_files_readonly(tmp_path, mon
     owner_before[archive] = archive.read_bytes()
     result = evaluation.score({})
     assert result["status"] == "COMPLETE"
-    assert set(result) == {"source_fp", "analysis_fp", "sample_fp", "gold_sha256", "counts", "metrics", "wilson", "gates", "status"}
+    assert set(result) == {"schema", "source_fp", "analysis_fp", "sample_fp", "gold_sha256",
+                           "yo_evidence_sha256", "counts", "metrics", "wilson", "gates", "status"}
+    assert result["schema"] == "stress-score/2"
+    assert result["yo_evidence_sha256"] is None
     assert result["gold_sha256"] == hashlib.sha256((paths.TEXT / "stress_gold.tsv").read_bytes()).hexdigest()
     assert result["counts"]["selected"] == result["counts"]["active_labels"] == result["counts"]["usable_gold"] == 3
     assert result["counts"]["missing_labels"] == 0
@@ -221,7 +224,7 @@ def test_adapter_mapping_y_property_override_and_population_weights(tmp_path, mo
     metrics = result["metrics"]["overall"]
     assert (metrics["suggestion_precision"]["k"], metrics["suggestion_precision"]["n"]) == (0, 1)
     assert (metrics["override_disagreement"]["k"], metrics["override_disagreement"]["n"]) == (1, 1)
-    assert (metrics["yo_precision"]["k"], metrics["yo_precision"]["n"]) == (0, 1)
+    assert (metrics["yo_precision"]["k"], metrics["yo_precision"]["n"]) == (0, 2)
     assert result["gates"]["YO"] == "YO_WARN"
     assert result["counts"]["by_stratum"]["yo_changed"]["selected"] == 0
     assert result["metrics"]["book_estimates"]["suggestion_precision"] == {
@@ -233,7 +236,7 @@ def test_validation_error_never_publishes_or_rewrites_old_score(tmp_path, monkey
     ready(tmp_path, monkeypatch)
     complete(tmp_path)
     evaluation.score({})
-    record = next((paths.OUT / "stress" / "eval" / "sample").glob("*.json"))
+    record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
     if fault in ("sample", "source_fp", "analysis_fp"):
         value = json.loads(record.read_text(encoding="utf-8"))
         value["keys" if fault == "sample" else fault] = [] if fault == "sample" else "corrupt"
@@ -309,7 +312,7 @@ def test_late_change_and_p1_prevent_score_publication(tmp_path, monkeypatch, fau
                 gold = paths.TEXT / "stress_gold.tsv"
                 gold.write_text(gold.read_text(encoding="utf-8") + "\n", encoding="utf-8")
             elif fault == "sample_change":
-                next((paths.OUT / "stress" / "eval" / "sample").glob("*.json")).write_text("{}", encoding="utf-8")
+                next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json")).write_text("{}", encoding="utf-8")
             else:
                 units[0]["text"] = "Дельта."
             original(context, config)
@@ -672,3 +675,21 @@ def test_score_yo_part_ast_guard():
         for n in ast.walk(observe_key_tree) if isinstance(n, ast.Call)
     ]
     assert "observe_su" in observe_key_calls, "_yo_observe_key must call observe_su"
+
+
+def test_f5_lock_unavailable_score_errors_no_overwrite(tmp_path, monkeypatch):
+    """F5: EVAL_LOCK_UNAVAILABLE from acquire_eval_lock → score raises; score file not changed."""
+    ready(tmp_path, monkeypatch)
+    complete(tmp_path)
+    evaluation.score({})
+    score_before = score_path().read_bytes()
+    before = snapshot(tmp_path)
+
+    def lock_fail(*a, **kw):
+        raise AnnotationError("EVAL_LOCK_UNAVAILABLE")
+
+    monkeypatch.setattr(evaluation, "acquire_eval_lock", lock_fail)
+    with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+        evaluation.score({})
+    assert score_path().read_bytes() == score_before
+    assert snapshot(tmp_path) == before
