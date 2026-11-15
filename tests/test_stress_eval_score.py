@@ -589,14 +589,17 @@ class TestT38YoSidecarFpCheck:
     ):
         """Integration: YO_EVIDENCE_CONFLICT detected via public score() in both row orderings.
 
+        Both rows share the same source_key/identity/restoration_fp (internally consistent);
+        they differ only in yo_correct and labeler. TSV is written with explicit row order
+        (bypassing serialize_yo_evidence sorting) so both [y,n] and [n,y] orderings are tested.
         Verifies that score, gold ledger, and YO-evidence journal are all byte-identical
-        after the error — no partial writes to any protected file.
+        after the failed score() call — no partial writes to any protected file.
         """
         ctx, mock_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
         gold_path = paths.TEXT / "stress_gold.tsv"
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
 
-        # Establish a COMPLETE score baseline with a non-conflicting sidecar entry.
+        # Establish a COMPLETE score baseline with a single non-conflicting sidecar entry.
         yo_path.write_text(
             evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct=first)]),
             encoding="utf-8",
@@ -604,26 +607,33 @@ class TestT38YoSidecarFpCheck:
         result = evaluation.score({})
         assert result["status"] == "COMPLETE"
 
-        # Snapshot all protected-file bytes before the conflicting call.
+        # Snapshot score and gold before the conflicting call.
         score_before = score_path().read_bytes()
         gold_before = gold_path.read_bytes()
-        yo_before = yo_path.read_bytes()
 
-        # Write two valid rows with the same fp but opposite verdicts.
-        yo_path.write_text(
-            evaluation.serialize_yo_evidence([
-                _yo_sidecar_row(mock_fp, source_key="01_test|0|0", yo_correct=first),
-                _yo_sidecar_row(mock_fp, source_key="01_test|0|1", yo_correct=second),
-            ]),
-            encoding="utf-8",
-        )
+        # Build two internally consistent rows: same source_key/identity/fp, different yo_correct.
+        # Different labeler makes each row distinct; both pass validate_yo_row individually.
+        row_first = {**_yo_sidecar_row(mock_fp, yo_correct=first), "labeler": "labeler-a"}
+        row_second = {**_yo_sidecar_row(mock_fp, yo_correct=second), "labeler": "labeler-b"}
+        assert evaluation.validate_yo_row(row_first)
+        assert evaluation.validate_yo_row(row_second)
+
+        # Write TSV with explicit ordering (not serialize_yo_evidence which sorts rows).
+        tsv_lines = ["\t".join(evaluation.YO_FIELDS)]
+        for row in (row_first, row_second):
+            tsv_lines.append("\t".join(row[f] for f in evaluation.YO_FIELDS))
+        yo_path.write_text("\n".join(tsv_lines) + "\n", encoding="utf-8")
+
+        # Snapshot YO-journal bytes AFTER writing the conflicting content, before score().
+        yo_conflict_before = yo_path.read_bytes()
+
         with pytest.raises(AnnotationError, match="YO_EVIDENCE_CONFLICT"):
             evaluation.score({})
 
-        # All three protected files must remain byte-identical.
+        # All three protected files must remain byte-identical after the failed call.
         assert score_path().read_bytes() == score_before, "score file must not change on conflict"
         assert gold_path.read_bytes() == gold_before, "gold ledger must not change on conflict"
-        assert yo_path.read_bytes() != yo_before  # we wrote the conflicting sidecar above
+        assert yo_path.read_bytes() == yo_conflict_before, "YO-journal must not change on conflict"
 
 
 class TestT41YoSidecarMutation:
