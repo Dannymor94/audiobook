@@ -752,15 +752,51 @@ def _present(value):
     return value
 
 
-def _yo_fp_from_sidecar_entry(entry, sources):
-    """Verify restoration_fp using pre-respell candidate and indices from sidecar (not form_synth)."""
-    from audiobook.stress_yo_observer import restoration_fp as _rfp
-    resolved = sources.resolve(entry["source_key"])
+def _yo_observe_key(occ, sources, config):
+    """Call stress_yo_observer.observe_su for one occurrence (monkeypatchable in tests)."""
+    from audiobook.stress_yo_observer import observe_su, UNSUPPORTED_obs
+    resolved = sources.resolve(occ.source_key)
     if resolved is None:
-        return None
-    identity = resolved[0]
-    indices = [int(i) for i in entry["restored_vowel_indices"].split("|")]
-    return _rfp(identity, entry["restored_form_pre_respell"], indices)
+        return UNSUPPORTED_obs("SOURCE_NOT_FOUND")
+    identity, raw_text, _ = resolved
+    return observe_su(
+        source_token=occ.form_source,
+        raw_text=raw_text,
+        token_idx=occ.su_token_index if occ.su_token_index is not None else 0,
+        config=config or {},
+        yo_map={},
+        table={},
+        sentinel="",
+        phrase=None,
+        open_end=False,
+        source_identity=identity,
+    )
+
+
+def _yo_check(keys, by_key, context, config, yo_data_before):
+    """Count missing yo verdicts by calling observer for each selected key (ADR §4.4).
+
+    Missing journal is treated as empty. UNSUPPORTED observation raises ERROR.
+    YO_EVALUABLE = RESTORED_obs ∧ F1-exclusions; verdict lookup by restoration_fp.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs, RESTORED_obs
+    yo_entries = parse_yo_evidence(yo_data_before.decode("utf-8")) if yo_data_before else []
+    verdict_by_fp = {row["restoration_fp"]: row for row in yo_entries}
+    yo_missing = 0
+    for key in keys:
+        occ = by_key.get(key)
+        if occ is None:
+            continue
+        obs = _yo_observe_key(occ, context.sources, config)
+        if isinstance(obs, UNSUPPORTED_obs):
+            _error("YO_OBSERVER_UNSUPPORTED")
+        if not isinstance(obs, RESTORED_obs):
+            continue
+        if occ.f1_rule is not None or occ.f1_flag != "none":
+            continue
+        if obs.fp not in verdict_by_fp:
+            yo_missing += 1
+    return yo_missing
 
 
 def score(config):
@@ -784,31 +820,8 @@ def score(config):
     keys = record["keys"]
     by_key = {occ.source_key: occ for occ in context.rows}
     missing = sum(key not in state.active for key in keys)
-    # T38/T41: dual ledger freshness; sidecar membership defines RESTORED → YO_EVALUABLE (ADR §4.4)
-    yo_missing = 0
-    if yo_data_before is not None:
-        # Sidecar present: sidecar keys are RESTORED_obs occurrences; verify fp integrity
-        yo_by_key = {row["source_key"]: row
-                     for row in parse_yo_evidence(yo_data_before.decode("utf-8"))}
-        for key in keys:
-            occ = by_key.get(key)
-            if occ is None or occ.f1_rule is not None or occ.f1_flag != "none":
-                continue
-            if key not in yo_by_key:
-                continue  # NONE_obs: not YO_EVALUABLE, no verdict needed
-            entry = yo_by_key[key]
-            expected_fp = _yo_fp_from_sidecar_entry(entry, context.sources)
-            if expected_fp is None or expected_fp != entry["restoration_fp"]:
-                yo_missing += 1
-    else:
-        # Sidecar absent: T38a — yo_changed as conservative proxy for RESTORED_obs
-        # Only keys with an active gold label (others already counted in missing)
-        for key in keys:
-            if key not in state.active:
-                continue
-            occ = by_key.get(key)
-            if occ is not None and yo_changed(occ) and occ.f1_rule is None and occ.f1_flag == "none":
-                yo_missing += 1
+    # T38/T41: call observer per key; absent journal = empty; UNSUPPORTED → ERROR (ADR §4.4)
+    yo_missing = _yo_check(keys, by_key, context, config, yo_data_before)
     counts = {"selected": len(keys), "active_labels": len(keys) - missing,
               "missing_labels": missing, "missing_yo_verdicts": yo_missing,
               "stale_gold": len(state.stale),

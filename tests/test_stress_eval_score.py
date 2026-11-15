@@ -130,9 +130,7 @@ def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, corre
     monkeypatch.setattr(evaluation, "_load_context", lambda _: predictions(context_for(units, synth={"Елка.": "Ёлка."})))
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
-    # Sidecar present (empty): key not in yo_by_key → not YO_EVALUABLE → yo_missing=0
-    (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
-        "\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
+    # config={} → yo_restore=False → observer returns NONE_obs → not YO_EVALUABLE → yo_missing=0
     result = evaluation.score({})
     if label == "yo":
         # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
@@ -184,9 +182,7 @@ def test_adapter_mapping_y_property_override_and_population_weights(tmp_path, mo
     evaluation.sample({})
     annotated = [labeled(row, yo_correct="n" if row["form_source"] == "Елка" else "na") for row in todo_rows()]
     evaluation.merge({}, write_input(tmp_path, annotated))
-    # Sidecar present (empty): key not in yo_by_key → not YO_EVALUABLE → yo_missing=0
-    (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
-        "\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
+    # config={} → yo_restore=False → observer returns NONE_obs → not YO_EVALUABLE → yo_missing=0
     result = evaluation.score({})
     metrics = result["metrics"]["overall"]
     assert (metrics["suggestion_precision"]["k"], metrics["suggestion_precision"]["n"]) == (0, 1)
@@ -386,22 +382,36 @@ class TestT29YoEvaluableNoLabel:
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_labels"] == 1
-        assert result["counts"]["missing_yo_verdicts"] == 0  # not in state.active → not counted
+        assert result["counts"]["missing_yo_verdicts"] == 0  # config={} → NONE_obs → not YO_EVALUABLE
         assert result["metrics"] is None
 
 
 class TestT38YoSidecarFpCheck:
-    def _setup_yo_evaluable(self, tmp_path, monkeypatch, form_synth="Ёлка."):
+    """Oracle tests for YO-part of score(): observer-based YO_EVALUABLE, verdict by restoration_fp."""
+
+    def _setup_yo_evaluable(self, tmp_path, monkeypatch, form_synth="Ёлка.", merge_gold=True):
+        """Set up a YO-evaluable occurrence and monkeypatch _yo_observe_key to return RESTORED_obs.
+
+        Returns (ctx, mock_fp) where mock_fp is the fp the monkeypatched observer returns.
+        YO_EVALUABLE: observer returns RESTORED_obs ∧ f1_rule=None ∧ f1_flag='none'.
+        """
         units = [{"type": "text", "text": "Елка."}]
         setup_book(tmp_path, monkeypatch, units)
         ctx = predictions(context_for(units, synth={"Елка.": form_synth}))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
         evaluation.sample({})
-        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
-        return ctx
+        if merge_gold:
+            evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
+        occ = next(iter(ctx.rows))
+        from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+        return ctx, mock_fp
 
     def _make_sidecar_with_fp(self, fp, pre_respell="Ёлка", indices="0"):
-        """Return a valid sidecar row dict with given fp and pre-respell form."""
+        """Return a valid sidecar row dict with given restoration_fp."""
         h = hashlib.sha256(b"test").hexdigest()
         return {
             "schema_version": "yo-evidence/1",
@@ -423,37 +433,45 @@ class TestT38YoSidecarFpCheck:
         }
 
     def test_T38a_sidecar_absent_yo_evaluable_is_incomplete(self, tmp_path, monkeypatch):
-        """T38a: sidecar absent when |Y|>0 (yo_changed occ, f1 exclusions pass) → INCOMPLETE."""
+        """T38a: journal absent when |Y|>0 → treated as empty → no verdict → INCOMPLETE rc 2."""
         self._setup_yo_evaluable(tmp_path, monkeypatch)
-        # No sidecar written → yo_data_before=None → conservative yo_changed path
+        # No sidecar file → yo_data_before=None → treated as empty → verdict_by_fp={}
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 1
+        from audiobook import __main__ as _main_mod
+        monkeypatch.setattr(_main_mod, "load_config", lambda: {})
+        assert evaluation.main(["score"]) == 2
+
+    def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
+        """T38b (scenario а): journal has entry for candidate A, current obs gives fp B → INCOMPLETE."""
+        ctx, current_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
+        # Sidecar records stale_fp (candidate A) ≠ current_fp (candidate B) → lookup fails
+        stale_fp = hashlib.sha256(b"stale_candidate_A").hexdigest()
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(stale_fp)]),
+                           encoding="utf-8")
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 1
 
-    def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
-        """T38b: sidecar entry has corrupted restoration_fp (tampered) → INCOMPLETE."""
-        self._setup_yo_evaluable(tmp_path, monkeypatch)
-        # Store a tampered fp (not computable from sidecar's pre_respell "Ёлка"):
-        # _yo_fp_from_sidecar_entry will compute _rfp(identity, "Ёлка", [0]) ≠ tampered_fp → detection
-        tampered_fp = hashlib.sha256(b"tampered_fingerprint").hexdigest()
+    def test_sidecar_present_no_entry_for_restored_key_is_incomplete(self, tmp_path, monkeypatch):
+        """(б): journal present with entries for other fps, none matching current obs → INCOMPLETE."""
+        ctx, current_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
+        other_fp = hashlib.sha256(b"other_key_fp").hexdigest()
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence(
-            [self._make_sidecar_with_fp(tampered_fp, pre_respell="Ёлка")]),
-            encoding="utf-8")
+        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(other_fp)]),
+                           encoding="utf-8")
+        # verdict_by_fp = {other_fp: row}, current_fp not in it → yo_missing=1
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 1
 
     def test_sidecar_present_correct_fp_is_complete(self, tmp_path, monkeypatch):
-        """T38c: sidecar present with correct restoration_fp (pre-respell) → COMPLETE."""
-        ctx = self._setup_yo_evaluable(tmp_path, monkeypatch)
-        occ = next(iter(ctx.rows))
-        from audiobook.stress_yo_observer import restoration_fp as _rfp
-        resolved = ctx.sources.resolve(occ.source_key)
-        identity = resolved[0]
-        actual_fp = _rfp(identity, "Ёлка", [0])  # pre-respell: "Ёлка", е→ё at index 0
+        """T38c: sidecar has entry with fp matching current observation → COMPLETE."""
+        ctx, current_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(actual_fp)]),
+        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(current_fp)]),
                            encoding="utf-8")
         result = evaluation.score({})
         assert result["status"] == "COMPLETE"
@@ -461,36 +479,53 @@ class TestT38YoSidecarFpCheck:
         assert result["metrics"] is not None
 
     def test_fp_uses_pre_respell_form_not_form_synth(self, tmp_path, monkeypatch):
-        """T38 extra: pre-respell form in sidecar ≠ form_synth; fp computed from pre-respell → COMPLETE."""
-        # Scenario: observer restored "Ёлку" (pre-respell for a different inflection);
-        # respell then produced "Ёлка" (form_synth). yo_changed=True (without_yo matches).
-        # Sidecar stores "Ёлку" and its fp. Code must read pre_respell from sidecar, NOT form_synth.
-        ctx = self._setup_yo_evaluable(tmp_path, monkeypatch, form_synth="Ёлка.")
-        occ = next(iter(ctx.rows))
-        from audiobook.stress_yo_observer import restoration_fp as _rfp
-        resolved = ctx.sources.resolve(occ.source_key)
-        identity = resolved[0]
-        # Sidecar entry: pre_respell="Ёлку" (not form_synth "Ёлка") with matching fp
-        pre_respell_fp = _rfp(identity, "Ёлку", [0])
+        """T38d: form_synth ≠ pre-respell; observer's fp (pre-respell based) used for lookup → COMPLETE."""
+        # Observer monkeypatched to return RESTORED_obs("Ёлка", fp=mock_fp) regardless of form_synth.
+        # Score() must use the observer's fp for sidecar lookup; form_synth must not be consulted.
+        ctx, pre_respell_fp = self._setup_yo_evaluable(tmp_path, monkeypatch, form_synth="Ёлка.")
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence(
-            [self._make_sidecar_with_fp(pre_respell_fp, pre_respell="Ёлку")]),
-            encoding="utf-8")
+        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(pre_respell_fp)]),
+                           encoding="utf-8")
         result = evaluation.score({})
-        # Code reads "Ёлку" from sidecar → fp matches → COMPLETE (using form_synth "Ёлка" would not match)
         assert result["status"] == "COMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 0
 
     def test_yo_from_respell_only_needs_no_verdict(self, tmp_path, monkeypatch):
-        """T38 extra: ё introduced only by respell (NONE_obs, no sidecar entry) → COMPLETE."""
-        # form_synth has ё (from respell), but observer returned NONE_obs → no sidecar entry
-        self._setup_yo_evaluable(tmp_path, monkeypatch)
-        # Sidecar present but empty (no entries) → key NOT in yo_by_key → not YO_EVALUABLE
-        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text("\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
+        """T38e: form_synth has ё (from respell only); real observer with config={} → NONE_obs → COMPLETE."""
+        # Real observer (not monkeypatched): config={} → yo_restore=False → NONE_obs → not YO_EVALUABLE
+        units = [{"type": "text", "text": "Елка."}]
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        evaluation.sample({})
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
+        # No sidecar, real observer → NONE_obs → yo_missing=0 → COMPLETE
         result = evaluation.score({})
         assert result["status"] == "COMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 0
+
+    def test_yo_evaluable_independent_of_gold_label(self, tmp_path, monkeypatch):
+        """(в): missing_yo_verdicts is counted regardless of active gold stress label."""
+        units = [{"type": "text", "text": "Елка."}]
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        evaluation.sample({})
+        occ = next(iter(ctx.rows))
+        from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+        # WITHOUT gold label: both missing_labels and missing_yo_verdicts are 1
+        result_no_gold = evaluation.score({})
+        assert result_no_gold["counts"]["missing_yo_verdicts"] == 1
+        assert result_no_gold["counts"]["missing_labels"] == 1
+        # WITH gold label: missing_labels=0 but missing_yo_verdicts=1 (Y is same)
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
+        result_with_gold = evaluation.score({})
+        assert result_with_gold["counts"]["missing_yo_verdicts"] == 1
+        assert result_with_gold["counts"]["missing_labels"] == 0
 
 
 class TestT41YoSidecarMutation:
@@ -545,3 +580,51 @@ class TestT42Oracles:
         """T42c: Wilson 95% lower bound matches ADR §7 reference values (4-decimal rounding)."""
         lo, _ = stress_metrics.wilson_interval(k, n)
         assert round(lo, 4) == expected_lower
+
+
+# (д) AST guard: _yo_check body must not access form_synth or yo_changed; must call _yo_observe_key.
+# score() must call _yo_check. _yo_observe_key must call observe_su.
+def test_score_yo_part_ast_guard():
+    import ast, inspect, textwrap
+    import audiobook.stress_eval as _se
+
+    def _func_body_src(fn):
+        src = inspect.getsource(fn)
+        return textwrap.dedent(src)
+
+    # _yo_check must NOT access form_synth or yo_changed
+    yo_check_src = _func_body_src(_se._yo_check)
+    yo_check_tree = ast.parse(yo_check_src)
+    names_in_yo_check = {n.id for n in ast.walk(yo_check_tree) if isinstance(n, ast.Name)}
+    attr_in_yo_check = {n.attr for n in ast.walk(yo_check_tree) if isinstance(n, ast.Attribute)}
+    forbidden = names_in_yo_check | attr_in_yo_check
+    assert "form_synth" not in forbidden, "_yo_check must not access form_synth"
+    assert "yo_changed" not in forbidden, "_yo_check must not access yo_changed"
+
+    # _yo_check must call _yo_observe_key
+    calls_in_yo_check = [
+        n.func.id if isinstance(n.func, ast.Name) else
+        (n.func.attr if isinstance(n.func, ast.Attribute) else "")
+        for n in ast.walk(yo_check_tree) if isinstance(n, ast.Call)
+    ]
+    assert "_yo_observe_key" in calls_in_yo_check, "_yo_check must call _yo_observe_key"
+
+    # score() must call _yo_check (search for the call in score body)
+    score_src = _func_body_src(_se.score)
+    score_tree = ast.parse(score_src)
+    score_calls = [
+        n.func.id if isinstance(n.func, ast.Name) else
+        (n.func.attr if isinstance(n.func, ast.Attribute) else "")
+        for n in ast.walk(score_tree) if isinstance(n, ast.Call)
+    ]
+    assert "_yo_check" in score_calls, "score() must call _yo_check"
+
+    # _yo_observe_key must call observe_su
+    observe_key_src = _func_body_src(_se._yo_observe_key)
+    observe_key_tree = ast.parse(observe_key_src)
+    observe_key_calls = [
+        n.func.id if isinstance(n.func, ast.Name) else
+        (n.func.attr if isinstance(n.func, ast.Attribute) else "")
+        for n in ast.walk(observe_key_tree) if isinstance(n, ast.Call)
+    ]
+    assert "observe_su" in observe_key_calls, "_yo_observe_key must call observe_su"
