@@ -130,12 +130,18 @@ def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, corre
     monkeypatch.setattr(evaluation, "_load_context", lambda _: predictions(context_for(units, synth={"Елка.": "Ёлка."})))
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
+    # Sidecar present (empty): key not in yo_by_key → not YO_EVALUABLE → yo_missing=0
+    (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+        "\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
     result = evaluation.score({})
     if label == "yo":
         # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
         # Selected key has no active label → INCOMPLETE; metrics=null; CLI rc=2.
         assert result["status"] == "INCOMPLETE"
         assert result["metrics"] is None
+        from audiobook import __main__ as _main_mod
+        monkeypatch.setattr(_main_mod, "load_config", lambda: {})
+        assert evaluation.main(["score"]) == 2
     else:
         assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
         assert result["metrics"]["overall"]["yo_precision"]["n"] == 1
@@ -178,6 +184,9 @@ def test_adapter_mapping_y_property_override_and_population_weights(tmp_path, mo
     evaluation.sample({})
     annotated = [labeled(row, yo_correct="n" if row["form_source"] == "Елка" else "na") for row in todo_rows()]
     evaluation.merge({}, write_input(tmp_path, annotated))
+    # Sidecar present (empty): key not in yo_by_key → not YO_EVALUABLE → yo_missing=0
+    (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+        "\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
     result = evaluation.score({})
     metrics = result["metrics"]["overall"]
     assert (metrics["suggestion_precision"]["k"], metrics["suggestion_precision"]["n"]) == (0, 1)
@@ -325,29 +334,6 @@ with MonkeyPatch.context() as patch:
 # I3 oracles: T11, T12, T13, T29, T38, T41, T42 (ADR §5, §7)
 # ---------------------------------------------------------------------------
 
-def _make_yo_sidecar_row(restoration_fp):
-    """Build a minimal valid YO sidecar row for synthetic tests (T38/T41)."""
-    h = hashlib.sha256(b"test").hexdigest()
-    return {
-        "schema_version": "yo-evidence/1",
-        "source_key": "01_test|0|0",
-        "form_source": "Елка",
-        "unit_text_sha256": h,
-        "unit_kind": "text",
-        "context_sha256": h,
-        "restored_form_pre_respell": "Ёлка",
-        "restored_vowel_indices": "0",
-        "observation_contract_version": "yo-observation/1",
-        "restoration_fp": restoration_fp,
-        "norm_content_sha256": h,
-        "yo_map_sha256": h,
-        "prep_config_sha256": h,
-        "yo_correct": "y",
-        "labeler": "test",
-        "date": "2026-11-15",
-    }
-
-
 class TestT11AmbiguousOnly:
     def test_ambiguous_gold_is_complete_with_inconclusive_hint(self, tmp_path, monkeypatch):
         """T11: only ambiguous labels → COMPLETE; usable_gold=0; G_hint=INCONCLUSIVE (n=0)."""
@@ -400,45 +386,111 @@ class TestT29YoEvaluableNoLabel:
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_labels"] == 1
-        assert result["counts"]["missing_yo_verdicts"] == 0  # sidecar absent → no fp check
+        assert result["counts"]["missing_yo_verdicts"] == 0  # not in state.active → not counted
         assert result["metrics"] is None
 
 
 class TestT38YoSidecarFpCheck:
-    def _setup_yo_evaluable(self, tmp_path, monkeypatch):
+    def _setup_yo_evaluable(self, tmp_path, monkeypatch, form_synth="Ёлка."):
         units = [{"type": "text", "text": "Елка."}]
         setup_book(tmp_path, monkeypatch, units)
-        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        ctx = predictions(context_for(units, synth={"Елка.": form_synth}))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
         evaluation.sample({})
         evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
         return ctx
 
-    def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
-        """T38a: sidecar present but restoration_fp doesn't match computed occ fp → INCOMPLETE."""
+    def _make_sidecar_with_fp(self, fp, pre_respell="Ёлка", indices="0"):
+        """Return a valid sidecar row dict with given fp and pre-respell form."""
+        h = hashlib.sha256(b"test").hexdigest()
+        return {
+            "schema_version": "yo-evidence/1",
+            "source_key": "01_test|0|0",
+            "form_source": "Елка",
+            "unit_text_sha256": h,
+            "unit_kind": "text",
+            "context_sha256": h,
+            "restored_form_pre_respell": pre_respell,
+            "restored_vowel_indices": indices,
+            "observation_contract_version": "yo-observation/1",
+            "restoration_fp": fp,
+            "norm_content_sha256": h,
+            "yo_map_sha256": h,
+            "prep_config_sha256": h,
+            "yo_correct": "y",
+            "labeler": "test",
+            "date": "2026-11-15",
+        }
+
+    def test_T38a_sidecar_absent_yo_evaluable_is_incomplete(self, tmp_path, monkeypatch):
+        """T38a: sidecar absent when |Y|>0 (yo_changed occ, f1 exclusions pass) → INCOMPLETE."""
         self._setup_yo_evaluable(tmp_path, monkeypatch)
-        wrong_fp = hashlib.sha256(b"deliberately_wrong_fp").hexdigest()
-        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence([_make_yo_sidecar_row(wrong_fp)]),
-                           encoding="utf-8")
+        # No sidecar written → yo_data_before=None → conservative yo_changed path
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 1
-        assert result["metrics"] is None
+
+    def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
+        """T38b: sidecar entry has corrupted restoration_fp (tampered) → INCOMPLETE."""
+        self._setup_yo_evaluable(tmp_path, monkeypatch)
+        # Store a tampered fp (not computable from sidecar's pre_respell "Ёлка"):
+        # _yo_fp_from_sidecar_entry will compute _rfp(identity, "Ёлка", [0]) ≠ tampered_fp → detection
+        tampered_fp = hashlib.sha256(b"tampered_fingerprint").hexdigest()
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence(
+            [self._make_sidecar_with_fp(tampered_fp, pre_respell="Ёлка")]),
+            encoding="utf-8")
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 1
 
     def test_sidecar_present_correct_fp_is_complete(self, tmp_path, monkeypatch):
-        """T38b: sidecar present with correct restoration_fp → COMPLETE."""
+        """T38c: sidecar present with correct restoration_fp (pre-respell) → COMPLETE."""
         ctx = self._setup_yo_evaluable(tmp_path, monkeypatch)
         occ = next(iter(ctx.rows))
-        actual_fp = evaluation._yo_fp_from_occ(occ, ctx.sources)
-        assert actual_fp is not None, "_yo_fp_from_occ must resolve for synthetic test"
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        resolved = ctx.sources.resolve(occ.source_key)
+        identity = resolved[0]
+        actual_fp = _rfp(identity, "Ёлка", [0])  # pre-respell: "Ёлка", е→ё at index 0
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence([_make_yo_sidecar_row(actual_fp)]),
+        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(actual_fp)]),
                            encoding="utf-8")
         result = evaluation.score({})
         assert result["status"] == "COMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 0
         assert result["metrics"] is not None
+
+    def test_fp_uses_pre_respell_form_not_form_synth(self, tmp_path, monkeypatch):
+        """T38 extra: pre-respell form in sidecar ≠ form_synth; fp computed from pre-respell → COMPLETE."""
+        # Scenario: observer restored "Ёлку" (pre-respell for a different inflection);
+        # respell then produced "Ёлка" (form_synth). yo_changed=True (without_yo matches).
+        # Sidecar stores "Ёлку" and its fp. Code must read pre_respell from sidecar, NOT form_synth.
+        ctx = self._setup_yo_evaluable(tmp_path, monkeypatch, form_synth="Ёлка.")
+        occ = next(iter(ctx.rows))
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        resolved = ctx.sources.resolve(occ.source_key)
+        identity = resolved[0]
+        # Sidecar entry: pre_respell="Ёлку" (not form_synth "Ёлка") with matching fp
+        pre_respell_fp = _rfp(identity, "Ёлку", [0])
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence(
+            [self._make_sidecar_with_fp(pre_respell_fp, pre_respell="Ёлку")]),
+            encoding="utf-8")
+        result = evaluation.score({})
+        # Code reads "Ёлку" from sidecar → fp matches → COMPLETE (using form_synth "Ёлка" would not match)
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 0
+
+    def test_yo_from_respell_only_needs_no_verdict(self, tmp_path, monkeypatch):
+        """T38 extra: ё introduced only by respell (NONE_obs, no sidecar entry) → COMPLETE."""
+        # form_synth has ё (from respell), but observer returned NONE_obs → no sidecar entry
+        self._setup_yo_evaluable(tmp_path, monkeypatch)
+        # Sidecar present but empty (no entries) → key NOT in yo_by_key → not YO_EVALUABLE
+        yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+        yo_path.write_text("\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 0
 
 
 class TestT41YoSidecarMutation:

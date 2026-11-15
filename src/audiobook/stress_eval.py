@@ -752,19 +752,15 @@ def _present(value):
     return value
 
 
-def _yo_fp_from_occ(occ, sources):
-    """Simplified restoration_fp from form_synth for synthetic test purposes (ADR T38)."""
+def _yo_fp_from_sidecar_entry(entry, sources):
+    """Verify restoration_fp using pre-respell candidate and indices from sidecar (not form_synth)."""
     from audiobook.stress_yo_observer import restoration_fp as _rfp
-    resolved = sources.resolve(occ.source_key)
+    resolved = sources.resolve(entry["source_key"])
     if resolved is None:
         return None
     identity = resolved[0]
-    synth = (occ.form_synth or "").lower()
-    src = occ.form_source.lower()
-    synth_vowels = [c for c in synth if c in _VOWELS]
-    src_vowels = [c for c in src if c in _VOWELS]
-    indices = [i for i, (sv, tv) in enumerate(zip(src_vowels, synth_vowels)) if sv == "е" and tv == "ё"]
-    return _rfp(identity, occ.form_synth or "", indices)
+    indices = [int(i) for i in entry["restored_vowel_indices"].split("|")]
+    return _rfp(identity, entry["restored_form_pre_respell"], indices)
 
 
 def score(config):
@@ -788,17 +784,31 @@ def score(config):
     keys = record["keys"]
     by_key = {occ.source_key: occ for occ in context.rows}
     missing = sum(key not in state.active for key in keys)
-    # T38/T41: check YO sidecar if present; absent sidecar skips fp check (ADR §5)
+    # T38/T41: dual ledger freshness; sidecar membership defines RESTORED → YO_EVALUABLE (ADR §4.4)
     yo_missing = 0
     if yo_data_before is not None:
-        yo_by_fp = {row["restoration_fp"]: row["yo_correct"]
-                    for row in parse_yo_evidence(yo_data_before.decode("utf-8"))}
+        # Sidecar present: sidecar keys are RESTORED_obs occurrences; verify fp integrity
+        yo_by_key = {row["source_key"]: row
+                     for row in parse_yo_evidence(yo_data_before.decode("utf-8"))}
         for key in keys:
             occ = by_key.get(key)
+            if occ is None or occ.f1_rule is not None or occ.f1_flag != "none":
+                continue
+            if key not in yo_by_key:
+                continue  # NONE_obs: not YO_EVALUABLE, no verdict needed
+            entry = yo_by_key[key]
+            expected_fp = _yo_fp_from_sidecar_entry(entry, context.sources)
+            if expected_fp is None or expected_fp != entry["restoration_fp"]:
+                yo_missing += 1
+    else:
+        # Sidecar absent: T38a — yo_changed as conservative proxy for RESTORED_obs
+        # Only keys with an active gold label (others already counted in missing)
+        for key in keys:
+            if key not in state.active:
+                continue
+            occ = by_key.get(key)
             if occ is not None and yo_changed(occ) and occ.f1_rule is None and occ.f1_flag == "none":
-                fp = _yo_fp_from_occ(occ, context.sources)
-                if fp is None or fp not in yo_by_fp:
-                    yo_missing += 1
+                yo_missing += 1
     counts = {"selected": len(keys), "active_labels": len(keys) - missing,
               "missing_labels": missing, "missing_yo_verdicts": yo_missing,
               "stale_gold": len(state.stale),
