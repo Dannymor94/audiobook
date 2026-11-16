@@ -645,6 +645,7 @@ def audit_archive_compatibility(config) -> AuditResult:
     archive_missing: True iff archive file is absent at time of initial read.
     """
     def _try_read(path):
+        # Recheck only: any OS error treated as None (changed/gone/unreadable = stale).
         try:
             return path.read_bytes()
         except OSError:
@@ -653,10 +654,29 @@ def audit_archive_compatibility(config) -> AuditResult:
     gold_path = paths.TEXT / "stress_gold.tsv"
     archive_path = paths.TEXT / "stress_gold.archive.tsv"
 
-    # Phase 1: initial reads
-    gold_before = _try_read(gold_path)
-    archive_missing = not archive_path.exists()
-    archive_before = None if archive_missing else _try_read(archive_path)
+    # Phase 1: initial reads.
+    # FileNotFoundError → absent (None).  Other OSError → unreadable → immediate error.
+    try:
+        gold_before = gold_path.read_bytes()
+    except FileNotFoundError:
+        gold_before = None
+    except OSError:
+        return AuditResult(status="ERROR", code="GOLD_INVALID",
+                           gold_rows=0, archive_rows=0,
+                           archive_only_rows=0, excess_duplicates=0,
+                           archive_missing=False)
+
+    archive_missing = False
+    try:
+        archive_before = archive_path.read_bytes()
+    except FileNotFoundError:
+        archive_missing = True
+        archive_before = None
+    except OSError:
+        return AuditResult(status="ERROR", code="ARCHIVE_INVALID",
+                           gold_rows=0, archive_rows=0,
+                           archive_only_rows=0, excess_duplicates=0,
+                           archive_missing=False)
 
     # Phase 2: parse — collect errors without returning
     gold_parse_error = None

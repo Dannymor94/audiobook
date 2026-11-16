@@ -1277,6 +1277,58 @@ class TestT20AuditArchiveCompatibility:
         assert result.status == "ERROR"
         assert result.code == "ARCHIVE_AUDIT_STALE"  # staleness takes precedence
 
+    # --- T20-7g/7h: unreadable file or path-is-directory => ERROR, never PASS ---
+
+    def test_T20_7g_unreadable_archive_permission_error(self, tmp_path, monkeypatch):
+        """T20-7g: existing archive raises PermissionError => ERROR/ARCHIVE_INVALID, never PASS."""
+        import os
+        text = self._setup_text(tmp_path, monkeypatch)
+        _write_tsv(text / "stress_gold.tsv", [_gold_row()])
+        archive_path = text / "stress_gold.archive.tsv"
+        _write_tsv(archive_path, [_gold_row()])
+        archive_bytes = archive_path.read_bytes()
+        os.chmod(archive_path, 0o000)
+        try:
+            result = evaluation.audit_archive_compatibility({})
+        finally:
+            os.chmod(archive_path, 0o644)
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_INVALID"
+        assert archive_path.read_bytes() == archive_bytes  # no writes
+
+    def test_T20_7g2_unreadable_gold_permission_error(self, tmp_path, monkeypatch):
+        """T20-7g2: existing gold raises PermissionError => ERROR/GOLD_INVALID, never PASS."""
+        import os
+        text = self._setup_text(tmp_path, monkeypatch)
+        gold_path = text / "stress_gold.tsv"
+        _write_tsv(gold_path, [_gold_row()])
+        gold_bytes = gold_path.read_bytes()
+        os.chmod(gold_path, 0o000)
+        try:
+            result = evaluation.audit_archive_compatibility({})
+        finally:
+            os.chmod(gold_path, 0o644)
+        assert result.status == "ERROR"
+        assert result.code == "GOLD_INVALID"
+        assert gold_path.read_bytes() == gold_bytes  # no writes
+
+    def test_T20_7h_archive_is_directory_error(self, tmp_path, monkeypatch):
+        """T20-7h: archive path is a directory (IsADirectoryError) => ERROR/ARCHIVE_INVALID."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        _write_tsv(text / "stress_gold.tsv", [_gold_row()])
+        (text / "stress_gold.archive.tsv").mkdir()
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_INVALID"
+
+    def test_T20_7h2_gold_is_directory_error(self, tmp_path, monkeypatch):
+        """T20-7h2: gold path is a directory (IsADirectoryError) => ERROR/GOLD_INVALID."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        (text / "stress_gold.tsv").mkdir()
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "GOLD_INVALID"
+
     # --- T20-7c/7d/7e: PASS/BLOCKED/ERROR preserve ALL files incl. YO, no new files ---
 
     def _snapshot(self, path):
