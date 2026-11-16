@@ -70,7 +70,8 @@ def test_accepted_labels(tmp_path, monkeypatch, value):
 
 
 @pytest.mark.parametrize("value", ["", "yo_unstressed", "yo", "-1", "+1", "01", "٢", "2", "1.0",
-                                  "variants:0", "variants:0|0", "variants:0|2", "variants:00|1", "variants:1|"])
+                                  "variants:0", "variants:0|0", "variants:0|2", "variants:00|1", "variants:1|",
+                                  "variants:1|0"])
 def test_invalid_labels_rejected(tmp_path, monkeypatch, value):
     setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
@@ -126,14 +127,18 @@ def test_blank_and_partially_filled_annotations(tmp_path, monkeypatch):
 def test_wire_header_columns_newlines_and_canonical_variants(tmp_path, monkeypatch):
     setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
-    annotated = labeled(todo_rows()[0], "variants:1|0")
+    # K=1: single valid stress index; variants:0|1 accepted as-is (strict, no silent sort)
+    annotated = labeled(todo_rows()[0], "0")
     canonical = evaluation.serialize_gold([annotated])
-    assert evaluation.parse_gold(canonical)[0]["gold_vowel"] == "variants:0|1"
+    assert evaluation.parse_gold(canonical)[0]["gold_vowel"] == "0"
     assert evaluation.serialize_gold(evaluation.parse_gold(canonical.replace("\n", "\r\n"))) == canonical
     for text in (canonical.rstrip("\n"), canonical + "\n", canonical.replace("source_key", "key", 1),
                  canonical.replace("\t", "", 1), canonical.replace("synthetic-owner", "bad\tcell")):
         with pytest.raises(AnnotationError, match="GOLD_INVALID"):
             evaluation.parse_gold(text)
+    # T15: unsorted variants is now GOLD_INVALID (no auto-sort)
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.validate_gold(labeled(todo_rows()[0], "variants:1|0"))
 
 
 @pytest.mark.parametrize("change", [{"context_sha256": "0" * 64}, {"unit_text_sha256": "0" * 64},
@@ -171,7 +176,7 @@ def test_semantic_duplicates_and_source_reversion(tmp_path, monkeypatch):
     units = setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
     row = todo_rows()[1]
-    first = labeled(row, "variants:1|0")
+    first = labeled(row, "variants:0|1")
     second = labeled(row, "variants:0|1", labeler="other-synthetic-owner", date="2026-11-14")
     gold = paths.TEXT / "stress_gold.tsv"
     gold.write_text(evaluation.serialize_gold([first, second]), encoding="utf-8")
@@ -1015,3 +1020,238 @@ class TestF1SolRegressions:
         assert fp_pos0 != fp_same_form_diff_idx
         state = self._legacy_state()
         assert len(state.legacy) == 1 and len(state.active) == 0
+
+
+# ---------------------------------------------------------------------------
+# T20: audit_archive_compatibility synthetic regression tests (S1, tests 1-8)
+# ---------------------------------------------------------------------------
+
+def _gold_row(source_key="01_test|0|0", form_source="Бета", gold_vowel="0",
+              yo_correct="na", labeler="syn", date="2026-11-16", **overrides):
+    base = {
+        "source_key": source_key,
+        "form_source": form_source,
+        "unit_text_sha256": "a" * 64,
+        "unit_kind": "text",
+        "context_sha256": "b" * 64,
+        "context": "test context",
+        "gold_vowel": gold_vowel,
+        "yo_correct": yo_correct,
+        "labeler": labeler,
+        "date": date,
+    }
+    base.update(overrides)
+    return base
+
+
+def _write_tsv(path, rows, *, allow_blank=False):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(evaluation.serialize_gold(rows, allow_blank=allow_blank), encoding="utf-8", newline="")
+
+
+class TestT20AuditArchiveCompatibility:
+    def _setup_text(self, tmp_path, monkeypatch):
+        text = tmp_path / "text"
+        text.mkdir(exist_ok=True)
+        monkeypatch.setattr(paths, "TEXT", text)
+        return text
+
+    def test_T20_1_exact_10field_match_pass(self, tmp_path, monkeypatch):
+        """T20-1: archive row exactly matches gold 10-field tuple => PASS."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        _write_tsv(text / "stress_gold.archive.tsv", [row])
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "PASS"
+        assert result.code == "OK"
+        assert result.gold_rows == 1
+        assert result.archive_rows == 1
+        assert result.archive_missing == 0
+
+    def test_T20_2_same_5field_different_human_fields_blocked(self, tmp_path, monkeypatch):
+        """T20-2: same 5-field identity, different gold_vowel/labeler/date => BLOCKED."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        gold_row = _gold_row(gold_vowel="0")
+        archive_row = _gold_row(gold_vowel="1")  # same 5-field, different gold_vowel
+        _write_tsv(text / "stress_gold.tsv", [gold_row])
+        _write_tsv(text / "stress_gold.archive.tsv", [archive_row])
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "BLOCKED"
+        assert result.code == "ARCHIVE_COMPAT_BLOCKED"
+        assert result.archive_missing == 1
+        assert result.excess_duplicates == 1
+
+    def test_T20_3_excess_duplicates_in_archive_blocked(self, tmp_path, monkeypatch):
+        """T20-3: archive has 3 copies of a row, gold has 1 => BLOCKED (2 missing)."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        # Write archive with 3 copies of the same row (gold has only 1)
+        row_line = "\t".join(row[f] for f in evaluation.GOLD_FIELDS) + "\n"
+        (text / "stress_gold.archive.tsv").write_text(
+            "\t".join(evaluation.GOLD_FIELDS) + "\n" + row_line * 3,
+            encoding="utf-8", newline="",
+        )
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "BLOCKED"
+        assert result.archive_rows == 3
+        assert result.archive_missing == 2  # gold has 1, archive has 3: 2 excess
+        assert result.excess_duplicates == 1
+
+    def test_T20_4_duplicate_within_gold_bounds_pass(self, tmp_path, monkeypatch):
+        """T20-4: archive has 2 copies of a row, gold has 2 => PASS."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        row2 = _gold_row(labeler="other-syn", date="2026-11-15")
+        # Both rows have the same 10-field? No: labeler differs. So 2 distinct tuples.
+        # gold has [row, row2], archive has [row, row2] → PASS.
+        _write_tsv(text / "stress_gold.tsv", [row, row2])
+        _write_tsv(text / "stress_gold.archive.tsv", [row, row2])
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "PASS"
+        assert result.archive_rows == 2
+        assert result.archive_missing == 0
+
+    def test_T20_5_bad_header_archive_invalid(self, tmp_path, monkeypatch):
+        """T20-5: bad archive header => ARCHIVE_INVALID."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        _write_tsv(text / "stress_gold.tsv", [_gold_row()])
+        (text / "stress_gold.archive.tsv").write_text("bad_header\n", encoding="utf-8", newline="")
+        from audiobook.unitmap import AnnotationError as AE
+        with pytest.raises(AE, match="ARCHIVE_INVALID"):
+            evaluation.audit_archive_compatibility({})
+
+    def test_T20_5b_invalid_utf8_archive_invalid(self, tmp_path, monkeypatch):
+        """T20-5b: invalid UTF-8 in archive => ARCHIVE_INVALID."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        _write_tsv(text / "stress_gold.tsv", [_gold_row()])
+        (text / "stress_gold.archive.tsv").write_bytes(b"\xff\xfe bad bytes\n")
+        from audiobook.unitmap import AnnotationError as AE
+        with pytest.raises(AE, match="ARCHIVE_INVALID"):
+            evaluation.audit_archive_compatibility({})
+
+    def test_T20_6_missing_archive_pass_no_file_created(self, tmp_path, monkeypatch):
+        """T20-6: archive absent => PASS, no file created."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        _write_tsv(text / "stress_gold.tsv", [_gold_row()])
+        archive_path = text / "stress_gold.archive.tsv"
+        assert not archive_path.exists()
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "PASS"
+        assert result.archive_rows == 0
+        assert not archive_path.exists()
+
+    def test_T20_7_concurrent_mutation_stale(self, tmp_path, monkeypatch):
+        """T20-7: archive bytes change between parse and recheck => ARCHIVE_AUDIT_STALE."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        archive_path = text / "stress_gold.archive.tsv"
+        _write_tsv(archive_path, [row])
+        # Simulate concurrent mutation by mutating archive during parse_gold (2nd call = archive parse)
+        orig_parse = evaluation.parse_gold
+        call_count = [0]
+        def mutating_parse(text_data, **kw):
+            result = orig_parse(text_data, **kw)
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                archive_path.write_bytes(b"mutated\n")
+            return result
+        monkeypatch.setattr(evaluation, "parse_gold", mutating_parse)
+        from audiobook.unitmap import AnnotationError as AE
+        with pytest.raises(AE, match="ARCHIVE_AUDIT_STALE"):
+            evaluation.audit_archive_compatibility({})
+
+    def test_T20_7b_pass_preserves_all_files(self, tmp_path, monkeypatch):
+        """T20-7b: PASS preserves gold/archive bytes (no writes)."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        _write_tsv(text / "stress_gold.archive.tsv", [row])
+        gold_before = (text / "stress_gold.tsv").read_bytes()
+        archive_before = (text / "stress_gold.archive.tsv").read_bytes()
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "PASS"
+        assert (text / "stress_gold.tsv").read_bytes() == gold_before
+        assert (text / "stress_gold.archive.tsv").read_bytes() == archive_before
+
+    def test_T20_8_t19_rebuild_independent_of_archive(self, tmp_path, monkeypatch):
+        """T20-8: T19 rebuild_archive is byte-deterministic regardless of prior archive state."""
+        units = setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        row = labeled(todo_rows()[1])
+        evaluation.merge({}, write_input(tmp_path, [row]))
+        units[0]["text"] = "Дельта."
+        evaluation.sample({})
+        archive = paths.TEXT / "stress_gold.archive.tsv"
+        archive_bytes_1 = archive.read_bytes()
+        # Corrupt the archive with archive-only data, then rebuild.
+        archive.write_text("corrupted-state\n", encoding="utf-8")
+        evaluation.sample({})
+        archive_bytes_2 = archive.read_bytes()
+        assert archive_bytes_1 == archive_bytes_2
+
+
+# ---------------------------------------------------------------------------
+# T15: strict variants synthetic regression tests (S1, tests 9-13)
+# ---------------------------------------------------------------------------
+
+class TestT15StrictVariants:
+    def _row(self, gold_vowel, **kw):
+        return _gold_row(gold_vowel=gold_vowel, **kw)
+
+    def test_T15_9_unsorted_variants_gold_invalid(self):
+        """T15-9: unsorted variants:1|0 => GOLD_INVALID."""
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.validate_gold(self._row("variants:1|0"))
+
+    def test_T15_10a_duplicate_indices_gold_invalid(self):
+        """T15-10a: variants:0|0 (duplicate index) => GOLD_INVALID."""
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.validate_gold(self._row("variants:0|0"))
+
+    def test_T15_10b_out_of_range_index_gold_invalid(self):
+        """T15-10b: variants:0|9 out of range for 'Бета' (2 vowels) => GOLD_INVALID."""
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.validate_gold(self._row("variants:0|9"))
+
+    def test_T15_10c_noncanonical_leading_zero_gold_invalid(self):
+        """T15-10c: variants:00|1 (noncanonical) => GOLD_INVALID."""
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.validate_gold(self._row("variants:00|1"))
+
+    def test_T15_11_strict_ascending_in_range_accepted(self):
+        """T15-11: variants:0|1 strictly ascending and in-range => accepted unchanged."""
+        result = evaluation.validate_gold(self._row("variants:0|1"))
+        assert result["gold_vowel"] == "variants:0|1"
+
+    def test_T15_12_noncanonical_historical_gold_error_before_merge(self, tmp_path, monkeypatch):
+        """T15-12: noncanonical variants in historical gold => GOLD_INVALID before any write in audit."""
+        text = tmp_path / "text"
+        text.mkdir()
+        monkeypatch.setattr(paths, "TEXT", text)
+        # Write a gold file with unsorted variants (bypassing validate_gold)
+        bad_row = evaluation.GOLD_FIELDS
+        bad_tsv = ("\t".join(evaluation.GOLD_FIELDS) + "\n"
+                   + "01_test|0|0\tБета\t" + "a" * 64 + "\ttext\t" + "b" * 64
+                   + "\tctx\tvariants:1|0\tna\tsyn\t2026-11-16\n")
+        (text / "stress_gold.tsv").write_text(bad_tsv, encoding="utf-8", newline="")
+        from audiobook.unitmap import AnnotationError as AE
+        with pytest.raises(AE, match="GOLD_INVALID"):
+            evaluation.audit_archive_compatibility({})
+
+    def test_T15_12b_noncanonical_in_archive_error_before_merge(self, tmp_path, monkeypatch):
+        """T15-12b: noncanonical variants in archive => ARCHIVE_INVALID in audit."""
+        text = tmp_path / "text"
+        text.mkdir()
+        monkeypatch.setattr(paths, "TEXT", text)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        bad_tsv = ("\t".join(evaluation.GOLD_FIELDS) + "\n"
+                   + "01_test|0|0\tБета\t" + "a" * 64 + "\ttext\t" + "b" * 64
+                   + "\tctx\tvariants:1|0\tna\tsyn\t2026-11-16\n")
+        (text / "stress_gold.archive.tsv").write_text(bad_tsv, encoding="utf-8", newline="")
+        from audiobook.unitmap import AnnotationError as AE
+        with pytest.raises(AE, match="ARCHIVE_INVALID"):
+            evaluation.audit_archive_compatibility({})

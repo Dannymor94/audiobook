@@ -157,7 +157,7 @@ def test_complete_ambiguous_human_gold_never_considered_correct(tmp_path, monkey
     assert not result["gates"]["hint_allows_ordering_only"]
 
 
-@pytest.mark.parametrize("label,correct", [("0", True), ("1", False), ("variants:1|0", True), ("yo", True)])
+@pytest.mark.parametrize("label,correct", [("0", True), ("1", False), ("variants:0|1", True), ("yo", True)])
 def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, correct):
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)

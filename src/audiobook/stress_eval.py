@@ -535,9 +535,10 @@ def validate_gold(row, occ=None, *, allow_blank=False, historical=False, allow_n
         indices = [int(value) for value in values]
     except ValueError:
         _error("GOLD_INVALID")
-    if len(set(indices)) != len(indices) or any(index >= vowel_count(row["form_source"]) for index in indices):
+    if (len(set(indices)) != len(indices) or indices != sorted(indices)
+            or any(index >= vowel_count(row["form_source"]) for index in indices)):
         _error("GOLD_INVALID")
-    result["gold_vowel"] = "variants:" + "|".join(map(str, sorted(indices))) if label.startswith("variants:") else label
+    result["gold_vowel"] = label
     return result
 
 
@@ -619,6 +620,70 @@ def inspect_ledger(rows, context):
         else:
             active[key] = row
     return GoldState(active, tuple(stale), duplicates, tuple(legacy_rows))
+
+
+@dataclass(frozen=True)
+class AuditResult:
+    status: str
+    code: str
+    gold_rows: int
+    archive_rows: int
+    archive_only_rows: int
+    excess_duplicates: int
+    archive_missing: int
+
+
+def audit_archive_compatibility(config) -> AuditResult:
+    """Read-only multiset audit: archive ⊆ gold (exact 10-field tuples).
+
+    Explicit invocation only. No lock, no writes, no context/generation load.
+    T15: parse_gold rejects noncanonical variants → GOLD_INVALID / ARCHIVE_INVALID.
+    """
+    gold_path = paths.TEXT / "stress_gold.tsv"
+    archive_path = paths.TEXT / "stress_gold.archive.tsv"
+
+    gold_before = gold_path.read_bytes() if gold_path.exists() else None
+    if gold_before is None:
+        gold_rows_list: list = []
+    else:
+        try:
+            gold_rows_list = parse_gold(gold_before.decode("utf-8"))
+        except UnicodeError:
+            _error("GOLD_INVALID")
+
+    archive_before = archive_path.read_bytes() if archive_path.exists() else None
+    if archive_before is None:
+        archive_rows_list: list = []
+    else:
+        try:
+            archive_rows_list = parse_gold(archive_before.decode("utf-8"))
+        except (UnicodeError, AnnotationError):
+            _error("ARCHIVE_INVALID")
+
+    gold_after = gold_path.read_bytes() if gold_path.exists() else None
+    archive_after = archive_path.read_bytes() if archive_path.exists() else None
+    if gold_after != gold_before or archive_after != archive_before:
+        _error("ARCHIVE_AUDIT_STALE")
+
+    gold_ctr: Counter = Counter(tuple(row[f] for f in GOLD_FIELDS) for row in gold_rows_list)
+    archive_ctr: Counter = Counter(tuple(row[f] for f in GOLD_FIELDS) for row in archive_rows_list)
+
+    archive_only_rows = sum(1 for t in archive_ctr if gold_ctr[t] == 0)
+    excess_duplicates = sum(1 for t, ac in archive_ctr.items() if ac > gold_ctr[t])
+    archive_missing = sum(max(0, ac - gold_ctr[t]) for t, ac in archive_ctr.items())
+
+    if archive_missing:
+        return AuditResult(
+            status="BLOCKED", code="ARCHIVE_COMPAT_BLOCKED",
+            gold_rows=len(gold_rows_list), archive_rows=len(archive_rows_list),
+            archive_only_rows=archive_only_rows, excess_duplicates=excess_duplicates,
+            archive_missing=archive_missing,
+        )
+    return AuditResult(
+        status="PASS", code="OK",
+        gold_rows=len(gold_rows_list), archive_rows=len(archive_rows_list),
+        archive_only_rows=0, excess_duplicates=0, archive_missing=0,
+    )
 
 
 def _todo_row(occ, sources):
@@ -1251,6 +1316,7 @@ def main(argv=None):
     merge_src_parser.add_argument("file", type=Path, help="Локальный TSV с разметкой")
     merge_yo_parser = commands.add_parser("merge-yo", help="Добавить YO-свидетельства")
     merge_yo_parser.add_argument("file", type=Path, help="Локальный YO TSV")
+    commands.add_parser("audit-archive", help="Проверить совместимость архива с gold (только чтение)")
     args = parser.parse_args(argv)
     from audiobook.__main__ import load_config
     try:
@@ -1263,6 +1329,15 @@ def main(argv=None):
             result = merge_source(config, args.file)
         elif args.command == "merge-yo":
             result = merge_yo(config, args.file)
+        elif args.command == "audit-archive":
+            audit = audit_archive_compatibility(config)
+            displayed = {"status": audit.status, "code": audit.code,
+                         "gold_rows": audit.gold_rows, "archive_rows": audit.archive_rows,
+                         "archive_only_rows": audit.archive_only_rows,
+                         "excess_duplicates": audit.excess_duplicates,
+                         "archive_missing": audit.archive_missing}
+            print("stress-eval: " + json.dumps(displayed, ensure_ascii=False, sort_keys=True))
+            return 3 if audit.status == "BLOCKED" else 0
         else:
             result = merge(config, args.file, args.sample)
     except (AnnotationError, OSError, ValueError) as error:
