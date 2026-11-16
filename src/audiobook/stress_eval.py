@@ -630,7 +630,7 @@ class AuditResult:
     archive_rows: int
     archive_only_rows: int
     excess_duplicates: int
-    archive_missing: int
+    archive_missing: bool
 
 
 def audit_archive_compatibility(config) -> AuditResult:
@@ -638,7 +638,18 @@ def audit_archive_compatibility(config) -> AuditResult:
 
     Explicit invocation only. No lock, no writes, no context/generation load.
     T15: parse_gold rejects noncanonical variants → GOLD_INVALID / ARCHIVE_INVALID.
+    Always returns AuditResult; never raises AnnotationError.
+
+    archive_only_rows: physical archive rows with no matching gold tuple.
+    excess_duplicates: extra copies of tuples that DO exist in gold (ac > gc, gc > 0).
+    archive_missing: True iff archive file is absent (PASS by definition).
     """
+    _err = lambda code: AuditResult(
+        status="ERROR", code=code,
+        gold_rows=0, archive_rows=0,
+        archive_only_rows=0, excess_duplicates=0, archive_missing=False,
+    )
+
     gold_path = paths.TEXT / "stress_gold.tsv"
     archive_path = paths.TEXT / "stress_gold.archive.tsv"
 
@@ -648,31 +659,34 @@ def audit_archive_compatibility(config) -> AuditResult:
     else:
         try:
             gold_rows_list = parse_gold(gold_before.decode("utf-8"))
-        except UnicodeError:
-            _error("GOLD_INVALID")
+        except (UnicodeError, AnnotationError):
+            return _err("GOLD_INVALID")
 
-    archive_before = archive_path.read_bytes() if archive_path.exists() else None
+    archive_missing = not archive_path.exists()
+    archive_before = None if archive_missing else archive_path.read_bytes()
     if archive_before is None:
         archive_rows_list: list = []
     else:
         try:
             archive_rows_list = parse_gold(archive_before.decode("utf-8"))
         except (UnicodeError, AnnotationError):
-            _error("ARCHIVE_INVALID")
+            return _err("ARCHIVE_INVALID")
 
     gold_after = gold_path.read_bytes() if gold_path.exists() else None
-    archive_after = archive_path.read_bytes() if archive_path.exists() else None
+    archive_after = None if archive_missing else archive_path.read_bytes()
     if gold_after != gold_before or archive_after != archive_before:
-        _error("ARCHIVE_AUDIT_STALE")
+        return _err("ARCHIVE_AUDIT_STALE")
 
     gold_ctr: Counter = Counter(tuple(row[f] for f in GOLD_FIELDS) for row in gold_rows_list)
     archive_ctr: Counter = Counter(tuple(row[f] for f in GOLD_FIELDS) for row in archive_rows_list)
 
-    archive_only_rows = sum(1 for t in archive_ctr if gold_ctr[t] == 0)
-    excess_duplicates = sum(1 for t, ac in archive_ctr.items() if ac > gold_ctr[t])
-    archive_missing = sum(max(0, ac - gold_ctr[t]) for t, ac in archive_ctr.items())
+    # Physical archive rows with no gold match at all.
+    archive_only_rows = sum(ac for t, ac in archive_ctr.items() if gold_ctr[t] == 0)
+    # Extra copies of tuples that exist in gold but archive has more of.
+    excess_duplicates = sum(ac - gold_ctr[t] for t, ac in archive_ctr.items()
+                            if gold_ctr[t] > 0 and ac > gold_ctr[t])
 
-    if archive_missing:
+    if archive_only_rows or excess_duplicates:
         return AuditResult(
             status="BLOCKED", code="ARCHIVE_COMPAT_BLOCKED",
             gold_rows=len(gold_rows_list), archive_rows=len(archive_rows_list),
@@ -682,7 +696,7 @@ def audit_archive_compatibility(config) -> AuditResult:
     return AuditResult(
         status="PASS", code="OK",
         gold_rows=len(gold_rows_list), archive_rows=len(archive_rows_list),
-        archive_only_rows=0, excess_duplicates=0, archive_missing=0,
+        archive_only_rows=0, excess_duplicates=0, archive_missing=archive_missing,
     )
 
 
@@ -1337,6 +1351,8 @@ def main(argv=None):
                          "excess_duplicates": audit.excess_duplicates,
                          "archive_missing": audit.archive_missing}
             print("stress-eval: " + json.dumps(displayed, ensure_ascii=False, sort_keys=True))
+            if audit.status == "ERROR":
+                return 1
             return 3 if audit.status == "BLOCKED" else 0
         else:
             result = merge(config, args.file, args.sample)
