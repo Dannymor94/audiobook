@@ -1218,46 +1218,103 @@ class TestT20AuditArchiveCompatibility:
         assert result.status == "ERROR"
         assert result.code == "ARCHIVE_AUDIT_STALE"
 
-    # --- T20-7c: PASS/BLOCKED/ERROR preserve gold/archive bytes ---
+    # --- T20-7a/7b/7f: concurrent file mutations → ARCHIVE_AUDIT_STALE ---
+
+    def test_T20_7a_absent_archive_created_during_audit_stale(self, tmp_path, monkeypatch):
+        """T20-7a: archive absent initially, another process creates it during gold parse => STALE."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        archive_path = text / "stress_gold.archive.tsv"
+        assert not archive_path.exists()
+        orig_parse = evaluation.parse_gold
+        def creating_parse(text_data, **kw):
+            result = orig_parse(text_data, **kw)
+            _write_tsv(archive_path, [row])  # simulate external process creating archive
+            return result
+        monkeypatch.setattr(evaluation, "parse_gold", creating_parse)
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_AUDIT_STALE"
+        assert result.archive_missing is True  # was absent at initial read
+
+    def test_T20_7b_present_archive_deleted_during_audit_stale(self, tmp_path, monkeypatch):
+        """T20-7b: archive present initially, deleted during archive parse => STALE."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        archive_path = text / "stress_gold.archive.tsv"
+        _write_tsv(archive_path, [row])
+        orig_parse = evaluation.parse_gold
+        call_count = [0]
+        def deleting_parse(text_data, **kw):
+            result = orig_parse(text_data, **kw)
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                archive_path.unlink()  # simulate external deletion after parse
+            return result
+        monkeypatch.setattr(evaluation, "parse_gold", deleting_parse)
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_AUDIT_STALE"
+        assert result.archive_missing is False  # was present at initial read
+
+    def test_T20_7f_malformed_gold_plus_archive_change_stale_wins(self, tmp_path, monkeypatch):
+        """T20-7f: gold invalid AND archive mutated => ARCHIVE_AUDIT_STALE (not GOLD_INVALID)."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        (text / "stress_gold.tsv").write_text(
+            "\t".join(evaluation.GOLD_FIELDS) + "\n" + self._bad_tsv_line("variants:1|0"),
+            encoding="utf-8", newline="",
+        )
+        archive_path = text / "stress_gold.archive.tsv"
+        _write_tsv(archive_path, [_gold_row()])
+        orig_parse = evaluation.parse_gold
+        def mutating_parse(text_data, **kw):
+            archive_path.write_bytes(b"mutated-during-gold-error\n")
+            return orig_parse(text_data, **kw)  # raises AnnotationError for bad gold
+        monkeypatch.setattr(evaluation, "parse_gold", mutating_parse)
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_AUDIT_STALE"  # staleness takes precedence
+
+    # --- T20-7c/7d/7e: PASS/BLOCKED/ERROR preserve ALL files incl. YO, no new files ---
+
+    def _snapshot(self, path):
+        return {str(p): p.read_bytes() for p in sorted(path.rglob("*")) if p.is_file()}
 
     def test_T20_7c_pass_preserves_all_files(self, tmp_path, monkeypatch):
-        """T20-7c: PASS preserves gold/archive bytes (no writes)."""
+        """T20-7c: PASS preserves all files (gold, archive, YO, no new files)."""
         text = self._setup_text(tmp_path, monkeypatch)
         row = _gold_row()
         _write_tsv(text / "stress_gold.tsv", [row])
         _write_tsv(text / "stress_gold.archive.tsv", [row])
-        gold_before = (text / "stress_gold.tsv").read_bytes()
-        archive_before = (text / "stress_gold.archive.tsv").read_bytes()
+        (text / "stress_gold.yo_evidence.tsv").write_text("yo\n", encoding="utf-8")
+        before = self._snapshot(text)
         result = evaluation.audit_archive_compatibility({})
         assert result.status == "PASS"
-        assert (text / "stress_gold.tsv").read_bytes() == gold_before
-        assert (text / "stress_gold.archive.tsv").read_bytes() == archive_before
+        assert self._snapshot(text) == before
 
     def test_T20_7d_blocked_preserves_all_files(self, tmp_path, monkeypatch):
-        """T20-7d: BLOCKED preserves gold/archive bytes (no writes)."""
+        """T20-7d: BLOCKED preserves all files (gold, archive, YO, no new files)."""
         text = self._setup_text(tmp_path, monkeypatch)
-        gold_row = _gold_row(gold_vowel="0")
-        archive_row = _gold_row(gold_vowel="1")
-        _write_tsv(text / "stress_gold.tsv", [gold_row])
-        _write_tsv(text / "stress_gold.archive.tsv", [archive_row])
-        gold_before = (text / "stress_gold.tsv").read_bytes()
-        archive_before = (text / "stress_gold.archive.tsv").read_bytes()
+        _write_tsv(text / "stress_gold.tsv", [_gold_row(gold_vowel="0")])
+        _write_tsv(text / "stress_gold.archive.tsv", [_gold_row(gold_vowel="1")])
+        (text / "stress_gold.yo_evidence.tsv").write_text("yo\n", encoding="utf-8")
+        before = self._snapshot(text)
         result = evaluation.audit_archive_compatibility({})
         assert result.status == "BLOCKED"
-        assert (text / "stress_gold.tsv").read_bytes() == gold_before
-        assert (text / "stress_gold.archive.tsv").read_bytes() == archive_before
+        assert self._snapshot(text) == before
 
     def test_T20_7e_error_preserves_all_files(self, tmp_path, monkeypatch):
-        """T20-7e: ERROR preserves gold/archive bytes (no writes)."""
+        """T20-7e: ERROR preserves all files (gold, archive, YO, no new files)."""
         text = self._setup_text(tmp_path, monkeypatch)
         _write_tsv(text / "stress_gold.tsv", [_gold_row()])
         (text / "stress_gold.archive.tsv").write_text("bad\n", encoding="utf-8", newline="")
-        archive_before = (text / "stress_gold.archive.tsv").read_bytes()
-        gold_before = (text / "stress_gold.tsv").read_bytes()
+        (text / "stress_gold.yo_evidence.tsv").write_text("yo\n", encoding="utf-8")
+        before = self._snapshot(text)
         result = evaluation.audit_archive_compatibility({})
         assert result.status == "ERROR"
-        assert (text / "stress_gold.tsv").read_bytes() == gold_before
-        assert (text / "stress_gold.archive.tsv").read_bytes() == archive_before
+        assert self._snapshot(text) == before
 
     # --- CLI return codes ---
 
@@ -1387,3 +1444,24 @@ class TestT15StrictVariants:
         assert result.status == "ERROR"
         assert result.code == "ARCHIVE_INVALID"
         assert (text / "stress_gold.archive.tsv").read_bytes() == archive_before  # no writes
+
+    def test_T15_12d_score_bad_variants_gold_invalid_no_write(self, tmp_path, monkeypatch):
+        """T15-12d: score() reads gold with unsorted variants => GOLD_INVALID; no score written."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        row = todo_rows()[0]
+        evaluation.merge({}, write_input(tmp_path, [labeled(row)]))
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        # Inject unsorted variants directly, bypassing validate_gold
+        bad_tsv = ("\t".join(evaluation.GOLD_FIELDS) + "\n"
+                   + row["source_key"] + "\t" + row["form_source"] + "\t"
+                   + row["unit_text_sha256"] + "\t" + row["unit_kind"] + "\t"
+                   + row["context_sha256"] + "\tctx\tvariants:1|0\tna\tsyn\t2026-11-16\n")
+        gold_path.write_text(bad_tsv, encoding="utf-8", newline="")
+        gold_before = gold_path.read_bytes()
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.score({})
+        assert gold_path.read_bytes() == gold_before  # no writes to gold
+        # No score JSON was written
+        assert not score_dir.exists() or not list(score_dir.glob("s2-*.json"))
