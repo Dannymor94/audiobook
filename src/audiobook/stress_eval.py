@@ -440,6 +440,24 @@ def _verify_saved_selection(stored, context):
         _error("SAMPLE_INVALID")
     if stored.get("sample_fp") != expected_fp:
         _error("SAMPLE_INVALID")
+    # Verify selected_by_stratum_sha256 is consistent with selected_by_stratum contents.
+    # sample_fp only commits to the digest, not to the keys themselves; without this
+    # check an attacker can replace selected_by_stratum keys while keeping sample_fp valid.
+    try:
+        actual_stratum_sha = _hash(
+            {name: sorted(stored["selected_by_stratum"][name]) for name, _ in STRATA}
+        )
+    except (KeyError, TypeError):
+        _error("SAMPLE_INVALID")
+    if actual_stratum_sha != stored["selected_by_stratum_sha256"]:
+        _error("SAMPLE_INVALID")
+    # Verify strata counts are consistent with selected_by_stratum lengths.
+    try:
+        for name, _ in STRATA:
+            if stored["strata"][name]["n"] != len(stored["selected_by_stratum"][name]):
+                _error("SAMPLE_INVALID")
+    except (KeyError, TypeError):
+        _error("SAMPLE_INVALID")
     try:
         expected_keys = sorted(sk for name in stored["selected_by_stratum"]
                                for sk in stored["selected_by_stratum"][name])

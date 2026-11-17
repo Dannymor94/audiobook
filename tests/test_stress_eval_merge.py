@@ -1706,3 +1706,108 @@ class TestGateAPartialMergePreservesTodo:
         assert todo_path.read_bytes() == todo_bytes_before, "todo changed on first replay"
         evaluation.merge({}, write_input(tmp_path, batch))
         assert todo_path.read_bytes() == todo_bytes_before, "todo changed on second replay"
+
+
+# ---------------------------------------------------------------------------
+# Gate B1 / R3: sample selection integrity — selected_by_stratum sha cross-check
+# ---------------------------------------------------------------------------
+
+def _sample_json_path():
+    return next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+
+
+class TestGateB1SampleSelectionIntegrity:
+    """R3: _verify_saved_selection must catch altered selected_by_stratum even when sample_fp is unchanged.
+
+    Attack vector: replace keys in selected_by_stratum[name] while keeping
+    selected_by_stratum_sha256 (and therefore sample_fp) at their original values.
+    Prior to the fix this passed verification silently.
+    """
+
+    def test_tampered_selected_by_stratum_sha_bypass_refused_on_merge(self, tmp_path, monkeypatch):
+        """R3 core: replace stratum keys, keep sha unchanged → SAMPLE_INVALID on merge."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        # Find the first stratum that has at least one key and replace it.
+        tampered = False
+        for name in [n for n, _ in evaluation.STRATA]:
+            if record["selected_by_stratum"][name]:
+                # Swap to a key with a recognisably wrong segment count so the
+                # attacker cannot accidentally produce a structurally valid key.
+                record["selected_by_stratum"][name] = ["injected|attacker|key"]
+                tampered = True
+                break
+        assert tampered, "test setup: at least one non-empty stratum required"
+        # selected_by_stratum_sha256 and sample_fp are still the ORIGINAL values —
+        # exactly the sha-bypass attack that R3 must close.
+        path.write_text(json.dumps(record), encoding="utf-8")
+        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
+        before = snapshot(tmp_path)
+        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
+            evaluation.merge({}, incoming)
+        assert snapshot(tmp_path) == before, "no writes must occur before the integrity check"
+
+    def test_tampered_selected_by_stratum_sha_bypass_refused_on_score(self, tmp_path, monkeypatch):
+        """R3: same sha-bypass attack surfaces when score() loads the selection."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for name in [n for n, _ in evaluation.STRATA]:
+            if record["selected_by_stratum"][name]:
+                record["selected_by_stratum"][name] = ["injected|attacker|key"]
+                break
+        path.write_text(json.dumps(record), encoding="utf-8")
+        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
+            evaluation.score({})
+
+    def test_strata_count_inconsistency_refused(self, tmp_path, monkeypatch):
+        """R3: strata[name].n inconsistent with len(selected_by_stratum[name]) → SAMPLE_INVALID."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        # Inflate the count for the first non-zero stratum — keep selected_by_stratum unchanged.
+        for name in [n for n, _ in evaluation.STRATA]:
+            if record["strata"][name]["n"] > 0:
+                record["strata"][name]["n"] += 1
+                break
+        path.write_text(json.dumps(record), encoding="utf-8")
+        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
+        before = snapshot(tmp_path)
+        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
+            evaluation.merge({}, incoming)
+        assert snapshot(tmp_path) == before
+
+    def test_valid_selection_still_loads_after_fix(self, tmp_path, monkeypatch):
+        """R3: regression — untampered selection must still load and merge successfully."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        result = evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0])]))
+        assert result["added"] == 1
+
+    # --- Strengthen two R2 scenarios (Coordinator comment 6951884391) ---
+
+    def test_partial_merge_selection_json_untouched(self, tmp_path, monkeypatch):
+        """R2 strengthened: partial merge must not modify the selection JSON."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        json_bytes_before = path.read_bytes()
+        rows = todo_rows()
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        assert path.read_bytes() == json_bytes_before, "selection JSON must not be modified by merge()"
+
+    def test_full_merge_selection_json_untouched(self, tmp_path, monkeypatch):
+        """R2 strengthened: full merge must not modify the selection JSON."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        json_bytes_before = path.read_bytes()
+        rows = todo_rows()
+        evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
+        assert path.read_bytes() == json_bytes_before, "selection JSON must not be modified by full merge()"
