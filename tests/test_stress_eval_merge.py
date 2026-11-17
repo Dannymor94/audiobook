@@ -1329,6 +1329,50 @@ class TestT20AuditArchiveCompatibility:
         assert result.status == "ERROR"
         assert result.code == "GOLD_INVALID"
 
+    # --- T20-7i/7j: MISSING→READ_ERROR transition => ARCHIVE_AUDIT_STALE (tri-state) ---
+
+    def test_T20_7i_absent_archive_becomes_directory_stale(self, tmp_path, monkeypatch):
+        """T20-7i: archive absent initially, directory created there during parse => STALE.
+        This catches the MISSING→READ_ERROR race that collapsed to False-PASS before the
+        tri-state fix (_read_state now distinguishes _MISSING from _READ_ERROR)."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        archive_path = text / "stress_gold.archive.tsv"
+        assert not archive_path.exists()
+        orig_parse = evaluation.parse_gold
+        def creating_dir_parse(text_data, **kw):
+            result = orig_parse(text_data, **kw)
+            archive_path.mkdir()  # create directory, not a readable file
+            return result
+        monkeypatch.setattr(evaluation, "parse_gold", creating_dir_parse)
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_AUDIT_STALE"
+        assert result.archive_missing is True  # was absent at initial read
+
+    def test_T20_7j_present_archive_replaced_by_directory_stale(self, tmp_path, monkeypatch):
+        """T20-7j: archive present, replaced by directory during parse => STALE."""
+        text = self._setup_text(tmp_path, monkeypatch)
+        row = _gold_row()
+        _write_tsv(text / "stress_gold.tsv", [row])
+        archive_path = text / "stress_gold.archive.tsv"
+        _write_tsv(archive_path, [row])
+        orig_parse = evaluation.parse_gold
+        call_count = [0]
+        def replacing_parse(text_data, **kw):
+            result = orig_parse(text_data, **kw)
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                archive_path.unlink()
+                archive_path.mkdir()  # replace file with directory
+            return result
+        monkeypatch.setattr(evaluation, "parse_gold", replacing_parse)
+        result = evaluation.audit_archive_compatibility({})
+        assert result.status == "ERROR"
+        assert result.code == "ARCHIVE_AUDIT_STALE"
+        assert result.archive_missing is False  # was present at initial read
+
     # --- T20-7c/7d/7e: PASS/BLOCKED/ERROR preserve ALL files incl. YO, no new files ---
 
     def _snapshot(self, path):

@@ -644,44 +644,44 @@ def audit_archive_compatibility(config) -> AuditResult:
     excess_duplicates: extra copies of tuples that DO exist in gold (ac > gc, gc > 0).
     archive_missing: True iff archive file is absent at time of initial read.
     """
-    def _try_read(path):
-        # Recheck only: any OS error treated as None (changed/gone/unreadable = stale).
+    # Tri-state sentinels: distinct from bytes and from each other.
+    _MISSING = object()     # FileNotFoundError — file genuinely absent
+    _READ_ERROR = object()  # other OSError — file exists but unreadable
+
+    def _read_state(path):
+        """Return bytes, _MISSING (absent), or _READ_ERROR (unreadable)."""
         try:
             return path.read_bytes()
+        except FileNotFoundError:
+            return _MISSING
         except OSError:
-            return None
+            return _READ_ERROR
 
     gold_path = paths.TEXT / "stress_gold.tsv"
     archive_path = paths.TEXT / "stress_gold.archive.tsv"
 
     # Phase 1: initial reads.
-    # FileNotFoundError → absent (None).  Other OSError → unreadable → immediate error.
-    try:
-        gold_before = gold_path.read_bytes()
-    except FileNotFoundError:
-        gold_before = None
-    except OSError:
+    # READ_ERROR on initial read → immediate structured error; never silently empty.
+    gold_before = _read_state(gold_path)
+    if gold_before is _READ_ERROR:
         return AuditResult(status="ERROR", code="GOLD_INVALID",
                            gold_rows=0, archive_rows=0,
                            archive_only_rows=0, excess_duplicates=0,
                            archive_missing=False)
 
-    archive_missing = False
-    try:
-        archive_before = archive_path.read_bytes()
-    except FileNotFoundError:
-        archive_missing = True
-        archive_before = None
-    except OSError:
+    archive_before = _read_state(archive_path)
+    if archive_before is _READ_ERROR:
         return AuditResult(status="ERROR", code="ARCHIVE_INVALID",
                            gold_rows=0, archive_rows=0,
                            archive_only_rows=0, excess_duplicates=0,
                            archive_missing=False)
 
+    archive_missing = archive_before is _MISSING
+
     # Phase 2: parse — collect errors without returning
     gold_parse_error = None
     gold_rows_list: list = []
-    if gold_before is not None:
+    if gold_before is not _MISSING:
         try:
             gold_rows_list = parse_gold(gold_before.decode("utf-8"))
         except (UnicodeError, AnnotationError):
@@ -689,16 +689,17 @@ def audit_archive_compatibility(config) -> AuditResult:
 
     archive_parse_error = None
     archive_rows_list: list = []
-    if archive_before is not None:
+    if archive_before is not _MISSING:
         try:
             archive_rows_list = parse_gold(archive_before.decode("utf-8"))
         except (UnicodeError, AnnotationError):
             archive_parse_error = "ARCHIVE_INVALID"
 
-    # Phase 3: staleness recheck — always, even on parse errors; always reads
-    # current disk state so absent→created and present→deleted are both detected.
-    gold_after = _try_read(gold_path)
-    archive_after = _try_read(archive_path)
+    # Phase 3: staleness recheck using the same tri-state.
+    # Any change (MISSING↔bytes↔READ_ERROR, or different bytes) → STALE.
+    # _MISSING and _READ_ERROR use identity comparison; bytes use value comparison.
+    gold_after = _read_state(gold_path)
+    archive_after = _read_state(archive_path)
 
     def _err(code):
         return AuditResult(
