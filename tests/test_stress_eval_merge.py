@@ -1561,3 +1561,95 @@ class TestT15StrictVariants:
         assert gold_path.read_bytes() == gold_before  # no writes to gold
         # No score JSON was written
         assert not score_dir.exists() or not list(score_dir.glob("s2-*.json"))
+
+
+# ---------------------------------------------------------------------------
+# Gate A: partial merge must preserve unmerged owner todo rows (R2)
+# ---------------------------------------------------------------------------
+
+class TestGateAPartialMergePreservesTodo:
+    """R2 regression: merge() must not unlink todo rows that were not in the incoming batch."""
+
+    def _todo_path(self):
+        todos = sorted(paths.TEXT.glob("stress_gold.todo.s2-*.tsv"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        assert todos, "no todo file found"
+        return todos[0]
+
+    def test_partial_merge_preserves_unmerged_rows(self, tmp_path, monkeypatch):
+        """R2: 3 owner todo rows, batch has only row[0] => todo trimmed to rows[1:], not deleted."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        assert len(rows) == 3, f"expected 3 todo rows, got {len(rows)}"
+
+        # Merge only the first row
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
+        todo_path = self._todo_path()
+        assert todo_path.exists(), "todo was deleted but had 2 unmerged rows"
+        remaining = evaluation.parse_gold(todo_path.read_text(encoding="utf-8"), allow_blank=True)
+        assert len(remaining) == 2, f"expected 2 remaining rows, got {len(remaining)}"
+        remaining_keys = {r["source_key"] for r in remaining}
+        assert rows[0]["source_key"] not in remaining_keys, "merged row must not remain in todo"
+        assert rows[1]["source_key"] in remaining_keys
+        assert rows[2]["source_key"] in remaining_keys
+        # Gold has exactly the one merged row
+        gold = evaluation.parse_gold(
+            (paths.TEXT / "stress_gold.tsv").read_text(encoding="utf-8"))
+        assert len(gold) == 1
+        assert gold[0]["source_key"] == rows[0]["source_key"]
+
+    def test_partial_merge_then_finish_retires_todo(self, tmp_path, monkeypatch):
+        """R2: merging remaining rows after partial merge retires the todo."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        # Partial: first row only
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        todo_path = self._todo_path()
+        assert todo_path.exists()
+        # Complete: remaining two rows
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[1]), labeled(rows[2])]))
+        # Now all rows are merged — todo must be gone
+        assert not todo_path.exists(), "todo must be retired when all rows are resolved"
+
+    def test_blank_rows_in_batch_not_resolved(self, tmp_path, monkeypatch):
+        """R2: batch returns row[0] blank (no annotation) => todo row[0] is NOT resolved."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        # Submit row[0] as blank (no annotation), row[1] labeled
+        blank_row = {**rows[0]}  # all LABEL_FIELDS empty (default from parse_gold allow_blank)
+        evaluation.merge({}, write_input(tmp_path, [blank_row, labeled(rows[1])]))
+        todo_path = self._todo_path()
+        assert todo_path.exists(), "todo must survive: row[0] was blank and row[2] unsubmitted"
+        remaining = evaluation.parse_gold(todo_path.read_text(encoding="utf-8"), allow_blank=True)
+        remaining_keys = {r["source_key"] for r in remaining}
+        assert rows[0]["source_key"] in remaining_keys, "blank row must remain in todo"
+        assert rows[2]["source_key"] in remaining_keys, "unsubmitted row must remain in todo"
+        assert rows[1]["source_key"] not in remaining_keys, "labeled row must be removed"
+
+    def test_all_resolved_retires_todo(self, tmp_path, monkeypatch):
+        """R2: batch resolves all todo rows => todo retired (original behavior preserved)."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+        assert todo_path.exists()
+        evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
+        assert not todo_path.exists(), "todo must be retired when all rows resolved"
+
+    def test_malformed_todo_not_deleted_on_merge(self, tmp_path, monkeypatch):
+        """R2: malformed todo bytes => merge succeeds but todo is NOT deleted or repaired."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+        # Corrupt the todo file
+        todo_path.write_bytes(b"corrupted\ttodo\n")
+        corrupted_bytes = todo_path.read_bytes()
+        # Merge one row; todo is malformed so it must remain untouched
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        assert todo_path.exists(), "malformed todo must not be deleted"
+        assert todo_path.read_bytes() == corrupted_bytes, "malformed todo must not be modified"
