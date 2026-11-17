@@ -1854,18 +1854,10 @@ class TestGateB1SampleSelectionIntegrity:
 
         rows = todo_rows()
         incoming = write_input(tmp_path, [labeled(rows[0])])
-        gold_path = paths.TEXT / "stress_gold.tsv"
-        archive_path = paths.TEXT / "stress_gold.archive.tsv"
-        gold_before = gold_path.read_bytes() if gold_path.exists() else None
-        archive_before = archive_path.read_bytes() if archive_path.exists() else None
-
+        before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.merge({}, incoming, sample_path=forged_path)
-
-        after_gold = gold_path.read_bytes() if gold_path.exists() else None
-        after_archive = archive_path.read_bytes() if archive_path.exists() else None
-        assert after_gold == gold_before, "gold must not be modified on forgery rejection"
-        assert after_archive == archive_before, "archive must not be modified on forgery rejection"
+        assert snapshot(tmp_path) == before
 
     def test_forged_eligible_key_refused_on_score(self, tmp_path, monkeypatch):
         """R3: forged eligible-key selection (genuine unselected key) also rejected by score()."""
@@ -1884,8 +1876,10 @@ class TestGateB1SampleSelectionIntegrity:
         forged = _forge_eligible_substitution(original, next(iter(unselected)))
         path.write_text(json.dumps(forged), encoding="utf-8")
 
+        before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
+        assert snapshot(tmp_path) == before
 
     def test_valid_selection_loads_on_both_paths(self, tmp_path, monkeypatch):
         """R3: untampered selection (many-unit fixture) must still merge successfully (regression)."""
@@ -1956,11 +1950,10 @@ class TestGateB1SampleSelectionIntegrity:
         })
         path.write_text(json.dumps(record), encoding="utf-8")
         incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        gold_path = paths.TEXT / "stress_gold.tsv"
-        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE|SAMPLE_INVALID"):
             evaluation.merge({}, incoming)
-        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+        assert snapshot(tmp_path) == before
 
     def test_forged_population_N_refused(self, tmp_path, monkeypatch):
         """R3: inflated population N (consistent fp recomputed) → SAMPLE_STALE.
@@ -1993,11 +1986,10 @@ class TestGateB1SampleSelectionIntegrity:
         })
         path.write_text(json.dumps(record), encoding="utf-8")
         incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        gold_path = paths.TEXT / "stress_gold.tsv"
-        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.merge({}, incoming)
-        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+        assert snapshot(tmp_path) == before
 
     def test_incorrect_stratum_membership_refused(self, tmp_path, monkeypatch):
         """R3: key reassigned to wrong stratum (consistent fp recomputed) → SAMPLE_STALE.
@@ -2054,11 +2046,10 @@ class TestGateB1SampleSelectionIntegrity:
         })
         path.write_text(json.dumps(record), encoding="utf-8")
         incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        gold_path = paths.TEXT / "stress_gold.tsv"
-        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.merge({}, incoming)
-        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+        assert snapshot(tmp_path) == before
 
     # --- R2 strengthened selections (Coordinator comment 6959312730) ---
 
