@@ -1914,6 +1914,152 @@ class TestGateB1SampleSelectionIntegrity:
             evaluation.merge({}, incoming)
         assert snapshot(tmp_path) == before
 
+    def test_duplicate_key_in_stratum_refused(self, tmp_path, monkeypatch):
+        """R3: duplicate key in selected_by_stratum (consistent fp recomputed) → SAMPLE_STALE.
+
+        A list with a repeated key passes _verify_saved_selection (count matches, sha matches)
+        but the fresh recompute produces only unique keys, so sample_fp diverges → SAMPLE_STALE.
+        No gold writes on rejection.
+        """
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        strata = evaluation.STRATA
+        # Find stratum with ≥1 key; duplicate first key.
+        for name in [n for n, _ in strata]:
+            keys = list(record["selected_by_stratum"][name])
+            if keys:
+                record["selected_by_stratum"][name] = sorted(keys + [keys[0]])
+                record["strata"][name]["n"] = len(record["selected_by_stratum"][name])
+                break
+        # Recompute all dependent digests consistently so _verify_saved_selection passes.
+        record["selected_by_stratum_sha256"] = evaluation._hash(
+            {name: sorted(record["selected_by_stratum"][name]) for name, _ in strata}
+        )
+        record["keys"] = sorted(
+            sk for name in [n for n, _ in strata]
+            for sk in record["selected_by_stratum"][name]
+        )
+        record["sample_fp"] = evaluation._hash({
+            "algo": "sample/2",
+            "source_fp": record["source_fp"],
+            "analysis_fp": record["analysis_fp"],
+            "observation_contract_version": "yo-observation/1",
+            "observation_inputs": record["observation_inputs"],
+            "seed": evaluation.SEED_V2,
+            "strata_order": [name for name, _ in strata],
+            "population": {name: record["strata"][name]["N"] for name, _ in strata},
+            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
+            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
+            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
+        })
+        path.write_text(json.dumps(record), encoding="utf-8")
+        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE|SAMPLE_INVALID"):
+            evaluation.merge({}, incoming)
+        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+
+    def test_forged_population_N_refused(self, tmp_path, monkeypatch):
+        """R3: inflated population N (consistent fp recomputed) → SAMPLE_STALE.
+
+        Increasing strata[name]["N"] changes the sample_fp hash input ("population").
+        Recomputing sample_fp consistently makes the forgery pass _verify_saved_selection,
+        but the fresh recompute uses the actual population count → sample_fp diverges → SAMPLE_STALE.
+        """
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        strata = evaluation.STRATA
+        for name in [n for n, _ in strata]:
+            if record["strata"][name]["N"] > 0:
+                record["strata"][name]["N"] += 100
+                break
+        record["sample_fp"] = evaluation._hash({
+            "algo": "sample/2",
+            "source_fp": record["source_fp"],
+            "analysis_fp": record["analysis_fp"],
+            "observation_contract_version": "yo-observation/1",
+            "observation_inputs": record["observation_inputs"],
+            "seed": evaluation.SEED_V2,
+            "strata_order": [name for name, _ in strata],
+            "population": {name: record["strata"][name]["N"] for name, _ in strata},
+            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
+            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
+            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
+        })
+        path.write_text(json.dumps(record), encoding="utf-8")
+        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.merge({}, incoming)
+        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+
+    def test_incorrect_stratum_membership_refused(self, tmp_path, monkeypatch):
+        """R3: key reassigned to wrong stratum (consistent fp recomputed) → SAMPLE_STALE.
+
+        A key moved from its legitimate stratum to another passes _verify_saved_selection
+        (all stored digests recomputed consistently) but the fresh recompute restores the
+        correct stratum assignment → sample_fp diverges → SAMPLE_STALE.
+        """
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        strata = evaluation.STRATA
+        # Find two strata: one with a key to steal, one to receive it.
+        strata_names = [n for n, _ in strata]
+        donor, recipient = None, None
+        stolen_key = None
+        for name in strata_names:
+            if record["selected_by_stratum"][name]:
+                donor = name
+                stolen_key = record["selected_by_stratum"][name][0]
+                break
+        for name in strata_names:
+            if name != donor:
+                recipient = name
+                break
+        if donor is None or recipient is None:
+            pytest.skip("not enough strata populated for test")
+        record["selected_by_stratum"][donor] = [k for k in record["selected_by_stratum"][donor]
+                                                 if k != stolen_key]
+        record["selected_by_stratum"][recipient] = sorted(
+            record["selected_by_stratum"][recipient] + [stolen_key]
+        )
+        record["strata"][donor]["n"] = len(record["selected_by_stratum"][donor])
+        record["strata"][recipient]["n"] = len(record["selected_by_stratum"][recipient])
+        record["selected_by_stratum_sha256"] = evaluation._hash(
+            {name: sorted(record["selected_by_stratum"][name]) for name, _ in strata}
+        )
+        record["keys"] = sorted(
+            sk for name in strata_names for sk in record["selected_by_stratum"][name]
+        )
+        record["sample_fp"] = evaluation._hash({
+            "algo": "sample/2",
+            "source_fp": record["source_fp"],
+            "analysis_fp": record["analysis_fp"],
+            "observation_contract_version": "yo-observation/1",
+            "observation_inputs": record["observation_inputs"],
+            "seed": evaluation.SEED_V2,
+            "strata_order": strata_names,
+            "population": {name: record["strata"][name]["N"] for name, _ in strata},
+            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
+            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
+            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
+        })
+        path.write_text(json.dumps(record), encoding="utf-8")
+        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.merge({}, incoming)
+        assert (gold_path.read_bytes() if gold_path.exists() else None) == gold_before
+
     # --- R2 strengthened selections (Coordinator comment 6959312730) ---
 
     def test_partial_merge_selection_json_untouched(self, tmp_path, monkeypatch):
