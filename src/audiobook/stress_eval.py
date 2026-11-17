@@ -897,41 +897,6 @@ def sample(config):
         release_eval_lock(lock)
 
 
-def _retire_todo(todo_path: Path, resolved_keys: set) -> None:
-    """Retire or trim the versioned owner todo after a successful merge.
-
-    Rows not covered by resolved_keys are preserved so owner annotations are
-    never lost on a partial merge. If the file is malformed or changed
-    concurrently it is left untouched.
-    """
-    todo_bytes = _optional_bytes(todo_path)
-    if todo_bytes is None:
-        return  # already gone
-    try:
-        todo_rows = parse_gold(todo_bytes.decode("utf-8"), allow_blank=True)
-    except (UnicodeError, AnnotationError):
-        return  # malformed — do not modify or delete
-    remaining = [r for r in todo_rows if r["source_key"] not in resolved_keys]
-    # Byte fence: ensure todo hasn't been modified since we read it.
-    if _optional_bytes(todo_path) != todo_bytes:
-        return  # concurrently modified — leave untouched
-    if not remaining:
-        todo_path.unlink(missing_ok=True)
-        return
-    # Atomic rewrite with only the remaining (unresolved) rows.
-    private_output_guard(todo_path)
-    tmp = todo_path.with_name(todo_path.stem + ".txn-" + uuid.uuid4().hex + todo_path.suffix)
-    try:
-        tmp.write_text(serialize_gold(remaining, allow_blank=True), encoding="utf-8", newline="")
-        if _optional_bytes(todo_path) != todo_bytes:
-            return  # changed again — abandon, leave original
-        os.replace(tmp, todo_path)
-    except OSError:
-        pass  # leave original untouched on any write failure
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def merge(config, incoming: Path, sample_path: Path | None = None):
     lock = acquire_eval_lock()
     try:
@@ -950,7 +915,6 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
         selected = set(selection.record["keys"])
         by_key = {row.source_key: row for row in context.rows}
         additions = {}
-        resolved_batch_keys: set = set()
         skipped = blank = 0
         for row in batch:
             key = row["source_key"]
@@ -970,7 +934,6 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
                 skipped += 1
             else:
                 additions[key] = row
-            resolved_batch_keys.add(key)
         updated = ledger + list(additions.values())
         updated_state = inspect_ledger(updated, context)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
@@ -978,8 +941,9 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
         _assert_current(context, config)
         for plan in plans:
             _apply(plan)
-        # Retire or trim the s2 todo: preserve any owner rows not in this batch.
-        _retire_todo(_todo_path_v2(selection.record["sample_fp"]), resolved_batch_keys)
+        # Owner todo is not modified here: safe retirement policy is pending
+        # architect decision (Issue #17). The versioned todo persists until
+        # sample() regenerates it on the next run.
         return {"added": len(additions), "skipped": skipped, "unlabeled": blank,
                 "active": len(updated_state.active), "stale": len(updated_state.stale),
                 "duplicates": updated_state.duplicates}

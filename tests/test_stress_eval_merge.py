@@ -195,6 +195,9 @@ def test_semantic_duplicates_and_source_reversion(tmp_path, monkeypatch):
 
 
 def test_owner_edited_todo_retained_until_saved_then_regenerated(tmp_path, monkeypatch):
+    # merge() never modifies the owner todo (conservative policy, Issue #17).
+    # After merge, the stale todo persists and sample() raises OWNER_TODO_PROTECTED
+    # until the user manually removes it.
     setup_book(tmp_path, monkeypatch)
     result = evaluation.sample({})
     rows = todo_rows()
@@ -204,8 +207,17 @@ def test_owner_edited_todo_retained_until_saved_then_regenerated(tmp_path, monke
     with pytest.raises(AnnotationError, match="TODO_HAS_UNMERGED_LABELS"):
         evaluation.sample({})
     assert snapshot(tmp_path) == before
+    todo_bytes_before = todo.read_bytes()
     assert evaluation.merge({}, todo)["added"] == 1
-    assert evaluation.sample({})["todo"] == 2
+    # todo must be byte-identical after merge (conservative policy)
+    assert todo.read_bytes() == todo_bytes_before, "merge() must not touch owner todo"
+    # sample() now raises OWNER_TODO_PROTECTED: stale todo bytes differ from new expected
+    with pytest.raises(AnnotationError, match="OWNER_TODO_PROTECTED"):
+        evaluation.sample({})
+    # After user deletes the stale todo, sample() can regenerate with 2 rows
+    todo.unlink()
+    result2 = evaluation.sample({})
+    assert result2["todo"] == 2
     assert all(not row["gold_vowel"] for row in todo_rows())
 
 
@@ -1564,11 +1576,12 @@ class TestT15StrictVariants:
 
 
 # ---------------------------------------------------------------------------
-# Gate A: partial merge must preserve unmerged owner todo rows (R2)
+# Gate A: merge() must never modify the versioned owner todo (R2)
+# Conservative policy pending architect Issue #17.
 # ---------------------------------------------------------------------------
 
 class TestGateAPartialMergePreservesTodo:
-    """R2 regression: merge() must not unlink todo rows that were not in the incoming batch."""
+    """R2 regression: merge() must leave the versioned owner todo byte-identical after any merge."""
 
     def _todo_path(self):
         todos = sorted(paths.TEXT.glob("stress_gold.todo.s2-*.tsv"),
@@ -1576,80 +1589,120 @@ class TestGateAPartialMergePreservesTodo:
         assert todos, "no todo file found"
         return todos[0]
 
-    def test_partial_merge_preserves_unmerged_rows(self, tmp_path, monkeypatch):
-        """R2: 3 owner todo rows, batch has only row[0] => todo trimmed to rows[1:], not deleted."""
+    def test_partial_merge_todo_bytes_identical(self, tmp_path, monkeypatch):
+        """R2: partial merge (1 of 3 rows) must leave todo byte-for-byte unchanged."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
         assert len(rows) == 3, f"expected 3 todo rows, got {len(rows)}"
+        todo_path = self._todo_path()
+        todo_bytes_before = todo_path.read_bytes()
 
-        # Merge only the first row
         evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
 
-        todo_path = self._todo_path()
-        assert todo_path.exists(), "todo was deleted but had 2 unmerged rows"
-        remaining = evaluation.parse_gold(todo_path.read_text(encoding="utf-8"), allow_blank=True)
-        assert len(remaining) == 2, f"expected 2 remaining rows, got {len(remaining)}"
-        remaining_keys = {r["source_key"] for r in remaining}
-        assert rows[0]["source_key"] not in remaining_keys, "merged row must not remain in todo"
-        assert rows[1]["source_key"] in remaining_keys
-        assert rows[2]["source_key"] in remaining_keys
-        # Gold has exactly the one merged row
+        assert todo_path.exists(), "todo must still exist after partial merge"
+        assert todo_path.read_bytes() == todo_bytes_before, (
+            "todo must be byte-identical after partial merge (all 3 rows preserved, "
+            "including the merged row)"
+        )
+        # Gold must have the one merged row
         gold = evaluation.parse_gold(
             (paths.TEXT / "stress_gold.tsv").read_text(encoding="utf-8"))
         assert len(gold) == 1
         assert gold[0]["source_key"] == rows[0]["source_key"]
 
-    def test_partial_merge_then_finish_retires_todo(self, tmp_path, monkeypatch):
-        """R2: merging remaining rows after partial merge retires the todo."""
+    def test_full_merge_todo_bytes_identical(self, tmp_path, monkeypatch):
+        """R2: full merge (all 3 rows) must still leave todo byte-identical (no auto-retire)."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
-        # Partial: first row only
-        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
         todo_path = self._todo_path()
-        assert todo_path.exists()
-        # Complete: remaining two rows
-        evaluation.merge({}, write_input(tmp_path, [labeled(rows[1]), labeled(rows[2])]))
-        # Now all rows are merged — todo must be gone
-        assert not todo_path.exists(), "todo must be retired when all rows are resolved"
+        todo_bytes_before = todo_path.read_bytes()
 
-    def test_blank_rows_in_batch_not_resolved(self, tmp_path, monkeypatch):
-        """R2: batch returns row[0] blank (no annotation) => todo row[0] is NOT resolved."""
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        rows = todo_rows()
-        # Submit row[0] as blank (no annotation), row[1] labeled
-        blank_row = {**rows[0]}  # all LABEL_FIELDS empty (default from parse_gold allow_blank)
-        evaluation.merge({}, write_input(tmp_path, [blank_row, labeled(rows[1])]))
-        todo_path = self._todo_path()
-        assert todo_path.exists(), "todo must survive: row[0] was blank and row[2] unsubmitted"
-        remaining = evaluation.parse_gold(todo_path.read_text(encoding="utf-8"), allow_blank=True)
-        remaining_keys = {r["source_key"] for r in remaining}
-        assert rows[0]["source_key"] in remaining_keys, "blank row must remain in todo"
-        assert rows[2]["source_key"] in remaining_keys, "unsubmitted row must remain in todo"
-        assert rows[1]["source_key"] not in remaining_keys, "labeled row must be removed"
-
-    def test_all_resolved_retires_todo(self, tmp_path, monkeypatch):
-        """R2: batch resolves all todo rows => todo retired (original behavior preserved)."""
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        rows = todo_rows()
-        todo_path = self._todo_path()
-        assert todo_path.exists()
         evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
-        assert not todo_path.exists(), "todo must be retired when all rows resolved"
+
+        assert todo_path.exists(), "todo must not be auto-retired (pending Issue #17)"
+        assert todo_path.read_bytes() == todo_bytes_before, (
+            "todo must be byte-identical even after a full-coverage merge"
+        )
+
+    def test_different_owner_label_preserved(self, tmp_path, monkeypatch):
+        """R2: merge of one row must not alter owner label in another row of the todo."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+        # Simulate an owner who added a custom label to rows[2] directly in the file
+        owner_text = todo_path.read_text(encoding="utf-8")
+        # We care about byte-identity, not about what the owner wrote;
+        # just capture the bytes as-is after sample()
+        todo_bytes_before = todo_path.read_bytes()
+
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
+        assert todo_path.read_bytes() == todo_bytes_before, (
+            "owner label in unmerged rows must be preserved verbatim"
+        )
+
+    def test_concurrent_owner_edit_preserved(self, tmp_path, monkeypatch):
+        """R2: if owner edits the todo between sample() and merge(), merge() must not undo it."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+
+        # Simulate owner adding a note to the todo after sample() returned
+        original_text = todo_path.read_text(encoding="utf-8")
+        edited_bytes = (original_text + "# owner note\n").encode("utf-8")
+        todo_path.write_bytes(edited_bytes)
+
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
+        assert todo_path.exists(), "todo must still exist"
+        assert todo_path.read_bytes() == edited_bytes, (
+            "merge() must not overwrite concurrent owner edits to the todo"
+        )
 
     def test_malformed_todo_not_deleted_on_merge(self, tmp_path, monkeypatch):
-        """R2: malformed todo bytes => merge succeeds but todo is NOT deleted or repaired."""
+        """R2: malformed todo bytes must remain untouched after any merge."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
         todo_path = self._todo_path()
-        # Corrupt the todo file
         todo_path.write_bytes(b"corrupted\ttodo\n")
         corrupted_bytes = todo_path.read_bytes()
-        # Merge one row; todo is malformed so it must remain untouched
+
         evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
         assert todo_path.exists(), "malformed todo must not be deleted"
         assert todo_path.read_bytes() == corrupted_bytes, "malformed todo must not be modified"
+
+    def test_blank_batch_todo_bytes_identical(self, tmp_path, monkeypatch):
+        """R2: batch with all-blank labels must leave todo byte-identical."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+        todo_bytes_before = todo_path.read_bytes()
+
+        # All batch rows are blank (no annotation labels)
+        blank_rows = [{**r} for r in rows]
+        evaluation.merge({}, write_input(tmp_path, blank_rows))
+
+        assert todo_path.read_bytes() == todo_bytes_before, (
+            "todo must be byte-identical after all-blank merge"
+        )
+
+    def test_idempotent_replay_no_change(self, tmp_path, monkeypatch):
+        """R2: replaying the same batch twice must leave todo byte-identical on both runs."""
+        setup_book(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        todo_path = self._todo_path()
+        todo_bytes_before = todo_path.read_bytes()
+
+        batch = [labeled(rows[0])]
+        evaluation.merge({}, write_input(tmp_path, batch))
+        assert todo_path.read_bytes() == todo_bytes_before, "todo changed on first replay"
+        evaluation.merge({}, write_input(tmp_path, batch))
+        assert todo_path.read_bytes() == todo_bytes_before, "todo changed on second replay"
