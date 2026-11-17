@@ -1590,20 +1590,27 @@ class TestGateAPartialMergePreservesTodo:
         return todos[0]
 
     def test_partial_merge_todo_bytes_identical(self, tmp_path, monkeypatch):
-        """R2: partial merge (1 of 3 rows) must leave todo byte-for-byte unchanged."""
+        """R2: 3 fully human-labeled rows in todo; partial merge (row 0 only) must leave todo byte-identical."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
         assert len(rows) == 3, f"expected 3 todo rows, got {len(rows)}"
         todo_path = self._todo_path()
+        # Simulate owner who fully annotated all three rows before submitting batch
+        human_labeled = [labeled(rows[0], "0"), labeled(rows[1], "1"), labeled(rows[2], "0")]
+        todo_path.write_text(
+            evaluation.serialize_gold(human_labeled, allow_blank=True),
+            encoding="utf-8", newline=""
+        )
         todo_bytes_before = todo_path.read_bytes()
 
-        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        # Submit only row 0's label (partial batch)
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "0")]))
 
         assert todo_path.exists(), "todo must still exist after partial merge"
         assert todo_path.read_bytes() == todo_bytes_before, (
-            "todo must be byte-identical after partial merge (all 3 rows preserved, "
-            "including the merged row)"
+            "todo must be byte-identical after partial merge: all 3 fully-labeled "
+            "owner rows preserved, including both unsubmitted labels"
         )
         # Gold must have the one merged row
         gold = evaluation.parse_gold(
@@ -1627,21 +1634,30 @@ class TestGateAPartialMergePreservesTodo:
         )
 
     def test_different_owner_label_preserved(self, tmp_path, monkeypatch):
-        """R2: merge of one row must not alter owner label in another row of the todo."""
+        """R2: owner writes label "1" for row 2; incoming batch labels row 0 "0"; todo stays byte-identical."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
         todo_path = self._todo_path()
-        # Simulate an owner who added a custom label to rows[2] directly in the file
-        owner_text = todo_path.read_text(encoding="utf-8")
-        # We care about byte-identity, not about what the owner wrote;
-        # just capture the bytes as-is after sample()
+        # Owner annotated row[0]="0" and row[2]="1" (a different value); row[1] left blank.
+        # This is the scenario where key-based matching alone could silently erase human labels.
+        owner_rows = [
+            labeled(rows[0], "0"),   # same key as incoming; owner chose "0"
+            rows[1],                 # blank — owner has not labeled yet
+            labeled(rows[2], "1"),   # owner chose "1" for this key
+        ]
+        todo_path.write_text(
+            evaluation.serialize_gold(owner_rows, allow_blank=True),
+            encoding="utf-8", newline=""
+        )
         todo_bytes_before = todo_path.read_bytes()
 
-        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        # Incoming batch: only row[0] labeled "0" — same as owner's choice for that key
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "0")]))
 
         assert todo_path.read_bytes() == todo_bytes_before, (
-            "owner label in unmerged rows must be preserved verbatim"
+            "owner labels for unmerged rows (including row[2]='1') must survive verbatim; "
+            "merge() must not erase owner annotations even when it merges the same key"
         )
 
     def test_concurrent_owner_edit_preserved(self, tmp_path, monkeypatch):
@@ -1709,61 +1725,177 @@ class TestGateAPartialMergePreservesTodo:
 
 
 # ---------------------------------------------------------------------------
-# Gate B1 / R3: sample selection integrity — selected_by_stratum sha cross-check
+# Gate B1 / R3: sample selection integrity — bind loading to deterministic recompute
 # ---------------------------------------------------------------------------
 
 def _sample_json_path():
     return next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
 
 
-class TestGateB1SampleSelectionIntegrity:
-    """R3: _verify_saved_selection must catch altered selected_by_stratum even when sample_fp is unchanged.
+def _forge_eligible_substitution(original, unselected_key):
+    """Return a self-consistent forged sample record with one unauthorized eligible key injected.
 
-    Attack vector: replace keys in selected_by_stratum[name] while keeping
-    selected_by_stratum_sha256 (and therefore sample_fp) at their original values.
-    Prior to the fix this passed verification silently.
+    The forged record has internally-consistent selected_by_stratum_sha256, keys,
+    strata counts and sample_fp, but references a key that was never legitimately
+    selected.  It must be rejected by _verify_selection_fresh (SAMPLE_STALE) even
+    though it passes _verify_saved_selection.
+    """
+    strata = evaluation.STRATA
+    record = json.loads(json.dumps(original))
+    # Substitute unselected_key into the first non-empty stratum.
+    for name in [n for n, _ in strata]:
+        keys = list(record["selected_by_stratum"][name])
+        if keys:
+            keys[0] = unselected_key
+            record["selected_by_stratum"][name] = sorted(keys)
+            break
+    # Recompute every dependent digest consistently so _verify_saved_selection passes.
+    record["selected_by_stratum_sha256"] = evaluation._hash(
+        {name: sorted(record["selected_by_stratum"][name]) for name, _ in strata}
+    )
+    record["keys"] = sorted(
+        sk for name in [n for n, _ in strata]
+        for sk in record["selected_by_stratum"][name]
+    )
+    record["sample_fp"] = evaluation._hash({
+        "algo": "sample/2",
+        "source_fp": record["source_fp"],
+        "analysis_fp": record["analysis_fp"],
+        "observation_contract_version": "yo-observation/1",
+        "observation_inputs": record["observation_inputs"],
+        "seed": evaluation.SEED_V2,
+        "strata_order": [name for name, _ in strata],
+        "population": {name: record["strata"][name]["N"] for name, _ in strata},
+        "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
+        "eligible_assignment_sha256": record["eligible_assignment_sha256"],
+        "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
+    })
+    return record
+
+
+def _setup_many_units(tmp_path, monkeypatch):
+    """Setup with 61 Гамма. copies so top300 limit (60) is exceeded by 1.
+
+    All 61 eligible keys are assigned to the top300 stratum (single most-frequent
+    form).  select_sample_v2 selects the first 60 by deterministic ranking; the 61st
+    is a genuine eligible-but-unselected key available for the forge attack.
+    """
+    units = [{"type": "text", "text": "Гамма."} for _ in range(61)]
+    return setup_book(tmp_path, monkeypatch, units=units)
+
+
+class TestGateB1SampleSelectionIntegrity:
+    """R3: both merge() and score() must reject a forged but internally-consistent selection.
+
+    Root gap: _verify_saved_selection proved self-consistency of stored digests but never
+    recomputed the assignment from the authoritative context.  A forged JSON with a
+    different eligible key (and freshly-computed sha/fp) satisfied all stored checks.
+    Fix: _load_saved_selection now calls _verify_selection_fresh on every load path so
+    the authoritative deterministic recompute is always the final gate.
     """
 
-    def test_tampered_selected_by_stratum_sha_bypass_refused_on_merge(self, tmp_path, monkeypatch):
-        """R3 core: replace stratum keys, keep sha unchanged → SAMPLE_INVALID on merge."""
+    # --- SHA-bypass (previous round) --- still must hold after the new fix -------
+
+    def test_sha_bypass_still_refused_on_merge(self, tmp_path, monkeypatch):
+        """R3 regression: replace stratum keys, keep sha unchanged → SAMPLE_INVALID."""
         setup_book(tmp_path, monkeypatch)
         evaluation.sample({})
         path = _sample_json_path()
         record = json.loads(path.read_text(encoding="utf-8"))
-        # Find the first stratum that has at least one key and replace it.
         tampered = False
         for name in [n for n, _ in evaluation.STRATA]:
             if record["selected_by_stratum"][name]:
-                # Swap to a key with a recognisably wrong segment count so the
-                # attacker cannot accidentally produce a structurally valid key.
                 record["selected_by_stratum"][name] = ["injected|attacker|key"]
                 tampered = True
                 break
         assert tampered, "test setup: at least one non-empty stratum required"
-        # selected_by_stratum_sha256 and sample_fp are still the ORIGINAL values —
-        # exactly the sha-bypass attack that R3 must close.
         path.write_text(json.dumps(record), encoding="utf-8")
         incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
         before = snapshot(tmp_path)
         with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
             evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before, "no writes must occur before the integrity check"
+        assert snapshot(tmp_path) == before
 
-    def test_tampered_selected_by_stratum_sha_bypass_refused_on_score(self, tmp_path, monkeypatch):
-        """R3: same sha-bypass attack surfaces when score() loads the selection."""
-        setup_book(tmp_path, monkeypatch)
+    # --- Core new attack: internally-consistent forged eligible-key substitution --
+
+    def test_forged_eligible_key_refused_on_merge(self, tmp_path, monkeypatch):
+        """R3 core: self-consistent forged selection (genuine unselected eligible key) → SAMPLE_STALE.
+
+        Fixture: 61 Гамма. units → top300 stratum has 61 eligible keys; sample() selects
+        60 (the natural top300 limit), leaving 1 genuine unselected eligible key.
+        Forge replaces one selected key with that unselected key and recomputes ALL stored
+        digests so _verify_saved_selection passes entirely.
+        _verify_selection_fresh recomputes from context (selects the original 60) and
+        rejects the forgery with SAMPLE_STALE.
+        Gold, archive, todo and selection JSON must be byte-identical after rejection.
+        """
+        _setup_many_units(tmp_path, monkeypatch)
+        evaluation.sample({})
+        path = _sample_json_path()
+        original = json.loads(path.read_text(encoding="utf-8"))
+
+        # Identify the unselected eligible key (all 61 keys; 60 selected).
+        all_eligible = {occ.source_key for occ in evaluation._load_context({}).rows
+                        if occ.alignment_status == "aligned"
+                        and evaluation.vowel_count(occ.form_analysis) >= 2}
+        assert len(all_eligible) == 61, f"expected 61 eligible keys, got {len(all_eligible)}"
+        assert len(original["keys"]) == 60, f"expected 60 selected keys, got {len(original['keys'])}"
+        unselected = all_eligible - set(original["keys"])
+        assert len(unselected) == 1, f"expected exactly 1 unselected eligible key, got {len(unselected)}"
+        unselected_key = next(iter(unselected))
+
+        # Forge a self-consistent sample JSON that substitutes the unselected key.
+        forged = _forge_eligible_substitution(original, unselected_key)
+        assert forged["sample_fp"] != original["sample_fp"], "forged fp must differ from legitimate fp"
+        assert set(forged["keys"]) != set(original["keys"]), "forged keys must differ"
+
+        forged_path = paths.OUT / "stress" / "eval" / "sample" / "forged.json"
+        forged_path.write_text(json.dumps(forged), encoding="utf-8")
+
+        rows = todo_rows()
+        incoming = write_input(tmp_path, [labeled(rows[0])])
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        archive_path = paths.TEXT / "stress_gold.archive.tsv"
+        gold_before = gold_path.read_bytes() if gold_path.exists() else None
+        archive_before = archive_path.read_bytes() if archive_path.exists() else None
+
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.merge({}, incoming, sample_path=forged_path)
+
+        after_gold = gold_path.read_bytes() if gold_path.exists() else None
+        after_archive = archive_path.read_bytes() if archive_path.exists() else None
+        assert after_gold == gold_before, "gold must not be modified on forgery rejection"
+        assert after_archive == archive_before, "archive must not be modified on forgery rejection"
+
+    def test_forged_eligible_key_refused_on_score(self, tmp_path, monkeypatch):
+        """R3: forged eligible-key selection (genuine unselected key) also rejected by score()."""
+        _setup_many_units(tmp_path, monkeypatch)
         evaluation.sample({})
         rows = todo_rows()
         evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
+
         path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        for name in [n for n, _ in evaluation.STRATA]:
-            if record["selected_by_stratum"][name]:
-                record["selected_by_stratum"][name] = ["injected|attacker|key"]
-                break
-        path.write_text(json.dumps(record), encoding="utf-8")
-        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
+        original = json.loads(path.read_text(encoding="utf-8"))
+        all_eligible = {occ.source_key for occ in evaluation._load_context({}).rows
+                        if occ.alignment_status == "aligned"
+                        and evaluation.vowel_count(occ.form_analysis) >= 2}
+        unselected = all_eligible - set(original["keys"])
+        assert len(unselected) == 1, f"expected 1 unselected key, got {len(unselected)}"
+        forged = _forge_eligible_substitution(original, next(iter(unselected)))
+        path.write_text(json.dumps(forged), encoding="utf-8")
+
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
+
+    def test_valid_selection_loads_on_both_paths(self, tmp_path, monkeypatch):
+        """R3: untampered selection (many-unit fixture) must still merge successfully (regression)."""
+        _setup_many_units(tmp_path, monkeypatch)
+        evaluation.sample({})
+        rows = todo_rows()
+        result = evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
+        assert result["added"] == len(rows)
+
+    # --- Other coherent forgeries ---
 
     def test_strata_count_inconsistency_refused(self, tmp_path, monkeypatch):
         """R3: strata[name].n inconsistent with len(selected_by_stratum[name]) → SAMPLE_INVALID."""
@@ -1771,7 +1903,6 @@ class TestGateB1SampleSelectionIntegrity:
         evaluation.sample({})
         path = _sample_json_path()
         record = json.loads(path.read_text(encoding="utf-8"))
-        # Inflate the count for the first non-zero stratum — keep selected_by_stratum unchanged.
         for name in [n for n, _ in evaluation.STRATA]:
             if record["strata"][name]["n"] > 0:
                 record["strata"][name]["n"] += 1
@@ -1783,14 +1914,7 @@ class TestGateB1SampleSelectionIntegrity:
             evaluation.merge({}, incoming)
         assert snapshot(tmp_path) == before
 
-    def test_valid_selection_still_loads_after_fix(self, tmp_path, monkeypatch):
-        """R3: regression — untampered selection must still load and merge successfully."""
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        result = evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0])]))
-        assert result["added"] == 1
-
-    # --- Strengthen two R2 scenarios (Coordinator comment 6951884391) ---
+    # --- R2 strengthened selections (Coordinator comment 6959312730) ---
 
     def test_partial_merge_selection_json_untouched(self, tmp_path, monkeypatch):
         """R2 strengthened: partial merge must not modify the selection JSON."""

@@ -471,6 +471,10 @@ def _load_saved_selection(context, config, sample_path=None):
     """Load a saved v2 Selection, verifying integrity. Returns (Selection, path)."""
     def _build(stored, path):
         _verify_saved_selection(stored, context)
+        # Recompute the deterministic assignment from the authoritative context;
+        # a forged or malformed selection with internally-consistent stored digests
+        # but wrong keys cannot survive this check.
+        _verify_selection_fresh(stored, context, config)
         strata_by_key = {sk: name
                          for name, keys in stored["selected_by_stratum"].items()
                          for sk in keys}
