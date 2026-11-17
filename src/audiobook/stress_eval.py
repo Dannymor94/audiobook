@@ -1057,8 +1057,16 @@ def _yo_check(keys, by_key, context, config, yo_data_before):
     Missing journal treated as empty. UNSUPPORTED observation raises ERROR.
     YO_EVALUABLE = RESTORED_obs ∧ ¬F1-excluded; verdict lookup by restoration_fp.
     """
-    from audiobook.stress_yo_observer import UNSUPPORTED_obs, RESTORED_obs
-    yo_entries = parse_yo_evidence(yo_data_before.decode("utf-8")) if yo_data_before else []
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs, RESTORED_obs, restoration_fp as _rfp
+    yo_entries = parse_yo_evidence(yo_data_before.decode("utf-8")) if yo_data_before is not None else []
+    # R4: Independent authentication — verify current source identity and fp recomputation.
+    for _entry in yo_entries:
+        _current = context.sources.resolve(_entry["source_key"])
+        if _current is None or any(_entry[_n] != _current[0][_n] for _n in IDENTITY_FIELDS):
+            _error("YO_EVIDENCE_INVALID")
+        _idx_parts = [int(_p) for _p in _entry["restored_vowel_indices"].split("|")]
+        if _rfp(_current[0], _entry["restored_form_pre_respell"], _idx_parts) != _entry["restoration_fp"]:
+            _error("YO_EVIDENCE_INVALID")
     # F1 fix: build verdict_by_fp with conflict detection (loop, not dict comprehension).
     verdict_by_fp: dict = {}
     for entry in yo_entries:
@@ -1275,6 +1283,9 @@ def validate_yo_row(row: dict) -> dict:
     if parts != sorted(set(parts)):
         _error("YO_EVIDENCE_INVALID")
     if not _WORD.fullmatch(row["restored_form_pre_respell"]):
+        _error("YO_EVIDENCE_INVALID")
+    _restored_vowels = [c for c in row["restored_form_pre_respell"].lower() if c in _VOWELS]
+    if any(p >= len(_restored_vowels) or _restored_vowels[p] != "ё" for p in parts):
         _error("YO_EVIDENCE_INVALID")
     if row["yo_correct"] not in ("y", "n"):
         _error("YO_EVIDENCE_INVALID")

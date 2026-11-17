@@ -15,14 +15,27 @@ from test_stress_eval_sample import context_for, setup_book
 from test_stress_eval_merge import labeled, todo_rows, write_input, snapshot
 
 
-def _yo_sidecar_row(fp, *, source_key="01_test|0|0", yo_correct="y"):
-    """Return a minimal valid yo_evidence sidecar row with the given restoration_fp."""
+def _yo_sidecar_row(fp=None, *, source_key="01_test|0|0", yo_correct="y", identity=None,
+                    restored_form="Ёлка", restored_indices="0"):
+    """Return a valid yo_evidence sidecar row.
+
+    If identity is supplied, use its five source-identity fields (authentic row).
+    If fp is None, compute it from identity+restored_form+restored_indices automatically.
+    """
+    from audiobook.stress_yo_observer import restoration_fp as _rfp
     h = hashlib.sha256(b"test").hexdigest()
+    base_id = {"source_key": source_key, "form_source": "Елка",
+               "unit_text_sha256": h, "unit_kind": "text", "context_sha256": h}
+    if identity is not None:
+        for k in ("source_key", "form_source", "unit_text_sha256", "unit_kind", "context_sha256"):
+            base_id[k] = identity[k]
+    if fp is None:
+        fp = _rfp(base_id, restored_form, [int(p) for p in restored_indices.split("|")])
     return {
-        "schema_version": "yo-evidence/1", "source_key": source_key,
-        "form_source": "Елка", "unit_text_sha256": h, "unit_kind": "text",
-        "context_sha256": h, "restored_form_pre_respell": "Ёлка",
-        "restored_vowel_indices": "0", "observation_contract_version": "yo-observation/1",
+        "schema_version": "yo-evidence/1", **base_id,
+        "restored_form_pre_respell": restored_form,
+        "restored_vowel_indices": restored_indices,
+        "observation_contract_version": "yo-observation/1",
         "restoration_fp": fp, "norm_content_sha256": h, "yo_map_sha256": h,
         "prep_config_sha256": h, "yo_correct": yo_correct, "labeler": "test",
         "date": "2026-11-15",
@@ -30,14 +43,14 @@ def _yo_sidecar_row(fp, *, source_key="01_test|0|0", yo_correct="y"):
 
 
 def _patch_yo_obs(monkeypatch, ctx):
-    """Monkeypatch _yo_observe_key to return RESTORED_obs for the first occurrence; return mock_fp."""
+    """Monkeypatch _yo_observe_key to return RESTORED_obs for the first occurrence; return (mock_fp, identity)."""
     from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
     occ = next(iter(ctx.rows))
     identity = ctx.sources.resolve(occ.source_key)[0]
     mock_fp = _rfp(identity, "Ёлка", [0])
     monkeypatch.setattr(evaluation, "_yo_observe_key",
                         lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
-    return mock_fp
+    return mock_fp, identity
 
 
 def predictions(context, changes=None, *, homographs=None):
@@ -166,9 +179,9 @@ def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, corre
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
     # YO restoration enabled: observer confirms RESTORED_obs; sidecar verdict present → yo_missing=0.
-    mock_fp = _patch_yo_obs(monkeypatch, ctx)
+    mock_fp, identity = _patch_yo_obs(monkeypatch, ctx)
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp)]), encoding="utf-8")
+    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, identity=identity)]), encoding="utf-8")
     result = evaluation.score({})
     if label == "yo":
         # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
@@ -222,9 +235,9 @@ def test_adapter_mapping_y_property_override_and_population_weights(tmp_path, mo
     evaluation.merge({}, write_input(tmp_path, annotated))
     # YO restoration enabled: Елка is in sample (omograph stratum); observer confirms RESTORED_obs.
     # Sidecar verdict present → yo_missing=0. YO_WARN comes from yo_correct="n" in gold (wrong verdict).
-    mock_fp = _patch_yo_obs(monkeypatch, context)
+    mock_fp, identity = _patch_yo_obs(monkeypatch, context)
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="n")]),
+    yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="n", identity=identity)]),
                        encoding="utf-8")
     result = evaluation.score({})
     metrics = result["metrics"]["overall"]
@@ -450,6 +463,7 @@ class TestT38YoSidecarFpCheck:
         occ = next(iter(ctx.rows))
         from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
         identity = ctx.sources.resolve(occ.source_key)[0]
+        self._identity = identity
         mock_fp = _rfp(identity, "Ёлка", [0])
         # Patch BEFORE sample so stored eligible assignment includes "yo_changed" stratum,
         # matching what _verify_selection_fresh recomputes at score time.
@@ -462,7 +476,7 @@ class TestT38YoSidecarFpCheck:
 
     def _make_sidecar_with_fp(self, fp, pre_respell="Ёлка", indices="0"):
         """Return a valid sidecar row dict with given restoration_fp."""
-        return _yo_sidecar_row(fp)
+        return _yo_sidecar_row(fp, identity=self._identity, restored_form=pre_respell, restored_indices=indices)
 
     def test_T38a_sidecar_absent_yo_evaluable_is_incomplete(self, tmp_path, monkeypatch):
         """T38a: journal absent when |Y|>0 → treated as empty → no verdict → INCOMPLETE rc 2."""
@@ -476,25 +490,38 @@ class TestT38YoSidecarFpCheck:
         assert evaluation.main(["score"]) == 2
 
     def test_sidecar_present_wrong_fp_is_incomplete(self, tmp_path, monkeypatch):
-        """T38b (scenario а): journal has entry for candidate A, current obs gives fp B → INCOMPLETE."""
-        ctx, current_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
-        # Sidecar records stale_fp (candidate A) ≠ current_fp (candidate B) → lookup fails
-        stale_fp = hashlib.sha256(b"stale_candidate_A").hexdigest()
+        """T38b: journal has authentic entry for candidate A (old fp), current obs gives candidate B (new fp) → INCOMPLETE."""
+        from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+        # "Еле." has two е-vowels: index 0 → "Ёле", index 1 → "Елё" — so old/new fps differ.
+        units = [{"type": "text", "text": "Еле."}]
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units, synth={"Еле.": "Ёле."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        occ = next(iter(ctx.rows))
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        self._identity = identity
+        old_fp = _rfp(identity, "Ёле", [0])
+        new_fp = _rfp(identity, "Елё", [1])
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, sources, cfg: RESTORED_obs("Елё", (1,), new_fp))
+        evaluation.sample({})
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(stale_fp)]),
-                           encoding="utf-8")
+        yo_path.write_text(
+            evaluation.serialize_yo_evidence([
+                _yo_sidecar_row(old_fp, identity=identity, restored_form="Ёле", restored_indices="0")
+            ]),
+            encoding="utf-8",
+        )
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 1
 
     def test_sidecar_present_no_entry_for_restored_key_is_incomplete(self, tmp_path, monkeypatch):
-        """(б): journal present with entries for other fps, none matching current obs → INCOMPLETE."""
-        ctx, current_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
-        other_fp = hashlib.sha256(b"other_key_fp").hexdigest()
+        """(б): journal present but empty (header-only), no entry for current fp → INCOMPLETE."""
+        self._setup_yo_evaluable(tmp_path, monkeypatch)
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-        yo_path.write_text(evaluation.serialize_yo_evidence([self._make_sidecar_with_fp(other_fp)]),
-                           encoding="utf-8")
-        # verdict_by_fp = {other_fp: row}, current_fp not in it → yo_missing=1
+        yo_path.write_text("\t".join(evaluation.YO_FIELDS) + "\n", encoding="utf-8")
         result = evaluation.score({})
         assert result["status"] == "INCOMPLETE"
         assert result["counts"]["missing_yo_verdicts"] == 1
@@ -565,7 +592,7 @@ class TestT38YoSidecarFpCheck:
         ctx, mock_fp = self._setup_yo_evaluable(tmp_path, monkeypatch)
         yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
         yo_path.write_text(
-            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="y")]),
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct="y", identity=self._identity)]),
             encoding="utf-8",
         )
         result = evaluation.score({})
@@ -574,8 +601,8 @@ class TestT38YoSidecarFpCheck:
         # Two rows: same fp, opposite verdicts → conflict must be detected
         yo_path.write_text(
             evaluation.serialize_yo_evidence([
-                _yo_sidecar_row(mock_fp, yo_correct="y"),
-                _yo_sidecar_row(mock_fp, source_key="01_test|0|1", yo_correct="n"),
+                _yo_sidecar_row(mock_fp, yo_correct="y", identity=self._identity),
+                _yo_sidecar_row(mock_fp, yo_correct="n", identity=self._identity),
             ]),
             encoding="utf-8",
         )
@@ -601,7 +628,7 @@ class TestT38YoSidecarFpCheck:
 
         # Establish a COMPLETE score baseline with a single non-conflicting sidecar entry.
         yo_path.write_text(
-            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct=first)]),
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, yo_correct=first, identity=self._identity)]),
             encoding="utf-8",
         )
         result = evaluation.score({})
@@ -613,8 +640,8 @@ class TestT38YoSidecarFpCheck:
 
         # Build two internally consistent rows: same source_key/identity/fp, different yo_correct.
         # Different labeler makes each row distinct; both pass validate_yo_row individually.
-        row_first = {**_yo_sidecar_row(mock_fp, yo_correct=first), "labeler": "labeler-a"}
-        row_second = {**_yo_sidecar_row(mock_fp, yo_correct=second), "labeler": "labeler-b"}
+        row_first = {**_yo_sidecar_row(mock_fp, yo_correct=first, identity=self._identity), "labeler": "labeler-a"}
+        row_second = {**_yo_sidecar_row(mock_fp, yo_correct=second, identity=self._identity), "labeler": "labeler-b"}
         assert evaluation.validate_yo_row(row_first)
         assert evaluation.validate_yo_row(row_second)
 
@@ -919,3 +946,162 @@ def test_t11_reg_stale_eligible_assignment_raises_sample_stale(tmp_path, monkeyp
     monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
     with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
         evaluation._verify_selection_fresh(stored, ctx, {})
+
+
+# ---------------------------------------------------------------------------
+# Gate B2 / R4: score() independently authenticates every stored YO-evidence row
+# ---------------------------------------------------------------------------
+
+def _raw_yo_tsv(row):
+    """Serialize a single YO row to TSV without calling validate_yo_row (for invalid-row tests)."""
+    return "\t".join(evaluation.YO_FIELDS) + "\n" + "\t".join(row[f] for f in evaluation.YO_FIELDS) + "\n"
+
+
+class TestGateB2R4:
+    """R4: score() verifies identity and recomputes restoration_fp for every sidecar row."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Book + sample + gold with RESTORED_obs patched; return (ctx, mock_fp, identity)."""
+        units = [{"type": "text", "text": "Елка."}]
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        occ = next(iter(ctx.rows))
+        from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, sources, cfg: RESTORED_obs("Ёлка", (0,), mock_fp))
+        evaluation.sample({})
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "0", yo_correct="y")]))
+        return ctx, mock_fp, identity
+
+    def test_T01_absent_journal_no_error_yo_missing_counted(self, tmp_path, monkeypatch):
+        """T01: absent sidecar → yo_data_before=None → no rows → no auth loop → yo_missing=1."""
+        self._setup(tmp_path, monkeypatch)
+        result = evaluation.score({})
+        assert result["status"] == "INCOMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 1
+
+    def test_T02_zero_byte_journal_raises_invalid(self, tmp_path, monkeypatch):
+        """T02: 0-byte sidecar → is not None → decode → empty string → parse fails (no newline) → YO_EVIDENCE_INVALID.
+
+        Old code (truthiness check) silently treated b"" as absent (empty). Fix: is not None → error surfaced.
+        """
+        self._setup(tmp_path, monkeypatch)
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_bytes(b"")
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T03_unknown_source_key_raises_invalid(self, tmp_path, monkeypatch):
+        """T03: sidecar row source_key not in context.sources → resolve returns None → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        bad_id = {**identity, "source_key": "02_other|0|0"}
+        row = _yo_sidecar_row(_rfp(bad_id, "Ёлка", [0]), identity=bad_id)
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([row]), encoding="utf-8"
+        )
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T04_stale_identity_raises_invalid(self, tmp_path, monkeypatch):
+        """T04: row has valid source_key but stale identity fields → field mismatch → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        stale_id = {**identity, "unit_text_sha256": hashlib.sha256(b"old_text").hexdigest()}
+        row = _yo_sidecar_row(_rfp(stale_id, "Ёлка", [0]), identity=stale_id)
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([row]), encoding="utf-8"
+        )
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T05_index_points_to_non_yo_raises_invalid(self, tmp_path, monkeypatch):
+        """T05: index 1 → 'а' (not ё) in "Ёлка" → validate_yo_row → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        row = _yo_sidecar_row(_rfp(identity, "Ёлка", [0]), identity=identity)
+        # Manually swap to index 1 (points to 'а' not 'ё') — bypass serialize_yo_evidence validation.
+        row["restored_vowel_indices"] = "1"
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(_raw_yo_tsv(row), encoding="utf-8")
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T06_tampered_fp_raises_invalid(self, tmp_path, monkeypatch):
+        """T06: fp doesn't match recomputed value → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        row = _yo_sidecar_row(identity=identity)  # auto-computes correct fp
+        row["restoration_fp"] = hashlib.sha256(b"tampered").hexdigest()
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(_raw_yo_tsv(row), encoding="utf-8")
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T07_authentic_row_passes_auth(self, tmp_path, monkeypatch):
+        """T07: correct identity + correct fp → R4 passes → COMPLETE."""
+        _, mock_fp, identity = self._setup(tmp_path, monkeypatch)
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, identity=identity)]),
+            encoding="utf-8"
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+
+    def test_T08_global_digests_changed_fp_still_valid(self, tmp_path, monkeypatch):
+        """T08: norm/yo_map/prep_config changed; fp not over them → still valid → COMPLETE."""
+        _, mock_fp, identity = self._setup(tmp_path, monkeypatch)
+        row = _yo_sidecar_row(mock_fp, identity=identity)
+        row["norm_content_sha256"] = hashlib.sha256(b"old_norm").hexdigest()
+        row["yo_map_sha256"] = hashlib.sha256(b"old_yo_map").hexdigest()
+        row["prep_config_sha256"] = hashlib.sha256(b"old_prep").hexdigest()
+        # serialize_yo_evidence validates format only (hex check passes for valid hex strings).
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([row]), encoding="utf-8"
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+
+    def test_T09_oob_index_raises_invalid(self, tmp_path, monkeypatch):
+        """T09: index 5 ≥ vowel count 2 → OOB → validate_yo_row → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        row = _yo_sidecar_row(_rfp(identity, "Ёлка", [0]), identity=identity)
+        row["restored_vowel_indices"] = "5"
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(_raw_yo_tsv(row), encoding="utf-8")
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T10_non_yo_form_raises_invalid(self, tmp_path, monkeypatch):
+        """T10: restored_form 'Елка' has 'е' at index 0 (not ё) → validate_yo_row → YO_EVIDENCE_INVALID."""
+        _, _, identity = self._setup(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import restoration_fp as _rfp
+        row = _yo_sidecar_row(_rfp(identity, "Ёлка", [0]), identity=identity)
+        row["restored_form_pre_respell"] = "Елка"
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(_raw_yo_tsv(row), encoding="utf-8")
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+            evaluation.score({})
+
+    def test_T11_complete_yo_missing_zero(self, tmp_path, monkeypatch):
+        """T11: authentic matching row → R4 passes, verdict found → COMPLETE, yo_missing=0."""
+        _, mock_fp, identity = self._setup(tmp_path, monkeypatch)
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, identity=identity)]),
+            encoding="utf-8"
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 0
+
+    def test_T12_historical_global_digests_still_valid(self, tmp_path, monkeypatch):
+        """T12 (A→B→A): row recorded with old global digests; fp unchanged → still valid."""
+        _, mock_fp, identity = self._setup(tmp_path, monkeypatch)
+        row = _yo_sidecar_row(mock_fp, identity=identity)
+        row["norm_content_sha256"] = hashlib.sha256(b"norm_v1").hexdigest()
+        row["yo_map_sha256"] = hashlib.sha256(b"yo_map_v1").hexdigest()
+        row["prep_config_sha256"] = hashlib.sha256(b"prep_v1").hexdigest()
+        (paths.TEXT / "stress_gold.yo_evidence.tsv").write_text(
+            evaluation.serialize_yo_evidence([row]), encoding="utf-8"
+        )
+        result = evaluation.score({})
+        assert result["status"] == "COMPLETE"
+        assert result["counts"]["missing_yo_verdicts"] == 0
