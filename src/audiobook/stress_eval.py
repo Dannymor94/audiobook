@@ -259,16 +259,50 @@ def _lock_path() -> Path:
     return paths.OUT / "stress" / "eval" / _EVAL_LOCK_NAME
 
 
+def _check_lock_symlinks(path: Path) -> None:
+    """Fail with EVAL_LOCK_UNAVAILABLE if path or any ancestor under paths.OUT is a symlink.
+
+    If path is not under paths.OUT (e.g., explicit test path), checks path and parent only.
+    ponytail: TOCTOU window between check and open; mitigated by O_NOFOLLOW on POSIX.
+    """
+    try:
+        rel = path.relative_to(paths.OUT)
+    except ValueError:
+        try:
+            if path.is_symlink() or path.parent.is_symlink():
+                _error("EVAL_LOCK_UNAVAILABLE")
+        except OSError:
+            _error("EVAL_LOCK_UNAVAILABLE")
+        return
+    try:
+        current = paths.OUT
+        for part in rel.parts:
+            current = current / part
+            if current.is_symlink():
+                _error("EVAL_LOCK_UNAVAILABLE")
+    except OSError:
+        _error("EVAL_LOCK_UNAVAILABLE")
+
+
 def acquire_eval_lock(lock_path: Path | None = None) -> object:
     """Acquire OS-backed exclusive evaluation lock. Returns opaque lock handle.
 
-    Fails closed with EVAL_LOCK_UNAVAILABLE/ERROR if unavailable or unsafe.
+    Fails closed with EVAL_LOCK_UNAVAILABLE if unavailable, unsafe, or symlinked.
     Call release_eval_lock(handle) when done.
     """
     path = lock_path if lock_path is not None else _lock_path()
+    _check_lock_symlinks(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _check_lock_symlinks(path)  # re-check after mkdir: defend against TOCTOU on the directory
+    _o_nofollow = getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = open(path, "a", encoding="utf-8")  # noqa: WPS515
+        if _o_nofollow and os.name != "nt":
+            raw = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | _o_nofollow, 0o666)  # encoding=N/A: raw fd, wrapped by fdopen below
+            fd = os.fdopen(raw, "a", encoding="utf-8")
+        else:
+            # Windows: rely on pre-open symlink check; no TOCTOU-safe O_NOFOLLOW equivalent.
+            # ponytail: residual TOCTOU on Windows; harden with CreateFile if required.
+            fd = open(path, "a", encoding="utf-8")  # noqa: WPS515
     except OSError:
         _error("EVAL_LOCK_UNAVAILABLE")
     try:
@@ -1012,6 +1046,15 @@ def _yo_observe_key(occ, sources, config):
     if occ.su_chunk_id is None:
         return UNSUPPORTED_obs("SU_ALIGNMENT_MISSING")
     manifest_path = paths.OUT / "sections" / occ.section / "manifest.jsonl"
+    # R8: reject any symlinked path component before read (T04/T05/T06).
+    _sections = paths.OUT / "sections"
+    _section_dir = _sections / occ.section
+    for _p in (_sections, _section_dir, manifest_path):
+        try:
+            if _p.is_symlink():
+                return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+        except OSError:
+            return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
     try:
         rows = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     except (OSError, ValueError, UnicodeError):
