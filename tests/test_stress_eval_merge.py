@@ -867,19 +867,20 @@ class TestT34T35T37T39YoMerge:
 
     def test_T34b_different_candidate_requires_new_judgment(self, tmp_path, monkeypatch):
         """T34b: different restoration_fp (candidate moved) requires a new YO entry."""
-        self._setup(tmp_path, monkeypatch)
-        identity = self._identity()
-        fp_a = _restoration_fp_for(identity, "Бёта", [0])
-        fp_b = _restoration_fp_for(identity, "Бетё", [1])
+        units = [{"type": "text", "text": "Еле."}]
+        setup_book(tmp_path, monkeypatch, units)
+        identity = context_for(units).sources.resolve("01_test|0|0")[0]
+        fp_a = _restoration_fp_for(identity, "Ёле", [0])
+        fp_b = _restoration_fp_for(identity, "Елё", [1])
         row_a = _yo_row(identity["source_key"], identity["form_source"],
                         identity["unit_text_sha256"], identity["unit_kind"],
-                        identity["context_sha256"], "Бёта", [0], fp_a, "y")
+                        identity["context_sha256"], "Ёле", [0], fp_a, "y")
         row_b = _yo_row(identity["source_key"], identity["form_source"],
                         identity["unit_text_sha256"], identity["unit_kind"],
-                        identity["context_sha256"], "Бетё", [1], fp_b, "n")
+                        identity["context_sha256"], "Елё", [1], fp_b, "n")
         # B3: use stateful observer to return the right fp per merge_yo call.
         from audiobook.stress_yo_observer import RESTORED_obs
-        obs_sequence = iter([RESTORED_obs("Бёта", (0,), fp_a), RESTORED_obs("Бетё", (1,), fp_b)])
+        obs_sequence = iter([RESTORED_obs("Ёле", (0,), fp_a), RESTORED_obs("Елё", (1,), fp_b)])
         monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: next(obs_sequence))
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_a]))
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_b]))
@@ -964,17 +965,19 @@ class TestT34T35T37T39YoMerge:
             })
 
     def test_f6b_fp_mismatch_between_candidate_and_claimed_fp_error(self, tmp_path, monkeypatch):
-        """F6b: restoration_fp doesn't match rfp(identity, form, indices) → YO_STALE_INPUT; no ledger write."""
+        """F6b: restoration_fp doesn't match rfp(identity, form, indices) → YO_EVIDENCE_INVALID; no ledger write."""
         self._setup(tmp_path, monkeypatch)
         identity = self._identity()
-        fp_for_beta = _restoration_fp_for(identity, "Бёта", [0])
-        # Row claims form "Бетё"[1] but fp was computed for "Бёта"[0] → mismatch.
+        forged_fp = "0" * 64
+        # Valid forward spelling with an altered fingerprint; bypass serializer validation.
         row = _yo_row(identity["source_key"], identity["form_source"],
                       identity["unit_text_sha256"], identity["unit_kind"],
-                      identity["context_sha256"], "Бетё", [1], fp_for_beta, "y")
-        yo_input = _write_yo_input(tmp_path, [row])
+                      identity["context_sha256"], "Бёта", [0], forged_fp, "y")
+        yo_input = tmp_path / "forged_yo.tsv"
+        yo_input.write_text("\t".join(evaluation.YO_FIELDS) + "\n" +
+                            "\t".join(row[f] for f in evaluation.YO_FIELDS) + "\n", encoding="utf-8")
         before = snapshot(tmp_path)  # snapshot after input file, before merge_yo
-        with pytest.raises(AnnotationError, match="YO_STALE_INPUT"):
+        with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
             evaluation.merge_yo({}, yo_input)
         assert snapshot(tmp_path) == before
 

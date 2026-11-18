@@ -1057,16 +1057,12 @@ def _yo_check(keys, by_key, context, config, yo_data_before):
     Missing journal treated as empty. UNSUPPORTED observation raises ERROR.
     YO_EVALUABLE = RESTORED_obs ∧ ¬F1-excluded; verdict lookup by restoration_fp.
     """
-    from audiobook.stress_yo_observer import UNSUPPORTED_obs, RESTORED_obs, restoration_fp as _rfp
-    yo_entries = parse_yo_evidence(yo_data_before.decode("utf-8")) if yo_data_before is not None else []
-    # R4: Independent authentication — verify current source identity and fp recomputation.
-    for _entry in yo_entries:
-        _current = context.sources.resolve(_entry["source_key"])
-        if _current is None or any(_entry[_n] != _current[0][_n] for _n in IDENTITY_FIELDS):
-            _error("YO_EVIDENCE_INVALID")
-        _idx_parts = [int(_p) for _p in _entry["restored_vowel_indices"].split("|")]
-        if _rfp(_current[0], _entry["restored_form_pre_respell"], _idx_parts) != _entry["restoration_fp"]:
-            _error("YO_EVIDENCE_INVALID")
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs, RESTORED_obs
+    try:
+        yo_entries = parse_yo_evidence(yo_data_before.decode("utf-8")) if yo_data_before is not None else []
+    except UnicodeError:
+        _error("YO_EVIDENCE_INVALID")
+    # Historical versions authenticate themselves, independently of current sources.
     # F1 fix: build verdict_by_fp with conflict detection (loop, not dict comprehension).
     verdict_by_fp: dict = {}
     for entry in yo_entries:
@@ -1284,8 +1280,26 @@ def validate_yo_row(row: dict) -> dict:
         _error("YO_EVIDENCE_INVALID")
     if not _WORD.fullmatch(row["restored_form_pre_respell"]):
         _error("YO_EVIDENCE_INVALID")
-    _restored_vowels = [c for c in row["restored_form_pre_respell"].lower() if c in _VOWELS]
-    if any(p >= len(_restored_vowels) or _restored_vowels[p] != "ё" for p in parts):
+    source = row["form_source"]
+    candidate = row["restored_form_pre_respell"]
+    if (unicodedata.normalize("NFC", source) != source
+            or unicodedata.normalize("NFC", candidate) != candidate
+            or len(source) != len(candidate)):
+        _error("YO_EVIDENCE_INVALID")
+    changed_indices = []
+    vowel_ordinal = 0
+    for original, restored in zip(source, candidate):
+        if original != restored:
+            if (original, restored) not in (("е", "ё"), ("Е", "Ё")):
+                _error("YO_EVIDENCE_INVALID")
+            changed_indices.append(vowel_ordinal)
+        if original.lower() in _VOWELS:
+            vowel_ordinal += 1
+    if not changed_indices or changed_indices != parts:
+        _error("YO_EVIDENCE_INVALID")
+    from audiobook.stress_yo_observer import restoration_fp
+    identity = {name: row[name] for name in IDENTITY_FIELDS}
+    if restoration_fp(identity, candidate, parts) != row["restoration_fp"]:
         _error("YO_EVIDENCE_INVALID")
     if row["yo_correct"] not in ("y", "n"):
         _error("YO_EVIDENCE_INVALID")
