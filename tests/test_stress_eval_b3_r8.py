@@ -1,6 +1,8 @@
-"""B3/R8 filesystem security regression tests for stress_eval.
+"""B3/R8-R1 filesystem security regression tests for stress_eval.
 
-Synthetic only — no owner data, no real paths. All eight R8 oracle cases.
+Synthetic only — no owner data, no real paths.
+Covers R8 oracle matrix (T01-T08), paths.OUT itself, O_NOFOLLOW TOCTOU,
+inaccessible-path normalization, and score-ERROR propagation.
 """
 import os
 import sys
@@ -12,7 +14,7 @@ import pytest
 from audiobook import paths
 from audiobook import stress_eval as ev
 from audiobook.unitmap import AnnotationError
-from audiobook.stress_yo_observer import UNSUPPORTED_obs
+from audiobook.stress_yo_observer import UNSUPPORTED_obs, NONE_obs
 
 # ---------------------------------------------------------------------------
 # Symlink availability guard
@@ -33,6 +35,13 @@ except (OSError, NotImplementedError):
 needs_symlink = pytest.mark.skipif(
     not _CAN_SYMLINK,
     reason="symlinks not available on this platform/config (Windows without Developer Mode)",
+)
+
+_HAS_O_NOFOLLOW = bool(getattr(os, "O_NOFOLLOW", 0)) and os.name != "nt"
+
+needs_nofollow = pytest.mark.skipif(
+    not _HAS_O_NOFOLLOW,
+    reason="O_NOFOLLOW not available on this platform",
 )
 
 # ---------------------------------------------------------------------------
@@ -74,19 +83,32 @@ def _make_sources():
     return SimpleNamespace(resolve=lambda k: (dummy_identity, "тест", None))
 
 
+def _snapshot(directory: Path) -> dict:
+    """Full recursive snapshot: {rel_path_str: bytes | None (dir/symlink)}."""
+    result = {}
+    if not directory.exists():
+        return result
+    for item in sorted(directory.rglob("*")):
+        rel = str(item.relative_to(directory))
+        if item.is_file() and not item.is_symlink():
+            result[rel] = item.read_bytes()
+        else:
+            result[rel] = None
+    return result
+
+
 # ---------------------------------------------------------------------------
-# BEFORE-FIX REPRO (source-code inspection, executed via monkeypatch)
-# Demonstrates that the unpatched code would follow symlinks: we bypass our
-# new guard and show the raw open() / read_text() accept symlink targets.
+# BEFORE-FIX REPRO
+# Demonstrates the pre-patch vulnerability using raw stdlib — not the
+# production function (which is now patched and would reject these paths).
 # ---------------------------------------------------------------------------
 
 
 @needs_symlink
-def test_before_fix_repro_lock_would_follow_symlink(tmp_path):
-    """Pre-fix: open(path, 'a') follows a symlink target — demonstrates the vulnerability.
+def test_before_fix_repro_raw_open_follows_symlink(tmp_path):
+    """Pre-fix demo (raw stdlib): open('a') follows a symlink — the closed vulnerability.
 
-    We call the raw open() without symlink protection and show it writes to external file.
-    This is a synthetic demonstration on tmp_path; no owner data touched.
+    Executed against raw os.open/open, NOT the patched production function.
     """
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -96,15 +118,15 @@ def test_before_fix_repro_lock_would_follow_symlink(tmp_path):
     lock_link = tmp_path / ".test.lock"
     lock_link.symlink_to(external)
 
-    # Raw open("a") without O_NOFOLLOW follows the symlink and writes to external.
+    # Raw open("a") without O_NOFOLLOW follows the symlink (pre-fix behavior).
     with open(str(lock_link), "a", encoding="utf-8") as fh:
-        fh.write("")  # append nothing, but file access proves it opened external
-    assert lock_link.resolve() == external  # symlink was followed
+        fh.write("")
+    assert lock_link.resolve() == external  # confirmed: symlink was followed
 
 
 @needs_symlink
-def test_before_fix_repro_manifest_would_follow_symlink(tmp_path):
-    """Pre-fix: read_text() follows a symlink — demonstrates the manifest vulnerability."""
+def test_before_fix_repro_raw_read_text_follows_symlink(tmp_path):
+    """Pre-fix demo (raw stdlib): read_text() follows a symlink — the closed vulnerability."""
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "secret.jsonl"
@@ -113,9 +135,9 @@ def test_before_fix_repro_manifest_would_follow_symlink(tmp_path):
     link = tmp_path / "manifest.jsonl"
     link.symlink_to(secret)
 
-    # Raw read_text() follows the symlink — reads external data.
+    # Raw read_text() follows the symlink (pre-fix behavior).
     content = link.read_text(encoding="utf-8")
-    assert "secret" in content  # proves external data would have been read
+    assert "secret" in content
 
 
 # ---------------------------------------------------------------------------
@@ -139,17 +161,13 @@ def test_r8_t01_lock_parent_dir_symlink(tmp_path, monkeypatch):
 
     monkeypatch.setattr(paths, "OUT", out_dir)
 
-    outside_before = {p.name: p.read_bytes() for p in outside.iterdir()}
-    outside_names_before = set(outside.iterdir())
+    before = _snapshot(outside)
 
     with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
         ev.acquire_eval_lock()
 
-    # Assert no side effects on external directory.
-    assert set(outside.iterdir()) == outside_names_before
+    assert _snapshot(outside) == before
     assert sentinel.read_text(encoding="utf-8") == "external"
-    for p, b in outside_before.items():
-        assert (outside / p).read_bytes() == b
 
 
 # ---------------------------------------------------------------------------
@@ -173,18 +191,16 @@ def test_r8_t02_lock_file_symlink(tmp_path, monkeypatch):
 
     monkeypatch.setattr(paths, "OUT", out_dir)
 
-    outside_listing = sorted(p.name for p in outside.iterdir())
-    external_bytes_before = external_file.read_bytes()
+    before = _snapshot(outside)
 
     with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
         ev.acquire_eval_lock()
 
-    assert sorted(p.name for p in outside.iterdir()) == outside_listing
-    assert external_file.read_bytes() == external_bytes_before
+    assert _snapshot(outside) == before
 
 
 # ---------------------------------------------------------------------------
-# R8-T03: nested ancestor is a symlink (stress dir → outside)
+# R8-T03: nested ancestor (stress dir) is a symlink
 # ---------------------------------------------------------------------------
 
 
@@ -200,12 +216,144 @@ def test_r8_t03_nested_ancestor_symlink(tmp_path, monkeypatch):
     stress_link.symlink_to(outside)
 
     monkeypatch.setattr(paths, "OUT", out_dir)
-    outside_before = set(outside.iterdir())
+    before = _snapshot(outside)
 
     with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
         ev.acquire_eval_lock()
 
-    assert set(outside.iterdir()) == outside_before
+    assert _snapshot(outside) == before
+
+
+# ---------------------------------------------------------------------------
+# NEW: paths.OUT itself is a symlink (P1-R8-1 fix)
+# ---------------------------------------------------------------------------
+
+
+@needs_symlink
+def test_r8_out_itself_symlink_lock(tmp_path, monkeypatch):
+    """P1-R8-1: paths.OUT itself is a symlink → EVAL_LOCK_UNAVAILABLE, no external effects."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    out_link = tmp_path / "out"
+    out_link.symlink_to(outside)
+
+    monkeypatch.setattr(paths, "OUT", out_link)
+    before = _snapshot(outside)
+
+    with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+        ev.acquire_eval_lock()
+
+    assert _snapshot(outside) == before
+
+
+@needs_symlink
+def test_r8_out_itself_symlink_observer(tmp_path, monkeypatch):
+    """P1-R8-1: paths.OUT itself is a symlink → observer UNSUPPORTED, external data not read."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.jsonl"
+    secret.write_text('{"id": "leaked"}\n', encoding="utf-8")
+    out_link = tmp_path / "out"
+    out_link.symlink_to(outside)
+
+    monkeypatch.setattr(paths, "OUT", out_link)
+    before = _snapshot(outside)
+
+    occ = _make_occ("ch01")
+    sources = _make_sources()
+    result = ev._yo_observe_key(occ, sources, {})
+
+    assert isinstance(result, UNSUPPORTED_obs)
+    assert _snapshot(outside) == before
+
+
+# ---------------------------------------------------------------------------
+# O_NOFOLLOW TOCTOU protection tests (P1-R8-2 fix)
+# Tests that O_NOFOLLOW guards against TOCTOU race where is_symlink() passed.
+# ---------------------------------------------------------------------------
+
+
+@needs_symlink
+@needs_nofollow
+def test_r8_lock_onofollow_toctou_protection(tmp_path, monkeypatch):
+    """P1-R8-2: O_NOFOLLOW on lock open rejects symlink even when is_symlink() is spoofed.
+
+    Simulates TOCTOU: is_symlink check passes (spoofed False), but O_NOFOLLOW
+    at open time catches the symlink → EVAL_LOCK_UNAVAILABLE, external unchanged.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external = outside / "data.txt"
+    external.write_text("external", encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    eval_dir = out_dir / "stress" / "eval"
+    eval_dir.mkdir(parents=True)
+    lock_link = eval_dir / ".wp4.lock"
+    lock_link.symlink_to(external)
+
+    monkeypatch.setattr(paths, "OUT", out_dir)
+    # Spoof is_symlink() to simulate TOCTOU (check sees non-symlink, symlink was placed after).
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+
+    with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+        ev.acquire_eval_lock()
+
+    assert external.read_bytes() == b"external"
+
+
+@needs_symlink
+@needs_nofollow
+def test_r8_manifest_onofollow_toctou_protection(tmp_path, monkeypatch):
+    """P1-R8-2: O_NOFOLLOW on manifest open rejects symlink even when is_symlink() is spoofed.
+
+    Simulates TOCTOU: is_symlink check passes (spoofed False), but O_NOFOLLOW
+    catches the symlink at open → UNSUPPORTED_obs, external data not read.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.jsonl"
+    secret.write_text('{"secret": true}\n', encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    section_dir = out_dir / "sections" / "ch01"
+    section_dir.mkdir(parents=True)
+    manifest_link = section_dir / "manifest.jsonl"
+    manifest_link.symlink_to(secret)
+
+    monkeypatch.setattr(paths, "OUT", out_dir)
+    # Spoof is_symlink() to simulate TOCTOU.
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+
+    occ = _make_occ("ch01")
+    sources = _make_sources()
+    result = ev._yo_observe_key(occ, sources, {})
+
+    assert isinstance(result, UNSUPPORTED_obs)
+    assert secret.read_bytes() == b'{"secret": true}\n'
+
+
+# ---------------------------------------------------------------------------
+# P2-R8-3: inaccessible lock parent → EVAL_LOCK_UNAVAILABLE (not raw OSError)
+# ---------------------------------------------------------------------------
+
+
+def test_r8_inaccessible_lock_path_normalized(tmp_path, monkeypatch):
+    """P2-R8-3: PermissionError on mkdir → EVAL_LOCK_UNAVAILABLE, not propagated raw OSError."""
+    out_dir = tmp_path / "out"
+    eval_dir = out_dir / "stress" / "eval"
+    eval_dir.mkdir(parents=True)
+    locked_subdir = eval_dir / "locked"
+    locked_subdir.mkdir()
+    locked_subdir.chmod(0o444)  # read-only → mkdir inside will fail
+
+    monkeypatch.setattr(paths, "OUT", out_dir)
+    lock_path = locked_subdir / "nested" / ".test.lock"
+    try:
+        with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+            ev.acquire_eval_lock(lock_path)
+    finally:
+        locked_subdir.chmod(0o755)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +363,7 @@ def test_r8_t03_nested_ancestor_symlink(tmp_path, monkeypatch):
 
 @needs_symlink
 def test_r8_t04_sections_dir_symlink(tmp_path, monkeypatch):
-    """R8-T04: out/sections is a symlink → UNSUPPORTED_obs, external data not read."""
+    """R8-T04: out/sections is a symlink → UNSUPPORTED_obs, external data not read (snapshot parity)."""
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "secret.jsonl"
@@ -227,13 +375,14 @@ def test_r8_t04_sections_dir_symlink(tmp_path, monkeypatch):
     sections_link.symlink_to(outside)
 
     monkeypatch.setattr(paths, "OUT", out_dir)
+    before = _snapshot(outside)
 
     occ = _make_occ("ch01")
     sources = _make_sources()
     result = ev._yo_observe_key(occ, sources, {})
 
     assert isinstance(result, UNSUPPORTED_obs)
-    assert secret.read_text(encoding="utf-8") == '{"id": "leaked"}\n'  # not consumed
+    assert _snapshot(outside) == before  # full snapshot parity: bytes + membership + existence
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +392,7 @@ def test_r8_t04_sections_dir_symlink(tmp_path, monkeypatch):
 
 @needs_symlink
 def test_r8_t05_section_parent_dir_symlink(tmp_path, monkeypatch):
-    """R8-T05: out/sections/ch01 is a symlink → UNSUPPORTED_obs, external data not read."""
+    """R8-T05: out/sections/ch01 is a symlink → UNSUPPORTED_obs, external snapshot unchanged."""
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "manifest.jsonl"
@@ -256,13 +405,14 @@ def test_r8_t05_section_parent_dir_symlink(tmp_path, monkeypatch):
     section_link.symlink_to(outside)
 
     monkeypatch.setattr(paths, "OUT", out_dir)
+    before = _snapshot(outside)
 
     occ = _make_occ("ch01")
     sources = _make_sources()
     result = ev._yo_observe_key(occ, sources, {})
 
     assert isinstance(result, UNSUPPORTED_obs)
-    assert secret.read_text(encoding="utf-8") == '{"id": "leaked"}\n'
+    assert _snapshot(outside) == before
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +422,7 @@ def test_r8_t05_section_parent_dir_symlink(tmp_path, monkeypatch):
 
 @needs_symlink
 def test_r8_t06_manifest_file_symlink(tmp_path, monkeypatch):
-    """R8-T06: manifest.jsonl is a symlink to external file → UNSUPPORTED_obs, file not read."""
+    """R8-T06: manifest.jsonl is a symlink to external file → UNSUPPORTED_obs, external snapshot parity."""
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "data.jsonl"
@@ -285,22 +435,75 @@ def test_r8_t06_manifest_file_symlink(tmp_path, monkeypatch):
     manifest_link.symlink_to(secret)
 
     monkeypatch.setattr(paths, "OUT", out_dir)
+    before = _snapshot(outside)
 
     occ = _make_occ("ch01")
     sources = _make_sources()
     result = ev._yo_observe_key(occ, sources, {})
 
     assert isinstance(result, UNSUPPORTED_obs)
-    assert secret.read_text(encoding="utf-8") == '{"id": "leaked"}\n'
+    assert _snapshot(outside) == before
 
 
 # ---------------------------------------------------------------------------
-# R8-T07: normal in-root positive control — lock acquires, manifest reads
+# T04-T06 extended: symlink manifest → score() raises, pre-existing score unchanged
+# (P2-R8-4 requirement)
+# ---------------------------------------------------------------------------
+
+
+@needs_symlink
+def test_r8_symlink_manifest_propagates_to_score_error(tmp_path, monkeypatch):
+    """P2-R8-4: T04 scenario — UNSUPPORTED_obs propagates to YO_OBSERVER_UNSUPPORTED in score().
+
+    Pre-existing score file must be unchanged after the error.
+    """
+    from test_stress_eval_sample import setup_book
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+
+    # Create sample first (sections dir is real at this point).
+    ev.sample({})
+
+    # Place a pre-existing score file that must survive the error.
+    score_dir = paths.OUT / "stress" / "eval" / "score"
+    score_dir.mkdir(parents=True, exist_ok=True)
+    existing_score = score_dir / "pre-existing.json"
+    existing_score.write_text('{"pre": "existing"}\n', encoding="utf-8")
+    existing_bytes = existing_score.read_bytes()
+
+    # Replace sections dir with symlink to outside sentinel.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.jsonl"
+    secret.write_text('{"id": "leaked"}\n', encoding="utf-8")
+    outside_before = _snapshot(outside)
+
+    real_sections = paths.OUT / "sections"
+    sections_backup = tmp_path / "sections_backup"
+    real_sections.rename(sections_backup)
+    real_sections.symlink_to(outside)
+
+    with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+        ev.score({})
+
+    # Pre-existing score file is unchanged.
+    assert existing_score.read_bytes() == existing_bytes
+    # External data snapshot parity.
+    assert _snapshot(outside) == outside_before
+
+    # Restore sections for cleanup.
+    real_sections.unlink()
+    sections_backup.rename(real_sections)
+
+
+# ---------------------------------------------------------------------------
+# R8-T07: normal in-root positive control — lock acquires, manifest supported observation
+# (P2-R8-5: assert NONE_obs, not just non-MANIFEST_UNAVAILABLE)
 # ---------------------------------------------------------------------------
 
 
 def test_r8_t07_normal_in_root_positive_control(tmp_path, monkeypatch):
-    """R8-T07: no symlinks — lock acquires normally, manifest read returns UNSUPPORTED (no such chunk)."""
+    """R8-T07: no symlinks — lock acquires normally; manifest produces supported NONE_obs observation."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
@@ -312,25 +515,21 @@ def test_r8_t07_normal_in_root_positive_control(tmp_path, monkeypatch):
     assert h is not None
     ev.release_eval_lock(h)
 
-    # Manifest: file exists but chunk not found → UNSUPPORTED (not symlink rejection).
+    # Manifest: real file (no symlinks) → supported NONE_obs (no yo-map, no ё in text).
     section_dir = out_dir / "sections" / "ch01"
     section_dir.mkdir(parents=True)
-    manifest = section_dir / "manifest.jsonl"
-    manifest.write_text('{"id": "0001", "n": 1, "text": "тест.", "pause_after_ms": 900}\n',
-                        encoding="utf-8")
+    (section_dir / "manifest.jsonl").write_text(
+        '{"id": "0001", "n": 1, "text": "тест.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
 
     occ = _make_occ("ch01")
-    occ.su_chunk_id = "0001"  # exists in manifest; passes symlink guard, reaches observe_su
     sources = _make_sources()
     result = ev._yo_observe_key(occ, sources, {})
-    # Must NOT be rejected by the symlink guard (MANIFEST_UNAVAILABLE).
-    # observe_su may return NONE_obs, RESTORED_obs, or UNSUPPORTED_obs from downstream.
-    from audiobook.stress_yo_observer import NONE_obs
-    assert isinstance(result, (NONE_obs, UNSUPPORTED_obs)), \
-        f"Expected NONE_obs or UNSUPPORTED_obs from observe_su path, got {result!r}"
-    # Verify it wasn't the symlink-guard rejection specifically.
-    if isinstance(result, UNSUPPORTED_obs):
-        assert result.reason != "MANIFEST_UNAVAILABLE"
+    # Must produce a SUPPORTED observation (NONE_obs: source text has no ё, no yo-map active).
+    assert isinstance(result, NONE_obs), (
+        f"Expected supported NONE_obs from observe_su path (no yo-map, no ё), got {result!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

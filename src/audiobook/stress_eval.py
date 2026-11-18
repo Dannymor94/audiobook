@@ -260,7 +260,7 @@ def _lock_path() -> Path:
 
 
 def _check_lock_symlinks(path: Path) -> None:
-    """Fail with EVAL_LOCK_UNAVAILABLE if path or any ancestor under paths.OUT is a symlink.
+    """Fail with EVAL_LOCK_UNAVAILABLE if paths.OUT or any descendant to path is a symlink.
 
     If path is not under paths.OUT (e.g., explicit test path), checks path and parent only.
     ponytail: TOCTOU window between check and open; mitigated by O_NOFOLLOW on POSIX.
@@ -275,6 +275,8 @@ def _check_lock_symlinks(path: Path) -> None:
             _error("EVAL_LOCK_UNAVAILABLE")
         return
     try:
+        if paths.OUT.is_symlink():  # check OUT itself before walking descendants
+            _error("EVAL_LOCK_UNAVAILABLE")
         current = paths.OUT
         for part in rel.parts:
             current = current / part
@@ -292,7 +294,10 @@ def acquire_eval_lock(lock_path: Path | None = None) -> object:
     """
     path = lock_path if lock_path is not None else _lock_path()
     _check_lock_symlinks(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        _error("EVAL_LOCK_UNAVAILABLE")
     _check_lock_symlinks(path)  # re-check after mkdir: defend against TOCTOU on the directory
     _o_nofollow = getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -1046,18 +1051,42 @@ def _yo_observe_key(occ, sources, config):
     if occ.su_chunk_id is None:
         return UNSUPPORTED_obs("SU_ALIGNMENT_MISSING")
     manifest_path = paths.OUT / "sections" / occ.section / "manifest.jsonl"
-    # R8: reject any symlinked path component before read (T04/T05/T06).
+    # R8: reject any symlinked path component before read (T04/T05/T06), including paths.OUT itself.
     _sections = paths.OUT / "sections"
     _section_dir = _sections / occ.section
-    for _p in (_sections, _section_dir, manifest_path):
+    for _p in (paths.OUT, _sections, _section_dir, manifest_path):
         try:
             if _p.is_symlink():
                 return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
         except OSError:
             return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    # R8-2: open manifest with O_NOFOLLOW on POSIX to guard against TOCTOU symlink replacement.
+    _o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+    _mfd = -1
     try:
-        rows = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except (OSError, ValueError, UnicodeError):
+        if _o_nofollow and os.name != "nt":
+            import stat as _stat_mod
+            _mfd = os.open(str(manifest_path), os.O_RDONLY | _o_nofollow)  # encoding=N/A: raw fd, fdopen below
+            if not _stat_mod.S_ISREG(os.fstat(_mfd).st_mode):
+                return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+            with os.fdopen(_mfd, "r", encoding="utf-8") as _mf:
+                _mfd = -1  # ownership transferred; finally will not double-close
+                manifest_text = _mf.read()
+        else:
+            # Windows: rely on is_symlink() precheck; documented TOCTOU limitation.
+            # ponytail: manifest reads on Windows lack O_NOFOLLOW; harden with CreateFile if required.
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    finally:
+        if _mfd >= 0:
+            try:
+                os.close(_mfd)
+            except OSError:
+                pass
+    try:
+        rows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
+    except (ValueError, UnicodeError):
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
     row = next((r for r in rows if r.get("id") == occ.su_chunk_id), None)
     if row is None:
