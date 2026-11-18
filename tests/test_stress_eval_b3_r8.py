@@ -1,4 +1,4 @@
-"""B3/R8-R1 filesystem security regression tests for stress_eval.
+"""B3/R8-R2 filesystem security regression tests for stress_eval.
 
 Synthetic only — no owner data, no real paths.
 Covers R8 oracle matrix (T01-T08), paths.OUT itself, O_NOFOLLOW TOCTOU,
@@ -6,6 +6,7 @@ inaccessible-path normalization, and score-ERROR propagation.
 """
 import os
 import sys
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -84,16 +85,19 @@ def _make_sources():
 
 
 def _snapshot(directory: Path) -> dict:
-    """Full recursive snapshot: {rel_path_str: bytes | None (dir/symlink)}."""
-    result = {}
+    """Existence, type, directory membership, symlink destinations and file bytes."""
+    result = {".": directory.exists()}
     if not directory.exists():
         return result
     for item in sorted(directory.rglob("*")):
         rel = str(item.relative_to(directory))
-        if item.is_file() and not item.is_symlink():
-            result[rel] = item.read_bytes()
+        info = item.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            result[rel] = ("symlink", os.readlink(item))
+        elif stat.S_ISREG(info.st_mode):
+            result[rel] = ("file", info.st_mode, info.st_mtime_ns, item.read_bytes())
         else:
-            result[rel] = None
+            result[rel] = ("directory",)
     return result
 
 
@@ -452,48 +456,44 @@ def test_r8_t06_manifest_file_symlink(tmp_path, monkeypatch):
 
 
 @needs_symlink
-def test_r8_symlink_manifest_propagates_to_score_error(tmp_path, monkeypatch):
-    """P2-R8-4: T04 scenario — UNSUPPORTED_obs propagates to YO_OBSERVER_UNSUPPORTED in score().
-
-    Pre-existing score file must be unchanged after the error.
-    """
-    from test_stress_eval_sample import setup_book
+@pytest.mark.parametrize("component", ["sections", "section", "manifest"])
+def test_r8_symlink_manifest_propagates_to_score_error(tmp_path, monkeypatch, component):
+    """T04-T06: no external reader, score ERROR and complete snapshot parity."""
+    from test_stress_eval_sample import setup_book, context_for
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
-
-    # Create sample first (sections dir is real at this point).
     ev.sample({})
-
-    # Place a pre-existing score file that must survive the error.
     score_dir = paths.OUT / "stress" / "eval" / "score"
     score_dir.mkdir(parents=True, exist_ok=True)
-    existing_score = score_dir / "pre-existing.json"
-    existing_score.write_text('{"pre": "existing"}\n', encoding="utf-8")
-    existing_bytes = existing_score.read_bytes()
-
-    # Replace sections dir with symlink to outside sentinel.
+    (score_dir / "pre-existing.json").write_bytes(b'{"pre":"existing"}\n')
+    sections = paths.OUT / "sections"
+    section = sections / "01_test"
+    manifest = section / "manifest.jsonl"
+    victim = {"sections": sections, "section": section, "manifest": manifest}[component]
     outside = tmp_path / "outside"
     outside.mkdir()
-    secret = outside / "secret.jsonl"
-    secret.write_text('{"id": "leaked"}\n', encoding="utf-8")
-    outside_before = _snapshot(outside)
+    external_parent = outside / "01_test" if component == "sections" else outside
+    external_parent.mkdir(exist_ok=True)
+    external = external_parent / "manifest.jsonl"
+    external.write_bytes(manifest.read_bytes())
+    victim.rename(tmp_path / "original")
+    victim.symlink_to(external if component == "manifest" else outside,
+                      target_is_directory=component != "manifest")
+    before = _snapshot(tmp_path)
+    original_fdopen = os.fdopen
+    external_stat = external.stat()
 
-    real_sections = paths.OUT / "sections"
-    sections_backup = tmp_path / "sections_backup"
-    real_sections.rename(sections_backup)
-    real_sections.symlink_to(outside)
+    def guarded_fdopen(fd, *args, **kwargs):
+        info = os.fstat(fd)
+        assert (info.st_dev, info.st_ino) != (external_stat.st_dev, external_stat.st_ino)
+        return original_fdopen(fd, *args, **kwargs)
 
+    monkeypatch.setattr(os, "fdopen", guarded_fdopen)
+    context = context_for(units)
+    assert isinstance(ev._yo_observe_key(context.rows[0], context.sources, {}), UNSUPPORTED_obs)
     with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
         ev.score({})
-
-    # Pre-existing score file is unchanged.
-    assert existing_score.read_bytes() == existing_bytes
-    # External data snapshot parity.
-    assert _snapshot(outside) == outside_before
-
-    # Restore sections for cleanup.
-    real_sections.unlink()
-    sections_backup.rename(real_sections)
+    assert _snapshot(tmp_path) == before
 
 
 # ---------------------------------------------------------------------------
@@ -550,3 +550,200 @@ def test_r8_t08_concurrent_lock_and_reacquire(tmp_path):
 
     h2 = ev.acquire_eval_lock(lock_path)
     ev.release_eval_lock(h2)
+
+
+# R8-R2: execute the production functions while swapping actual ancestors.
+# Hooks run synchronously at the OS boundary, with no scheduling/timing guesses.
+@needs_symlink
+@needs_nofollow
+@pytest.mark.parametrize("flow,component", [
+    ("lock", "out"), ("lock", "stress"), ("lock", "eval"),
+    ("manifest", "out"), ("manifest", "sections"), ("manifest", "01_test"),
+])
+@pytest.mark.parametrize("phase", ["directory", "leaf"])
+def test_r8_r2_ancestor_swap(tmp_path, monkeypatch, flow, component, phase):
+    from test_stress_eval_sample import setup_book
+    setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    ev.sample({})
+    score = paths.OUT / "stress" / "eval" / "score" / "existing.json"
+    score.parent.mkdir(parents=True, exist_ok=True)
+    score.write_bytes(b'{"existing":true}\n')
+    protected_before = _snapshot(paths.TEXT), _snapshot(score.parent)
+    branch = paths.OUT / ("stress" if flow == "lock" else "sections")
+    parent = branch / ("eval" if flow == "lock" else "01_test")
+    victim = paths.OUT if component == "out" else branch if component in {"stress", "sections"} else parent
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    # Mirror the relevant tree: a vulnerable full-path open really can succeed.
+    if victim == paths.OUT:
+        external_parent = outside / branch.name / parent.name
+    elif victim == branch:
+        external_parent = outside / parent.name
+    else:
+        external_parent = outside
+    external_parent.mkdir(parents=True, exist_ok=True)
+    leaf = ".wp4.lock" if flow == "lock" else "manifest.jsonl"
+    if flow == "manifest":
+        (external_parent / leaf).write_bytes((parent / leaf).read_bytes())
+    (outside / "sentinel").write_bytes(b"external sentinel")
+    outside_before = _snapshot(outside)
+    all_before = _snapshot(tmp_path)
+    original_open, original_fdopen = os.open, os.fdopen
+    external_inodes = {(p.stat().st_dev, p.stat().st_ino) for p in outside.rglob("*") if p.is_file()}
+    swapped = False
+    opened = []
+    lock_ready = flow == "lock"
+
+    def guarded_fdopen(fd, *args, **kwargs):
+        nonlocal lock_ready
+        if args and args[0] == "a":
+            lock_ready = True
+        st = os.fstat(fd)
+        assert (st.st_dev, st.st_ino) not in external_inodes, "outside FD handed to reader/writer"
+        return original_fdopen(fd, *args, **kwargs)
+
+    def swap_open(name, flags, *args, **kwargs):
+        nonlocal swapped
+        target_name = Path(name).name
+        trigger = target_name == (component if phase == "directory" else leaf)
+        if trigger and lock_ready and not swapped:
+            victim.rename(victim.with_name(victim.name + "_original"))
+            victim.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        fd = original_open(name, flags, *args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {swap_open})
+    monkeypatch.setattr(os, "open", swap_open)
+    monkeypatch.setattr(os, "fdopen", guarded_fdopen)
+    if flow == "lock":
+        with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+            handle = ev.acquire_eval_lock()
+            ev.release_eval_lock(handle)
+    else:
+        with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+            ev.score({})
+    assert swapped, "race hook must execute against the production function"
+    assert _snapshot(outside) == outside_before
+    # Restore only the attacker's substitution, then compare protected state.
+    victim.unlink()
+    victim.with_name(victim.name + "_original").rename(victim)
+    assert (_snapshot(paths.TEXT), _snapshot(score.parent)) == protected_before
+    assert _snapshot(tmp_path) == all_before
+    # Raw directory/failed-leaf FDs must all be closed. Successful fdopen handles
+    # close themselves; fstat verifies there are no live descriptors left here.
+    for fd in set(opened):
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+@pytest.mark.parametrize("api", ["O_NOFOLLOW", "O_DIRECTORY", "dir_fd"])
+def test_r8_r2_atomic_api_unavailable_fails_closed(tmp_path, monkeypatch, api):
+    """Runs even without symlink privileges; no unsafe portability fallback."""
+    monkeypatch.setattr(paths, "OUT", tmp_path / "out")
+    before = _snapshot(tmp_path)
+    if api == "dir_fd":
+        monkeypatch.setattr(os, "supports_dir_fd", set())
+    else:
+        monkeypatch.setattr(os, api, 0, raising=False)
+    with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+        ev.acquire_eval_lock()
+    result = ev._yo_observe_key(_make_occ(), _make_sources(), {})
+    assert isinstance(result, UNSUPPORTED_obs)
+    assert _snapshot(tmp_path) == before
+
+
+@needs_symlink
+@needs_nofollow
+def test_r8_r2_directory_swap_during_mkdir(tmp_path, monkeypatch):
+    """Missing lock directories are created relative to pinned FDs too."""
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(paths, "ROOT", root)
+    monkeypatch.setattr(paths, "OUT", root / "out")
+    before = _snapshot(outside)
+    original_mkdir = os.mkdir
+    swapped = False
+
+    def swap_mkdir(name, *args, **kwargs):
+        nonlocal swapped
+        if name == "stress" and kwargs.get("dir_fd") is not None and not swapped:
+            paths.OUT.rename(root / "original_out")
+            paths.OUT.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return original_mkdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {swap_mkdir})
+    monkeypatch.setattr(os, "mkdir", swap_mkdir)
+    with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+        ev.acquire_eval_lock()
+    assert swapped
+    assert _snapshot(outside) == before
+    assert (root / "original_out" / "stress" / "eval" / ".wp4.lock").is_file()
+
+
+@needs_symlink
+@needs_nofollow
+def test_r8_r2_canonical_root_allows_parent_alias(tmp_path, monkeypatch):
+    """Aliases above the already canonical trusted ROOT do not affect traversal."""
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    root = (alias / "project")
+    root.mkdir()
+    root = root.resolve()
+    monkeypatch.setattr(paths, "ROOT", root)
+    monkeypatch.setattr(paths, "OUT", root / "out")
+    handle = ev.acquire_eval_lock()
+    ev.release_eval_lock(handle)
+    assert (root / "out" / "stress" / "eval" / ".wp4.lock").is_file()
+
+
+@needs_nofollow
+@pytest.mark.parametrize("flow,failure", [
+    ("lock", "fdopen"), ("lock", "directory"), ("lock", "fifo"),
+    ("manifest", "fdopen"), ("manifest", "directory"),
+    ("manifest", "fifo"), ("manifest", "decode"),
+])
+def test_r8_r2_failed_leaf_closes_fds(tmp_path, monkeypatch, flow, failure):
+    """Regular-file validation and reader/wrapper failures leave no live FDs."""
+    root = tmp_path / "root"
+    parent = root / "out" / ("stress" if flow == "lock" else "sections") / ("eval" if flow == "lock" else "ch01")
+    parent.mkdir(parents=True)
+    leaf = parent / (".wp4.lock" if flow == "lock" else "manifest.jsonl")
+    if failure == "directory":
+        leaf.mkdir()
+    elif failure == "fifo":
+        os.mkfifo(leaf)
+    else:
+        leaf.write_bytes(b"\xff")
+    monkeypatch.setattr(paths, "ROOT", root)
+    monkeypatch.setattr(paths, "OUT", root / "out")
+    original_open = os.open
+    opened = []
+
+    def record_open(*args, **kwargs):
+        fd = original_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def failed_fdopen(*args, **kwargs):
+        raise OSError("injected wrapper failure")
+
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {record_open})
+    monkeypatch.setattr(os, "open", record_open)
+    if failure == "fdopen":
+        monkeypatch.setattr(os, "fdopen", failed_fdopen)
+    if flow == "lock":
+        with pytest.raises(AnnotationError, match="EVAL_LOCK_UNAVAILABLE"):
+            ev.acquire_eval_lock()
+    else:
+        assert isinstance(ev._yo_observe_key(_make_occ(), _make_sources(), {}), UNSUPPORTED_obs)
+    assert opened
+    for fd in set(opened):
+        with pytest.raises(OSError):
+            os.fstat(fd)

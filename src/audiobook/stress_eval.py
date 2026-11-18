@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import unicodedata
 import uuid
 from collections import Counter
@@ -259,31 +260,70 @@ def _lock_path() -> Path:
     return paths.OUT / "stress" / "eval" / _EVAL_LOCK_NAME
 
 
-def _check_lock_symlinks(path: Path) -> None:
-    """Fail with EVAL_LOCK_UNAVAILABLE if paths.OUT or any descendant to path is a symlink.
+def _open_eval_file(path: Path, *, create: bool = False) -> int:
+    """Open a regular file through pinned, no-follow directory descriptors.
 
-    If path is not under paths.OUT (e.g., explicit test path), checks path and parent only.
-    ponytail: TOCTOU window between check and open; mitigated by O_NOFOLLOW on POSIX.
+    ROOT is an already trusted canonical directory (including macOS aliases
+    above it). Explicit paths outside ROOT, used by synthetic callers, traverse
+    from the filesystem root without resolving any untrusted components.
+    Platforms without atomic relative opens/mkdir fail closed: a path precheck
+    is not a safe replacement, including on Windows without a native equivalent.
+    The caller owns the returned FD; all directory FDs are closed here.
     """
+    if (os.name != "posix" or not getattr(os, "O_NOFOLLOW", 0)
+            or not getattr(os, "O_DIRECTORY", 0)
+            or os.open not in os.supports_dir_fd
+            or os.mkdir not in os.supports_dir_fd
+            or os.stat not in os.supports_dir_fd
+            or os.stat not in os.supports_follow_symlinks):
+        raise OSError("Atomic no-follow directory operations unavailable")
+    path = path.absolute()
+    root = paths.ROOT
     try:
-        rel = path.relative_to(paths.OUT)
+        parts = path.relative_to(root).parts
     except ValueError:
-        try:
-            if path.is_symlink() or path.parent.is_symlink():
-                _error("EVAL_LOCK_UNAVAILABLE")
-        except OSError:
-            _error("EVAL_LOCK_UNAVAILABLE")
-        return
+        root = Path(path.anchor)
+        parts = path.relative_to(root).parts
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise OSError("Unsafe evaluation path")
+    directories = []
+    raw = -1
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        if paths.OUT.is_symlink():  # check OUT itself before walking descendants
-            _error("EVAL_LOCK_UNAVAILABLE")
-        current = paths.OUT
-        for part in rel.parts:
-            current = current / part
-            if current.is_symlink():
-                _error("EVAL_LOCK_UNAVAILABLE")
-    except OSError:
-        _error("EVAL_LOCK_UNAVAILABLE")
+        directories.append(os.open(root, directory_flags))  # encoding=N/A: directory FD
+        for part in parts[:-1]:
+            try:
+                child = os.open(part, directory_flags, dir_fd=directories[-1])  # encoding=N/A: directory FD
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(part, dir_fd=directories[-1])
+                except FileExistsError:
+                    pass  # A concurrent creator must still pass the no-follow open.
+                child = os.open(part, directory_flags, dir_fd=directories[-1])  # encoding=N/A: directory FD
+            directories.append(child)
+        flags = os.O_NOFOLLOW | os.O_NONBLOCK
+        flags |= (os.O_WRONLY | os.O_CREAT | os.O_APPEND) if create else os.O_RDONLY
+        raw = os.open(parts[-1], flags, 0o666, dir_fd=directories[-1])  # encoding=N/A: regular file FD
+        if not stat.S_ISREG(os.fstat(raw).st_mode):
+            raise OSError("Evaluation target must be a regular file")
+        # Detect detached/swapped directories before handing the FD to a reader
+        # or lock owner. Security comes from the pinned FDs even if a later swap
+        # races this check: no subsequent access resolves the untrusted path.
+        for index, part in enumerate(parts[:-1]):
+            entry = os.stat(part, dir_fd=directories[index], follow_symlinks=False)
+            pinned = os.fstat(directories[index + 1])
+            if (not stat.S_ISDIR(entry.st_mode)
+                    or (entry.st_dev, entry.st_ino) != (pinned.st_dev, pinned.st_ino)):
+                raise OSError("Evaluation directory replaced")
+        result, raw = raw, -1
+        return result
+    finally:
+        if raw >= 0:
+            os.close(raw)
+        for descriptor in reversed(directories):
+            os.close(descriptor)
 
 
 def acquire_eval_lock(lock_path: Path | None = None) -> object:
@@ -293,23 +333,16 @@ def acquire_eval_lock(lock_path: Path | None = None) -> object:
     Call release_eval_lock(handle) when done.
     """
     path = lock_path if lock_path is not None else _lock_path()
-    _check_lock_symlinks(path)
+    raw = -1
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
+        raw = _open_eval_file(path, create=True)
+        fd = os.fdopen(raw, "a", encoding="utf-8")
+        raw = -1  # Ownership transferred to the file object.
+    except (OSError, NotImplementedError):
         _error("EVAL_LOCK_UNAVAILABLE")
-    _check_lock_symlinks(path)  # re-check after mkdir: defend against TOCTOU on the directory
-    _o_nofollow = getattr(os, "O_NOFOLLOW", 0)
-    try:
-        if _o_nofollow and os.name != "nt":
-            raw = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | _o_nofollow, 0o666)  # encoding=N/A: raw fd, wrapped by fdopen below
-            fd = os.fdopen(raw, "a", encoding="utf-8")
-        else:
-            # Windows: rely on pre-open symlink check; no TOCTOU-safe O_NOFOLLOW equivalent.
-            # ponytail: residual TOCTOU on Windows; harden with CreateFile if required.
-            fd = open(path, "a", encoding="utf-8")  # noqa: WPS515
-    except OSError:
-        _error("EVAL_LOCK_UNAVAILABLE")
+    finally:
+        if raw >= 0:
+            os.close(raw)
     try:
         if os.name == "nt":
             import msvcrt
@@ -1051,39 +1084,17 @@ def _yo_observe_key(occ, sources, config):
     if occ.su_chunk_id is None:
         return UNSUPPORTED_obs("SU_ALIGNMENT_MISSING")
     manifest_path = paths.OUT / "sections" / occ.section / "manifest.jsonl"
-    # R8: reject any symlinked path component before read (T04/T05/T06), including paths.OUT itself.
-    _sections = paths.OUT / "sections"
-    _section_dir = _sections / occ.section
-    for _p in (paths.OUT, _sections, _section_dir, manifest_path):
-        try:
-            if _p.is_symlink():
-                return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-        except OSError:
-            return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    # R8-2: open manifest with O_NOFOLLOW on POSIX to guard against TOCTOU symlink replacement.
-    _o_nofollow = getattr(os, "O_NOFOLLOW", 0)
-    _mfd = -1
+    raw = -1
     try:
-        if _o_nofollow and os.name != "nt":
-            import stat as _stat_mod
-            _mfd = os.open(str(manifest_path), os.O_RDONLY | _o_nofollow)  # encoding=N/A: raw fd, fdopen below
-            if not _stat_mod.S_ISREG(os.fstat(_mfd).st_mode):
-                return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-            with os.fdopen(_mfd, "r", encoding="utf-8") as _mf:
-                _mfd = -1  # ownership transferred; finally will not double-close
-                manifest_text = _mf.read()
-        else:
-            # Windows: rely on is_symlink() precheck; documented TOCTOU limitation.
-            # ponytail: manifest reads on Windows lack O_NOFOLLOW; harden with CreateFile if required.
-            manifest_text = manifest_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        raw = _open_eval_file(manifest_path)
+        with os.fdopen(raw, "r", encoding="utf-8") as manifest:
+            raw = -1  # Ownership transferred; close on read/decode errors too.
+            manifest_text = manifest.read()
+    except (OSError, UnicodeError, NotImplementedError):
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
     finally:
-        if _mfd >= 0:
-            try:
-                os.close(_mfd)
-            except OSError:
-                pass
+        if raw >= 0:
+            os.close(raw)
     try:
         rows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
     except (ValueError, UnicodeError):
