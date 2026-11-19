@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import stat as _stat_mod
 import subprocess
 import sys
 from dataclasses import asdict
@@ -1192,6 +1193,24 @@ class TestGateB2R4:
 # R9-T01..T10: B4 final publication fence
 # ---------------------------------------------------------------------------
 
+# 20 Cyrillic consonants for building synthetic eligible words.
+_CONS = "бвгджзклмнпрстфхцчшщ"
+
+
+def _large_corpus_units():
+    """341 eligible units: 300 top300 ('Аа…') + 41 tail ('Яя…') by alpha under _fold."""
+    top = [f"Аа{_CONS[i // 20]}{_CONS[i % 20]}" for i in range(300)]
+    tail = [f"Яя{_CONS[j // 10]}{_CONS[j % 10]}" for j in range(41)]
+    return [{"type": "text", "text": f"{w}."} for w in top + tail]
+
+
+def _gold_add_duplicate_row(gold_path):
+    """Append a duplicate gold row (different labeler) to change gold_sha256 in next score()."""
+    rows = evaluation.parse_gold(gold_path.read_text(encoding="utf-8"))
+    extra = {**rows[0], "labeler": "r3-extra-labeler"}
+    gold_path.write_text(evaluation.serialize_gold(rows + [extra]), encoding="utf-8", newline="")
+
+
 class TestR9FinalPublicationFence:
     """R9: B4 final publication fence — fence fires for all R9 coverage points."""
 
@@ -1391,17 +1410,14 @@ class TestR9FinalPublicationFence:
     def test_t04f_nonselected_eligible_assignment_change_raises_sample_stale(
         self, tmp_path, monkeypatch, noop_path
     ):
-        """T04f: nonselected eligible key NONE→RESTORED changes eligible_assignment_sha256 → SAMPLE_STALE.
+        """T04f: genuine unselected eligible tail key NONE→RESTORED → eligible_assignment_sha256 changes → SAMPLE_STALE.
 
-        Selected witnesses are unchanged; only the eligible assignment digest changes.
+        Uses 341-word corpus so top300.N=300, tail.N=41, tail.n=40: exactly 1 tail key unselected.
+        Selected witnesses and input digests are unchanged; only the assignment digest changes.
         Fires on both rename path (noop_path=False) and no-op path (noop_path=True).
-        Without fix (_verify_selection_fresh absent from fence): no error raised.
         """
         from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs, restoration_fp as _rfp
-        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
-        mini_strata = (("omograph", 0), ("top300", 0), ("name", 0),
-                       ("override_covered", 0), ("yo_changed", 0), ("tail", 1))
-        monkeypatch.setattr(evaluation, "STRATA", mini_strata)
+        units = _large_corpus_units()
         setup_book(tmp_path, monkeypatch, units)
         ctx = predictions(context_for(units))
         monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
@@ -1410,15 +1426,23 @@ class TestR9FinalPublicationFence:
         complete(tmp_path)
         if noop_path:
             evaluation.score({})
-        # Determine the nonselected key by deterministic ranking (tail n=1: only ranked[0] selected).
-        ranked = sorted(
-            [occ.source_key for occ in ctx.rows],
-            key=lambda k: hashlib.sha256(f"{evaluation.SEED_V2}|{k}".encode("utf-8")).hexdigest()
+
+        # Determine unselected tail key (41st by SEED_V2 hash rank, quota=40).
+        tail_keys = sorted(
+            [occ.source_key for occ in ctx.rows
+             if evaluation._fold(occ.form_source).startswith("яя")],
+            key=lambda k: hashlib.sha256(f"{evaluation.SEED_V2}|{k}".encode()).hexdigest()
         )
-        nonselected_key = ranked[1]
-        nonselected_occ = next(occ for occ in ctx.rows if occ.source_key == nonselected_key)
+        assert len(tail_keys) == 41, f"Expected 41 tail keys, got {len(tail_keys)}"
+        nonselected_key = tail_keys[40]
+
+        # Verify key is genuinely absent from the sample selection.
+        sample_file = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+        record = json.loads(sample_file.read_text(encoding="utf-8"))
+        assert nonselected_key not in record["keys"], "nonselected_key must not be in selected keys"
+
         identity = ctx.sources.resolve(nonselected_key)[0]
-        mock_fp = _rfp(identity, "Ёлка", [0])
+        mock_fp = _rfp(identity, "Ёяяфф", [0])
         score_dir = paths.OUT / "stress" / "eval" / "score"
         old_bytes = score_path().read_bytes() if noop_path else None
         orig = evaluation._assert_current
@@ -1426,7 +1450,7 @@ class TestR9FinalPublicationFence:
         def inject(ctx2, cfg):
             orig(ctx2, cfg)
             monkeypatch.setattr(evaluation, "_yo_observe_key",
-                                lambda o, s, c: (RESTORED_obs("Ёлка", (0,), mock_fp)
+                                lambda o, s, c: (RESTORED_obs("Ёяяфф", (0,), mock_fp)
                                                  if o.source_key == nonselected_key
                                                  else NONE_obs()))
 
@@ -1463,6 +1487,61 @@ class TestR9FinalPublicationFence:
             orig(ctx, cfg)
             monkeypatch.setattr(evaluation, "_yo_observe_key",
                                 lambda o, s, c: _UnknownObs())
+
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+            evaluation.score({})
+        if noop_path:
+            assert score_path().read_bytes() == old_bytes
+        else:
+            assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
+    @pytest.mark.parametrize("noop_path", [False, True], ids=["rename", "noop"])
+    def test_r3_t04g_unknown_nonselected_raises_yo_observer_unsupported(
+        self, tmp_path, monkeypatch, noop_path
+    ):
+        """R3/T04g nonselected: unknown observer type on unselected eligible tail key → YO_OBSERVER_UNSUPPORTED.
+
+        Uses 341-word corpus so tail.N=41, tail.n=40: 1 tail key unselected.
+        RED on BASE (R2): unknown type treated as NONE, assignment unchanged, no error.
+        GREEN after R3 fix: select_sample_v2 rejects unknown type → YO_OBSERVER_UNSUPPORTED.
+        """
+        from audiobook.stress_yo_observer import NONE_obs
+        units = _large_corpus_units()
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        evaluation.sample({})
+        complete(tmp_path)
+        if noop_path:
+            evaluation.score({})
+
+        # Determine unselected tail key (41st by SEED_V2 hash rank).
+        tail_keys = sorted(
+            [occ.source_key for occ in ctx.rows
+             if evaluation._fold(occ.form_source).startswith("яя")],
+            key=lambda k: hashlib.sha256(f"{evaluation.SEED_V2}|{k}".encode()).hexdigest()
+        )
+        assert len(tail_keys) == 41
+        nonselected_key = tail_keys[40]
+        sample_file = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+        assert nonselected_key not in json.loads(sample_file.read_text(encoding="utf-8"))["keys"]
+
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        old_bytes = score_path().read_bytes() if noop_path else None
+        orig = evaluation._assert_current
+
+        class _UnknownObs:
+            pass
+
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: (_UnknownObs()
+                                                 if o.source_key == nonselected_key
+                                                 else NONE_obs()))
 
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
@@ -1513,19 +1592,22 @@ class TestR9FinalPublicationFence:
     def test_t05r_gold_mutated_at_fence_rename_with_existing_score_preserves_old_bytes(
         self, tmp_path, monkeypatch
     ):
-        """T05r: rename path with pre-existing score; gold mutated at fence → GOLD_OUTPUT_CHANGED, old bytes preserved."""
+        """T05r: rename path with untouched valid COMPLETE; gold mutated at fence → GOLD_OUTPUT_CHANGED, old bytes preserved.
+
+        Distinct proposed bytes produced via legitimate gold labeler duplicate (changes gold_sha256).
+        """
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})
-        # Force rename path: append a byte so stored bytes ≠ new computation.
-        score_path().write_bytes(score_path().read_bytes() + b" ")
         old_bytes = score_path().read_bytes()
+        # Produce distinct proposed bytes: add duplicate row → gold_sha256 changes in next result.
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        _gold_add_duplicate_row(gold_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
-        gold = paths.TEXT / "stress_gold.tsv"
         orig_fence = evaluation._score_publication_fence
 
         def inject_fence(*args, **kwargs):
-            gold.write_bytes(gold.read_bytes() + b" ")
+            gold_path.write_bytes(gold_path.read_bytes() + b" ")
             orig_fence(*args, **kwargs)
 
         monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
@@ -1537,12 +1619,17 @@ class TestR9FinalPublicationFence:
     def test_t06r_yo_mutated_at_fence_rename_with_existing_score_preserves_old_bytes(
         self, tmp_path, monkeypatch
     ):
-        """T06r: rename path with pre-existing score; YO journal mutated at fence → YO_OUTPUT_CHANGED, old bytes preserved."""
+        """T06r: rename path with untouched valid COMPLETE; YO journal mutated at fence → YO_OUTPUT_CHANGED, old bytes preserved.
+
+        Distinct proposed bytes produced via legitimate gold labeler duplicate (changes gold_sha256).
+        """
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})
-        score_path().write_bytes(score_path().read_bytes() + b" ")
         old_bytes = score_path().read_bytes()
+        # Produce distinct proposed bytes: add duplicate gold row → gold_sha256 changes in next result.
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        _gold_add_duplicate_row(gold_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
         yo = evaluation._yo_path()
         orig_fence = evaluation._score_publication_fence
@@ -1627,25 +1714,72 @@ class TestR9FinalPublicationFence:
     def test_t09r_rename_with_existing_score_fence_raises_old_bytes_preserved(
         self, tmp_path, monkeypatch
     ):
-        """T09r: rename path with pre-existing distinct score; fence raises → old bytes preserved, no temp residue."""
+        """T09r proof: rename path with untouched valid COMPLETE + gold labeler mutation.
+
+        Proves:
+        - Staged temp file is regular and contains proposed bytes at callback time.
+        - os.fsync was called; fstat(fd) device/inode matches the temp file lstat.
+        - os.replace not called on score target when fence raises.
+        - Pre-existing score bytes preserved; no *.txn-* residue.
+        """
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})
-        # Force rename path: append a byte so stored bytes ≠ new computation.
-        score_path().write_bytes(score_path().read_bytes() + b" ")
         old_bytes = score_path().read_bytes()
+        # Produce distinct proposed bytes: add duplicate gold row → gold_sha256 changes.
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        _gold_add_duplicate_row(gold_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
+
+        real_fsync = os.fsync
+        fsync_records: list = []
+
+        def spy_fsync(fd):
+            real_fsync(fd)
+            fsync_records.append(os.fstat(fd))
+
+        real_replace = os.replace
+        replace_calls: list = []
+
+        def spy_replace(src, dst):
+            replace_calls.append((str(src), str(dst)))
+            real_replace(src, dst)
+
+        temp_info: dict = {}
         orig_fence = evaluation._score_publication_fence
 
         def inject_fence(*args, **kwargs):
-            (paths.TEXT / "extra.norm.txt").write_text("injected-at-fence\n", encoding="utf-8")
+            txn = list(score_dir.glob("*.txn-*"))
+            if txn:
+                temp_info["path"] = txn[0]
+                temp_info["stat"] = txn[0].lstat()
+                temp_info["bytes"] = txn[0].read_bytes()
+            (paths.TEXT / "extra.norm.txt").write_text("injected-r3\n", encoding="utf-8")
             orig_fence(*args, **kwargs)
 
         monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        monkeypatch.setattr(os, "fsync", spy_fsync)
+        monkeypatch.setattr(os, "replace", spy_replace)
+
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
+
         assert score_path().read_bytes() == old_bytes, "Pre-existing score must be preserved on rename path"
-        assert not any(score_dir.glob("*.txn-*")), "No temp files should remain after error"
+        assert not any(score_dir.glob("*.txn-*")), "No temp residue"
+        # Prove temp was regular file with proposed bytes at callback time.
+        assert "stat" in temp_info, "Temp file must exist inside fence callback"
+        assert _stat_mod.S_ISREG(temp_info["stat"].st_mode), "Temp must be a regular file"
+        assert temp_info["bytes"].startswith(b"{"), "Temp must contain proposed JSON"
+        # Prove fsync was called on the temp fd (matching inode).
+        assert fsync_records, "os.fsync must have been called"
+        assert any(
+            r.st_dev == temp_info["stat"].st_dev and r.st_ino == temp_info["stat"].st_ino
+            for r in fsync_records
+        ), "os.fsync fd must match temp file inode"
+        # Prove os.replace was not called on the score target.
+        score_target = str(score_path())
+        assert not any(score_target == call[1] for call in replace_calls), \
+            "os.replace must not be called on score target when fence raises"
 
     def test_t10_no_op_path_fence_fires_on_idempotent_call(self, tmp_path, monkeypatch):
         """T10: second call takes no-op path but fence still fires and catches drift."""
@@ -1663,3 +1797,23 @@ class TestR9FinalPublicationFence:
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})  # no-op path → fence fires → SAMPLE_STALE
         assert score_path().read_bytes() == old_score
+
+    def test_r3_rename_positive_control(self, tmp_path, monkeypatch):
+        """R3 positive control: rename path with distinct proposed bytes succeeds; new bytes written."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        old_bytes = score_path().read_bytes()
+        old_result = json.loads(old_bytes)
+        # Add duplicate gold row: changes gold_sha256 → proposed bytes differ from B1.
+        gold_path = paths.TEXT / "stress_gold.tsv"
+        _gold_add_duplicate_row(gold_path)
+        new_result = evaluation.score({})
+        new_bytes = score_path().read_bytes()
+        # Rename path produces distinct bytes.
+        assert new_bytes != old_bytes, "Score bytes must change after gold mutation"
+        assert new_result["gold_sha256"] != old_result["gold_sha256"], "gold_sha256 must reflect mutation"
+        assert new_result["status"] == "COMPLETE"
+        # Second identical call is idempotent (no-op path).
+        assert evaluation.score({}) == new_result
+        assert score_path().read_bytes() == new_bytes

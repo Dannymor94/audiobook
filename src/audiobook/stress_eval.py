@@ -128,7 +128,7 @@ def select_sample_v2(rows, source_fp, analysis_fp, *, homographs, names,
     yo_changed stratum uses RESTORED (pre-respell forward observation), not form_synth.
     Returns Selection with sample/2 fingerprint; path helpers use _sample_path_v2.
     """
-    from audiobook.stress_yo_observer import RESTORED_obs
+    from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs, UNSUPPORTED_obs
     if (tuple(name for name, _ in targets) != tuple(name for name, _ in STRATA)
             or any(type(n) is not int or n < 0 for _, n in targets)):
         _error("SAMPLE_POLICY_INVALID")
@@ -142,6 +142,8 @@ def select_sample_v2(rows, source_fp, analysis_fp, *, homographs, names,
     groups = {name: [] for name, _ in targets}
     for row in eligible:
         obs = obs_map.get(row.source_key)
+        if obs is not None and not isinstance(obs, (RESTORED_obs, NONE_obs, UNSUPPORTED_obs)):
+            _error("YO_OBSERVER_UNSUPPORTED")
         is_restored = isinstance(obs, RESTORED_obs)
         if row.form_source.lower() in homographs:
             name = "omograph"
