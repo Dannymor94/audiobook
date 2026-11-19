@@ -905,11 +905,13 @@ def _plan(path, text, expected):
     return WritePlan(path, temporary, text, expected)
 
 
-def _apply(plan):
+def _apply(plan, *, before_publish=None):
     data = plan.text.encode("utf-8")
     if _optional_bytes(plan.path) != plan.expected:
         _error("GOLD_OUTPUT_CHANGED")
     if plan.expected == data:
+        if before_publish is not None:
+            before_publish()
         return False
     parent = plan.path.parent
     existing = parent
@@ -924,6 +926,8 @@ def _apply(plan):
             stream.write(plan.text)
             stream.flush()
             os.fsync(stream.fileno())
+        if before_publish is not None:
+            before_publish()
         if _optional_bytes(plan.path) != plan.expected:
             _error("GOLD_OUTPUT_CHANGED")
         os.replace(plan.temporary, plan.path)
@@ -934,6 +938,46 @@ def _apply(plan):
         if created:
             plan.temporary.unlink(missing_ok=True)
     return True
+
+
+def _obs_to_witness(obs):
+    """Canonical observer witness tuple for final publication fence (B4/R9)."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    if isinstance(obs, RESTORED_obs):
+        return ("RESTORED", obs.form, obs.indices, obs.fp)
+    return ("NONE",)
+
+
+def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before):
+    """B4/R9: re-validate observation inputs and per-key witness at true publication boundary.
+
+    Fires inside _apply for both no-op (existing==result) and atomic rename paths.
+    Re-checks norm/map/prep content digests and exact per-key observation witness;
+    also re-checks gold/YO authority bytes as belt-and-suspenders.
+    """
+    from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
+                                               compute_prep_config_digest, UNSUPPORTED_obs)
+    current_map = _load_yo_map(config)
+    current_inputs = {
+        "norm_content_sha256": compute_norm_digest(paths.TEXT),
+        "yo_map_sha256": compute_yo_map_digest(current_map),
+        "prep_config_sha256": compute_prep_config_digest(config),
+    }
+    if record.get("observation_inputs") != current_inputs:
+        _error("SAMPLE_STALE")
+    for key, expected in obs_witness.items():
+        occ = by_key.get(key)
+        if occ is None:
+            _error("SAMPLE_STALE")
+        fresh = _yo_observe_key(occ, context.sources, config)
+        if isinstance(fresh, UNSUPPORTED_obs):
+            _error("YO_OBSERVER_UNSUPPORTED")
+        if _obs_to_witness(fresh) != expected:
+            _error("SAMPLE_STALE")
+    if _optional_bytes(paths.TEXT / "stress_gold.tsv") != gold_before:
+        _error("GOLD_OUTPUT_CHANGED")
+    if _optional_bytes(_yo_path()) != yo_data_before:
+        _error("YO_OUTPUT_CHANGED")
 
 
 def _sample_path(record):
@@ -1207,6 +1251,7 @@ def score(config):
         missing = sum(key not in state.active for key in keys)
         # T38/T41: call observer per key; absent journal = empty; UNSUPPORTED → ERROR (ADR §4.4)
         yo_missing, verdict_by_fp, obs_by_key = _yo_check(keys, by_key, context, config, yo_data_before)
+        obs_witness = {key: _obs_to_witness(obs) for key, obs in obs_by_key.items()}
         counts = {"selected": len(keys), "active_labels": len(keys) - missing,
                   "missing_labels": missing, "missing_yo_verdicts": yo_missing,
                   "stale_gold": len(state.stale),
@@ -1267,7 +1312,8 @@ def score(config):
             _error("GOLD_OUTPUT_CHANGED")
         if _optional_bytes(yo_path) != yo_data_before:  # T41: dual ledger freshness
             _error("YO_OUTPUT_CHANGED")
-        _apply(plan)
+        _apply(plan, before_publish=lambda: _score_publication_fence(
+            context, config, record, obs_witness, by_key, gold_before, yo_data_before))
         return result
     finally:
         release_eval_lock(lock)
