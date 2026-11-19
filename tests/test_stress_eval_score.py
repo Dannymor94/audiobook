@@ -1552,6 +1552,56 @@ class TestR9FinalPublicationFence:
             assert not any(score_dir.glob("s2-*.json"))
         assert not any(score_dir.glob("*.txn-*"))
 
+    @pytest.mark.parametrize("noop_path", [False, True], ids=["rename", "noop"])
+    def test_r3_t04h_missing_key_raises_yo_observer_unsupported(
+        self, tmp_path, monkeypatch, noop_path
+    ):
+        """R3/T04h missing key: None obs_map entry on unselected eligible tail key → YO_OBSERVER_UNSUPPORTED.
+
+        RED on BASE (c95d140): obs is not None guard passes None silently, no error raised.
+        GREEN after R4 fix: isinstance(None, (RESTORED_obs, NONE_obs, UNSUPPORTED_obs)) → False → error.
+        """
+        from audiobook.stress_yo_observer import NONE_obs
+        units = _large_corpus_units()
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        evaluation.sample({})
+        complete(tmp_path)
+        if noop_path:
+            evaluation.score({})
+
+        tail_keys = sorted(
+            [occ.source_key for occ in ctx.rows
+             if evaluation._fold(occ.form_source).startswith("яя")],
+            key=lambda k: hashlib.sha256(f"{evaluation.SEED_V2}|{k}".encode()).hexdigest()
+        )
+        assert len(tail_keys) == 41
+        nonselected_key = tail_keys[40]
+        sample_file = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+        assert nonselected_key not in json.loads(sample_file.read_text(encoding="utf-8"))["keys"]
+
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        old_bytes = score_path().read_bytes() if noop_path else None
+        orig = evaluation._assert_current
+
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: (None
+                                                 if o.source_key == nonselected_key
+                                                 else NONE_obs()))
+
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+            evaluation.score({})
+        if noop_path:
+            assert score_path().read_bytes() == old_bytes
+        else:
+            assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
     def test_t05_gold_mutated_at_fence_raises_gold_output_changed(self, tmp_path, monkeypatch):
         """T05: gold mutated inside before_publish callback (post-fsync, pre-rename) → GOLD_OUTPUT_CHANGED."""
         ready(tmp_path, monkeypatch)
@@ -1731,6 +1781,14 @@ class TestR9FinalPublicationFence:
         _gold_add_duplicate_row(gold_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
 
+        real_plan = evaluation._plan
+        proposed_bytes_list: list = []
+
+        def spy_plan(path, text, expected):
+            p = real_plan(path, text, expected)
+            proposed_bytes_list.append(text.encode("utf-8"))
+            return p
+
         real_fsync = os.fsync
         fsync_records: list = []
 
@@ -1757,6 +1815,7 @@ class TestR9FinalPublicationFence:
             (paths.TEXT / "extra.norm.txt").write_text("injected-r3\n", encoding="utf-8")
             orig_fence(*args, **kwargs)
 
+        monkeypatch.setattr(evaluation, "_plan", spy_plan)
         monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
         monkeypatch.setattr(os, "fsync", spy_fsync)
         monkeypatch.setattr(os, "replace", spy_replace)
@@ -1770,6 +1829,8 @@ class TestR9FinalPublicationFence:
         assert "stat" in temp_info, "Temp file must exist inside fence callback"
         assert _stat_mod.S_ISREG(temp_info["stat"].st_mode), "Temp must be a regular file"
         assert temp_info["bytes"].startswith(b"{"), "Temp must contain proposed JSON"
+        assert proposed_bytes_list, "spy_plan must have been called before temp file was written"
+        assert temp_info["bytes"] == proposed_bytes_list[0], "Temp file must contain exact proposed bytes"
         # Prove fsync was called on the temp fd (matching inode).
         assert fsync_records, "os.fsync must have been called"
         assert any(

@@ -142,7 +142,7 @@ def select_sample_v2(rows, source_fp, analysis_fp, *, homographs, names,
     groups = {name: [] for name, _ in targets}
     for row in eligible:
         obs = obs_map.get(row.source_key)
-        if obs is not None and not isinstance(obs, (RESTORED_obs, NONE_obs, UNSUPPORTED_obs)):
+        if not isinstance(obs, (RESTORED_obs, NONE_obs, UNSUPPORTED_obs)):
             _error("YO_OBSERVER_UNSUPPORTED")
         is_restored = isinstance(obs, RESTORED_obs)
         if row.form_source.lower() in homographs:
