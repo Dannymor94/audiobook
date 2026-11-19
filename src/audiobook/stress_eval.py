@@ -942,13 +942,13 @@ def _apply(plan, *, before_publish=None):
 
 def _obs_to_witness(obs, f1_rule=None, f1_flag="none"):
     """Canonical observer witness tuple for final publication fence (B4/R9)."""
-    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
+    from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs
     OCV = "yo-observation/1"
     if isinstance(obs, RESTORED_obs):
         return ("RESTORED", obs.form, obs.indices, obs.fp, f1_rule, f1_flag, OCV)
-    if isinstance(obs, UNSUPPORTED_obs):
-        return ("UNSUPPORTED", f1_rule, f1_flag, OCV)
-    return ("NONE", f1_rule, f1_flag, OCV)
+    if isinstance(obs, NONE_obs):
+        return ("NONE", f1_rule, f1_flag, OCV)
+    return ("UNSUPPORTED", f1_rule, f1_flag, OCV)  # fail-closed: UNSUPPORTED_obs + unknown types
 
 
 def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path):
@@ -960,6 +960,7 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
     """
     _assert_current(context, config)
     _verify_sample(record, sample_path)
+    _verify_selection_fresh(record, context, config)
     from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
                                                compute_prep_config_digest)
     current_map = _load_yo_map(config)

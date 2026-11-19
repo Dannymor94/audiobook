@@ -1387,6 +1387,92 @@ class TestR9FinalPublicationFence:
             evaluation.score({})
         assert score_path().read_bytes() == old_score
 
+    @pytest.mark.parametrize("noop_path", [False, True], ids=["rename", "noop"])
+    def test_t04f_nonselected_eligible_assignment_change_raises_sample_stale(
+        self, tmp_path, monkeypatch, noop_path
+    ):
+        """T04f: nonselected eligible key NONE→RESTORED changes eligible_assignment_sha256 → SAMPLE_STALE.
+
+        Selected witnesses are unchanged; only the eligible assignment digest changes.
+        Fires on both rename path (noop_path=False) and no-op path (noop_path=True).
+        Without fix (_verify_selection_fresh absent from fence): no error raised.
+        """
+        from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs, restoration_fp as _rfp
+        units = [{"type": "text", "text": "Бета."}, {"type": "text", "text": "Гамма."}]
+        mini_strata = (("omograph", 0), ("top300", 0), ("name", 0),
+                       ("override_covered", 0), ("yo_changed", 0), ("tail", 1))
+        monkeypatch.setattr(evaluation, "STRATA", mini_strata)
+        setup_book(tmp_path, monkeypatch, units)
+        ctx = predictions(context_for(units))
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        evaluation.sample({})
+        complete(tmp_path)
+        if noop_path:
+            evaluation.score({})
+        # Determine the nonselected key by deterministic ranking (tail n=1: only ranked[0] selected).
+        ranked = sorted(
+            [occ.source_key for occ in ctx.rows],
+            key=lambda k: hashlib.sha256(f"{evaluation.SEED_V2}|{k}".encode("utf-8")).hexdigest()
+        )
+        nonselected_key = ranked[1]
+        nonselected_occ = next(occ for occ in ctx.rows if occ.source_key == nonselected_key)
+        identity = ctx.sources.resolve(nonselected_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        old_bytes = score_path().read_bytes() if noop_path else None
+        orig = evaluation._assert_current
+
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: (RESTORED_obs("Ёлка", (0,), mock_fp)
+                                                 if o.source_key == nonselected_key
+                                                 else NONE_obs()))
+
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score({})
+        if noop_path:
+            assert score_path().read_bytes() == old_bytes
+        else:
+            assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
+    @pytest.mark.parametrize("noop_path", [False, True], ids=["rename", "noop"])
+    def test_t04g_unknown_observer_type_at_fence_raises_yo_observer_unsupported(
+        self, tmp_path, monkeypatch, noop_path
+    ):
+        """T04g: unknown observer type at fence → YO_OBSERVER_UNSUPPORTED (fail-closed).
+
+        Fires on both rename path (noop_path=False) and no-op path (noop_path=True).
+        Without fix: unknown type silently treated as NONE; with fix: raises.
+        """
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        if noop_path:
+            evaluation.score({})
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        old_bytes = score_path().read_bytes() if noop_path else None
+        orig = evaluation._assert_current
+
+        class _UnknownObs:
+            pass
+
+        def inject(ctx, cfg):
+            orig(ctx, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: _UnknownObs())
+
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+            evaluation.score({})
+        if noop_path:
+            assert score_path().read_bytes() == old_bytes
+        else:
+            assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
     def test_t05_gold_mutated_at_fence_raises_gold_output_changed(self, tmp_path, monkeypatch):
         """T05: gold mutated inside before_publish callback (post-fsync, pre-rename) → GOLD_OUTPUT_CHANGED."""
         ready(tmp_path, monkeypatch)
@@ -1422,6 +1508,54 @@ class TestR9FinalPublicationFence:
         with pytest.raises(AnnotationError, match="YO_OUTPUT_CHANGED"):
             evaluation.score({})
         assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
+    def test_t05r_gold_mutated_at_fence_rename_with_existing_score_preserves_old_bytes(
+        self, tmp_path, monkeypatch
+    ):
+        """T05r: rename path with pre-existing score; gold mutated at fence → GOLD_OUTPUT_CHANGED, old bytes preserved."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        # Force rename path: append a byte so stored bytes ≠ new computation.
+        score_path().write_bytes(score_path().read_bytes() + b" ")
+        old_bytes = score_path().read_bytes()
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        gold = paths.TEXT / "stress_gold.tsv"
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            gold.write_bytes(gold.read_bytes() + b" ")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="GOLD_OUTPUT_CHANGED"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_bytes
+        assert not any(score_dir.glob("*.txn-*"))
+
+    def test_t06r_yo_mutated_at_fence_rename_with_existing_score_preserves_old_bytes(
+        self, tmp_path, monkeypatch
+    ):
+        """T06r: rename path with pre-existing score; YO journal mutated at fence → YO_OUTPUT_CHANGED, old bytes preserved."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        score_path().write_bytes(score_path().read_bytes() + b" ")
+        old_bytes = score_path().read_bytes()
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        yo = evaluation._yo_path()
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            yo.parent.mkdir(parents=True, exist_ok=True)
+            yo.write_bytes((yo.read_bytes() if yo.exists() else b"") + b"injected\n")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="YO_OUTPUT_CHANGED"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_bytes
         assert not any(score_dir.glob("*.txn-*"))
 
     def test_t07_late_sample_mutation_raises_sample_invalid(self, tmp_path, monkeypatch):
@@ -1489,6 +1623,29 @@ class TestR9FinalPublicationFence:
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
         assert score_path().read_bytes() == old_score, "Pre-existing score must be preserved"
+
+    def test_t09r_rename_with_existing_score_fence_raises_old_bytes_preserved(
+        self, tmp_path, monkeypatch
+    ):
+        """T09r: rename path with pre-existing distinct score; fence raises → old bytes preserved, no temp residue."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        # Force rename path: append a byte so stored bytes ≠ new computation.
+        score_path().write_bytes(score_path().read_bytes() + b" ")
+        old_bytes = score_path().read_bytes()
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            (paths.TEXT / "extra.norm.txt").write_text("injected-at-fence\n", encoding="utf-8")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_bytes, "Pre-existing score must be preserved on rename path"
+        assert not any(score_dir.glob("*.txn-*")), "No temp files should remain after error"
 
     def test_t10_no_op_path_fence_fires_on_idempotent_call(self, tmp_path, monkeypatch):
         """T10: second call takes no-op path but fence still fires and catches drift."""
