@@ -1199,6 +1199,8 @@ class TestR9FinalPublicationFence:
         """T01: prep config changes between _assert_current and fence → SAMPLE_STALE."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
+        evaluation.score({})
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx, cfg):
@@ -1208,6 +1210,7 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
+        assert score_path().read_bytes() == old_score
 
     def test_t02_yo_map_drift_raises_sample_stale(self, tmp_path, monkeypatch):
         """T02: YO-map content changes between _assert_current and fence → SAMPLE_STALE."""
@@ -1220,6 +1223,8 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
         evaluation.sample(config)
         complete(tmp_path)
+        evaluation.score(config)
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx, cfg):
@@ -1230,11 +1235,14 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score(config)
+        assert score_path().read_bytes() == old_score
 
     def test_t03_norm_content_drift_raises_sample_stale(self, tmp_path, monkeypatch):
         """T03: norm file content changes between _assert_current and fence → SAMPLE_STALE."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
+        evaluation.score({})
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx, cfg):
@@ -1244,6 +1252,7 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
+        assert score_path().read_bytes() == old_score
 
     def test_t04_per_key_witness_drift_raises_sample_stale(self, tmp_path, monkeypatch):
         """T04: per-key observer returns different result at fence → SAMPLE_STALE."""
@@ -1260,6 +1269,8 @@ class TestR9FinalPublicationFence:
                             lambda o, s, c: RESTORED_obs("Ёлка", (0,), mock_fp))
         evaluation.sample(config)
         complete(tmp_path)
+        evaluation.score(config)
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx2, cfg):
@@ -1269,43 +1280,101 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score(config)
+        assert score_path().read_bytes() == old_score
 
-    def test_t05_gold_mutated_at_fence_raises_gold_output_changed(self, tmp_path, monkeypatch):
-        """T05: gold mutated after fsync (inside _apply) → GOLD_OUTPUT_CHANGED from fence."""
-        ready(tmp_path, monkeypatch)
+    def test_t04b_restored_to_different_restored_raises_sample_stale(self, tmp_path, monkeypatch):
+        """T04b: RESTORED(A) → RESTORED(B) with different form/indices/fp at fence → SAMPLE_STALE."""
+        from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp as _rfp
+        units = setup_book(tmp_path, monkeypatch)
+        (paths.TEXT / "yo.norm.txt").write_text("елка ёлка ёлка\n", encoding="utf-8")
+        config = {"text_prep": {"yo_restore": True}}
+        ctx = predictions(context_for(units))
+        occ = ctx.rows[0]
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        fp_a = _rfp(identity, "Ёлка", [0])
+        fp_b = _rfp(identity, "ЁЛКА", [1])
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, s, c: RESTORED_obs("Ёлка", (0,), fp_a))
+        evaluation.sample(config)
         complete(tmp_path)
-        gold = paths.TEXT / "stress_gold.tsv"
-        real_fsync = os.fsync
+        evaluation.score(config)
+        old_score = score_path().read_bytes()
+        orig = evaluation._assert_current
 
-        def inject_fsync(fd):
-            real_fsync(fd)
-            gold.write_bytes(gold.read_bytes() + b" ")
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: RESTORED_obs("ЁЛКА", (1,), fp_b))
 
-        monkeypatch.setattr(evaluation.os, "fsync", inject_fsync)
-        with pytest.raises(AnnotationError, match="GOLD_OUTPUT_CHANGED"):
-            evaluation.score({})
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score(config)
+        assert score_path().read_bytes() == old_score
 
-    def test_t06_yo_mutated_at_fence_raises_yo_output_changed(self, tmp_path, monkeypatch):
-        """T06: YO journal mutated after fsync (inside _apply) → YO_OUTPUT_CHANGED from fence."""
-        ready(tmp_path, monkeypatch)
+    def test_t04c_none_to_restored_raises_sample_stale(self, tmp_path, monkeypatch):
+        """T04c: NONE → RESTORED at fence → SAMPLE_STALE."""
+        from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs, restoration_fp as _rfp
+        units = setup_book(tmp_path, monkeypatch)
+        (paths.TEXT / "yo.norm.txt").write_text("елка ёлка ёлка\n", encoding="utf-8")
+        config = {"text_prep": {"yo_restore": True}}
+        ctx = predictions(context_for(units))
+        occ = ctx.rows[0]
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        evaluation.sample(config)
         complete(tmp_path)
-        yo = evaluation._yo_path()
-        real_fsync = os.fsync
+        evaluation.score(config)
+        old_score = score_path().read_bytes()
+        orig = evaluation._assert_current
 
-        def inject_fsync(fd):
-            real_fsync(fd)
-            yo.parent.mkdir(parents=True, exist_ok=True)
-            yo.write_bytes((yo.read_bytes() if yo.exists() else b"") + b"injected\n")
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key",
+                                lambda o, s, c: RESTORED_obs("Ёлка", (0,), mock_fp))
 
-        monkeypatch.setattr(evaluation.os, "fsync", inject_fsync)
-        with pytest.raises(AnnotationError, match="YO_OUTPUT_CHANGED"):
-            evaluation.score({})
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score(config)
+        assert score_path().read_bytes() == old_score
 
-    def test_t07_unsupported_at_fence_raises_yo_observer_unsupported(self, tmp_path, monkeypatch):
-        """T07: observer returns UNSUPPORTED at fence → YO_OBSERVER_UNSUPPORTED."""
+    def test_t04d_f1_excluded_witness_change_raises_sample_stale(self, tmp_path, monkeypatch):
+        """T04d: F1-excluded key's observer changes at fence → SAMPLE_STALE (witness covers F1 keys)."""
+        from audiobook.stress_yo_observer import RESTORED_obs, NONE_obs, restoration_fp as _rfp
+        units = setup_book(tmp_path, monkeypatch)
+        (paths.TEXT / "yo.norm.txt").write_text("елка ёлка ёлка\n", encoding="utf-8")
+        config = {"text_prep": {"yo_restore": True}}
+        ctx = predictions(context_for(units), changes={"01_test|0|0": {"f1_rule": "F1_TEST", "f1_flag": "f1_exclude"}})
+        occ = ctx.rows[0]
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        mock_fp = _rfp(identity, "Ёлка", [0])
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, s, c: RESTORED_obs("Ёлка", (0,), mock_fp))
+        evaluation.sample(config)
+        complete(tmp_path)
+        evaluation.score(config)
+        old_score = score_path().read_bytes()
+        orig = evaluation._assert_current
+
+        def inject(ctx2, cfg):
+            orig(ctx2, cfg)
+            monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+
+        monkeypatch.setattr(evaluation, "_assert_current", inject)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score(config)
+        assert score_path().read_bytes() == old_score
+
+    def test_t04e_unsupported_at_fence_raises_yo_observer_unsupported(self, tmp_path, monkeypatch):
+        """T04e: observer returns UNSUPPORTED at fence → YO_OBSERVER_UNSUPPORTED."""
         from audiobook.stress_yo_observer import UNSUPPORTED_obs
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
+        evaluation.score({})
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx, cfg):
@@ -1316,36 +1385,117 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
             evaluation.score({})
+        assert score_path().read_bytes() == old_score
 
-    def test_t08_idempotent_second_score_does_not_raise(self, tmp_path, monkeypatch):
-        """T08: calling score() twice returns identical result, no error."""
-        ready(tmp_path, monkeypatch)
-        complete(tmp_path)
-        r1 = evaluation.score({})
-        r2 = evaluation.score({})
-        assert r1 == r2
-
-    def test_t09_fence_fires_before_replace_so_target_absent_on_error(self, tmp_path, monkeypatch):
-        """T09: fence fires after fsync but before os.replace — target file absent on error."""
+    def test_t05_gold_mutated_at_fence_raises_gold_output_changed(self, tmp_path, monkeypatch):
+        """T05: gold mutated inside before_publish callback (post-fsync, pre-rename) → GOLD_OUTPUT_CHANGED."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
-        real_fsync = os.fsync
+        gold = paths.TEXT / "stress_gold.tsv"
+        orig_fence = evaluation._score_publication_fence
 
-        def inject_fsync(fd):
-            real_fsync(fd)
-            (paths.TEXT / "extra.norm.txt").write_text("injected-at-fsync\n", encoding="utf-8")
+        def inject_fence(*args, **kwargs):
+            gold.write_bytes(gold.read_bytes() + b" ")
+            orig_fence(*args, **kwargs)
 
-        monkeypatch.setattr(evaluation.os, "fsync", inject_fsync)
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="GOLD_OUTPUT_CHANGED"):
+            evaluation.score({})
+        assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
+    def test_t06_yo_mutated_at_fence_raises_yo_output_changed(self, tmp_path, monkeypatch):
+        """T06: YO journal mutated inside before_publish callback (post-fsync, pre-rename) → YO_OUTPUT_CHANGED."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        yo = evaluation._yo_path()
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            yo.parent.mkdir(parents=True, exist_ok=True)
+            yo.write_bytes((yo.read_bytes() if yo.exists() else b"") + b"injected\n")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="YO_OUTPUT_CHANGED"):
+            evaluation.score({})
+        assert not any(score_dir.glob("s2-*.json"))
+        assert not any(score_dir.glob("*.txn-*"))
+
+    def test_t07_late_sample_mutation_raises_sample_invalid(self, tmp_path, monkeypatch):
+        """T07: sample JSON mutated inside fence callback (post-fsync, pre-rename) → SAMPLE_INVALID."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        old_score = score_path().read_bytes()
+        sample_dir = paths.OUT / "stress" / "eval" / "sample"
+        sample_file = next(sample_dir.glob("*.json"))
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            sample_file.write_bytes(sample_file.read_bytes()[:-2])  # truncate closing brace → invalid JSON
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_score
+
+    def test_t08_idempotent_second_score_does_not_raise(self, tmp_path, monkeypatch):
+        """T08: calling score() twice returns identical result with same persisted bytes."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        r1 = evaluation.score({})
+        score_bytes_1 = score_path().read_bytes()
+        r2 = evaluation.score({})
+        score_bytes_2 = score_path().read_bytes()
+        assert r1 == r2
+        assert score_bytes_1 == score_bytes_2
+        assert not any(score_dir.glob("*.txn-*")), "No temp files should remain"
+
+    def test_t09_fence_fires_before_replace_so_target_absent_on_error(self, tmp_path, monkeypatch):
+        """T09: fence fires inside _apply callback (post-fsync, pre-rename) — target absent on error."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        score_dir = paths.OUT / "stress" / "eval" / "score"
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            (paths.TEXT / "extra.norm.txt").write_text("injected-at-fence\n", encoding="utf-8")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})
         assert not any(score_dir.glob("s2-*.json")), "Target must not be written when fence raises"
+        assert not any(score_dir.glob("*.txn-*")), "No temp files should remain after error"
+
+    def test_t09b_pre_existing_score_preserved_when_fence_raises(self, tmp_path, monkeypatch):
+        """T09b: fence raises in no-op path — pre-existing score bytes unchanged."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        evaluation.score({})
+        old_score = score_path().read_bytes()
+        orig_fence = evaluation._score_publication_fence
+
+        def inject_fence(*args, **kwargs):
+            (paths.TEXT / "extra.norm.txt").write_text("injected-at-fence\n", encoding="utf-8")
+            orig_fence(*args, **kwargs)
+
+        monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
+        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+            evaluation.score({})
+        assert score_path().read_bytes() == old_score, "Pre-existing score must be preserved"
 
     def test_t10_no_op_path_fence_fires_on_idempotent_call(self, tmp_path, monkeypatch):
         """T10: second call takes no-op path but fence still fires and catches drift."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})  # write the file; second call will be no-op
+        old_score = score_path().read_bytes()
         orig = evaluation._assert_current
 
         def inject(ctx, cfg):
@@ -1355,3 +1505,4 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(evaluation, "_assert_current", inject)
         with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
             evaluation.score({})  # no-op path → fence fires → SAMPLE_STALE
+        assert score_path().read_bytes() == old_score
