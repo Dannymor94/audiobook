@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - ci/wp4-gate-ca-r3
-  pull_request:
-    branches:
-      - task/T15-7-wp4-g1-implementation
   workflow_dispatch:
 
 permissions:
