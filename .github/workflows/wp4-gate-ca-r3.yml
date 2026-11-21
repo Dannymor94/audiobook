@@ -1,0 +1,83 @@
+name: WP4 Gate C-A R3 synthetic QA
+
+on:
+  push:
+    branches:
+      - ci/wp4-gate-ca-r3
+  pull_request:
+    branches:
+      - task/T15-7-wp4-g1-implementation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wp4-ca-r3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - name: Checkout source without credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact implementation SHA and isolated CI diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=ecd922167a109a2ea818c7a3abe72273ccb37c72
+          target=e36f9bac33c4625239e3bed73bf414a9fefe9af7
+          git cat-file -e "${base}^{commit}"
+          git cat-file -e "${target}^{commit}"
+          git merge-base --is-ancestor "${target}" HEAD
+          while IFS= read -r changed; do
+            case "${changed}" in
+              src/audiobook/stress_eval.py|tests/test_stress_eval_merge.py|tests/test_stress_eval_sample.py|tests/test_stress_eval_score.py)
+                ;;
+              *)
+                echo "::error::Out-of-allowlist implementation file: ${changed}"
+                exit 1
+                ;;
+            esac
+          done < <(git diff --name-only "${base}" "${target}")
+          while IFS= read -r changed; do
+            case "${changed}" in
+              .github/workflows/wp4-gate-ca-r3.yml)
+                ;;
+              *)
+                echo "::error::QA branch changed implementation file: ${changed}"
+                exit 1
+                ;;
+            esac
+          done < <(git diff --name-only "${target}" HEAD)
+          echo "Pinned R3 source: ${target}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v10.2.0
+      - run: uv python install 3.11
+      - name: Install test environment
+        run: uv sync --extra dev
+      - name: Offline doctor (no models)
+        run: uv run python -m audiobook doctor --no-models
+
+      - name: Synthetic suite at three hash seeds
+        shell: bash
+        run: |
+          set -euo pipefail
+          for seed in 0 42 1337; do
+            echo "::group::PYTHONHASHSEED=${seed}"
+            echo "Running source-only tests; no private owner data is supplied"
+            PYTHONHASHSEED="${seed}" uv run pytest -m "not slow" -q --tb=short
+            echo "::endgroup::"
+            echo "PYTHONHASHSEED=${seed}: PASS" >> "${GITHUB_STEP_SUMMARY}"
+          done
