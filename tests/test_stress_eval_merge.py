@@ -416,8 +416,9 @@ from audiobook.stress_yo_observer import (
 
 def _yo_row(source_key, form_source, unit_text_sha256, unit_kind, context_sha256,
             restored_form, indices, restoration_fp_val, yo_correct, *,
-            norm="a" * 64, yo_map="b" * 64, prep_cfg="c" * 64,
+            norm=None, yo_map=None, prep_cfg=None,
             labeler="synthetic-owner", date="2026-11-15"):
+    from audiobook.stress_yo_observer import compute_norm_digest, compute_yo_map_digest, compute_prep_config_digest
     return {
         "schema_version": "yo-evidence/1",
         "source_key": source_key, "form_source": form_source,
@@ -427,8 +428,9 @@ def _yo_row(source_key, form_source, unit_text_sha256, unit_kind, context_sha256
         "restored_vowel_indices": "|".join(map(str, sorted(indices))),
         "observation_contract_version": "yo-observation/1",
         "restoration_fp": restoration_fp_val,
-        "norm_content_sha256": norm, "yo_map_sha256": yo_map,
-        "prep_config_sha256": prep_cfg,
+        "norm_content_sha256": norm if norm is not None else compute_norm_digest(paths.TEXT),
+        "yo_map_sha256": yo_map if yo_map is not None else compute_yo_map_digest({}),
+        "prep_config_sha256": prep_cfg if prep_cfg is not None else compute_prep_config_digest({}),
         "yo_correct": yo_correct, "labeler": labeler, "date": date,
     }
 
@@ -851,11 +853,18 @@ class TestT34T35T37T39YoMerge:
         row_b = _yo_row(identity["source_key"], identity["form_source"],
                         identity["unit_text_sha256"], identity["unit_kind"],
                         identity["context_sha256"], "Елё", [1], fp_b, "n")
-        # B3: use stateful observer to return the right fp per merge_yo call.
+        # B3: use call-count observer — returns fp_a until second merge_yo starts, then fp_b.
+        # The fence in merge_yo also re-observes, so we return fp_a for all calls within
+        # the first merge_yo, and fp_b for all calls within the second merge_yo.
         from audiobook.stress_yo_observer import RESTORED_obs
-        obs_sequence = iter([RESTORED_obs("Ёле", (0,), fp_a), RESTORED_obs("Елё", (1,), fp_b)])
-        monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", lambda key, frm, s, c: next(obs_sequence))
+        merge_call = [0]
+
+        def _obs(key, frm, s, c):
+            return RESTORED_obs("Ёле", (0,), fp_a) if merge_call[0] == 0 else RESTORED_obs("Елё", (1,), fp_b)
+
+        monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", _obs)
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_a]))
+        merge_call[0] = 1
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_b]))
         assert result["added"] == 1  # new entry for different fp
 
@@ -1840,12 +1849,12 @@ def _c1_yo_input(tmp_path, rows):
     return path
 
 
-def _c1_make_yo_ev_row(si, key, restored_form, indices=(0,)):
+def _c1_make_yo_ev_row(si, key, restored_form, indices=(0,), config=None):
     """Build a valid yo-evidence row: form_source has е, restored_form has ё."""
-    from audiobook.stress_yo_observer import restoration_fp
+    from audiobook.stress_yo_observer import restoration_fp, compute_norm_digest, compute_yo_map_digest, compute_prep_config_digest
+    cfg = config or {}
     identity = si.resolve(key)[0]
     fp = restoration_fp(identity, restored_form, list(indices))
-    h = _hashlib.sha256(b"test").hexdigest()
     return {
         "schema_version": "yo-evidence/1",
         "source_key": identity["source_key"],
@@ -1857,7 +1866,9 @@ def _c1_make_yo_ev_row(si, key, restored_form, indices=(0,)):
         "restored_vowel_indices": "|".join(str(i) for i in indices),
         "observation_contract_version": "yo-observation/1",
         "restoration_fp": fp,
-        "norm_content_sha256": h, "yo_map_sha256": h, "prep_config_sha256": h,
+        "norm_content_sha256": compute_norm_digest(paths.TEXT),
+        "yo_map_sha256": compute_yo_map_digest({}),
+        "prep_config_sha256": compute_prep_config_digest(cfg),
         "yo_correct": "y", "labeler": "owner", "date": "2026-01-01",
     }
 
@@ -2311,22 +2322,30 @@ def test_P01_yo_missing_final_lf_rejected(tmp_path, monkeypatch):
 # P0.2 — Source freshness fence ——————————————————————————————————————————————
 
 def test_P02_source_changed_between_pin_and_publish_raises(tmp_path, monkeypatch):
-    """P0.2: SOURCE_CHANGED raised when _source_provenance differs at publish vs pin time."""
+    """P0.2: SOURCE_CHANGED raised when norm file mutates after resolve but before fence check."""
     from audiobook.unitmap import AnnotationError
-    units = setup_book(tmp_path, monkeypatch)
-    evaluation.sample({})
-    rows = todo_rows()
+    import json as _json
+    # Set up real norm + blocks files so SourceIndex.resolve reads from disk.
+    text_dir = tmp_path / "text"
+    text_dir.mkdir()
+    monkeypatch.setattr(paths, "TEXT", text_dir)
+    units = [{"type": "text", "text": "Альфа.", "tokens": []}]
+    norm_path = text_dir / "01_test.norm.txt"
+    norm_path.write_bytes(b"original norm content")
+    blocks_path = text_dir / "01_test.blocks.json"
+    blocks_path.write_text(_json.dumps([{"type": "text", "text": "Альфа.", "tokens": []}]), encoding="utf-8")
 
-    # Simulate a source mutation between pin and publish by returning different bytes.
-    call_count = [0]
+    si = evaluation.SourceIndex()
+    # Monkeypatch load_units to return our synthetic units.
+    import audiobook.chunker as _chunker
+    monkeypatch.setattr(_chunker, "load_units", lambda *a, **kw: units)
+    si.resolve("01_test|0|0")  # populates _norm_bytes["01_test"]
 
-    def _shifting_provenance(sources):
-        call_count[0] += 1
-        return b"before" if call_count[0] == 1 else b"changed"
+    # Mutate the norm file after resolve.
+    norm_path.write_bytes(b"mutated norm content")
 
-    monkeypatch.setattr(evaluation, "_source_provenance", _shifting_provenance)
     with pytest.raises(AnnotationError, match="SOURCE_CHANGED"):
-        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+        evaluation._fence_check_sources(si)
 
 
 # P0.3 — Manifest uniqueness —————————————————————————————————————————————————
@@ -2475,3 +2494,157 @@ def test_P14_merge_yo_stale_fp_raises_yo_candidate_stale(tmp_path, monkeypatch):
         evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
     after = yo_path.read_bytes() if yo_path.exists() else None
     assert before == after
+
+
+# P0.5 — Source fence: framing and missing-file cases ————————————————————————
+
+def test_P05_fence_missing_file_at_fence_raises(tmp_path, monkeypatch):
+    """P0.5: SOURCE_CHANGED raised when norm file removed after resolve."""
+    import json as _json
+    text_dir = tmp_path / "text"
+    text_dir.mkdir()
+    monkeypatch.setattr(paths, "TEXT", text_dir)
+    units = [{"type": "text", "text": "Альфа.", "tokens": []}]
+    norm_path = text_dir / "01_test.norm.txt"
+    norm_path.write_bytes(b"original")
+    blocks_path = text_dir / "01_test.blocks.json"
+    blocks_path.write_text(_json.dumps(units), encoding="utf-8")
+    si = evaluation.SourceIndex()
+    import audiobook.chunker as _chunker
+    monkeypatch.setattr(_chunker, "load_units", lambda *a, **kw: units)
+    si.resolve("01_test|0|0")
+    norm_path.unlink()
+    with pytest.raises(AnnotationError, match="SOURCE_CHANGED"):
+        evaluation._fence_check_sources(si)
+
+
+def test_P05_framing_prevents_cross_section_collision(tmp_path, monkeypatch):
+    """P0.5: section+length framing ensures two sections can't collide by swapping bytes."""
+    import json as _json
+    text_dir = tmp_path / "text"
+    text_dir.mkdir()
+    monkeypatch.setattr(paths, "TEXT", text_dir)
+    units_a = [{"type": "text", "text": "Альфа.", "tokens": []}]
+    units_b = [{"type": "text", "text": "Бета.", "tokens": []}]
+    for section, units, content in [
+        ("01_test", units_a, b"aaaa"),
+        ("02_test", units_b, b"bbbb"),
+    ]:
+        (text_dir / f"{section}.norm.txt").write_bytes(content)
+        (text_dir / f"{section}.blocks.json").write_text(_json.dumps(units), encoding="utf-8")
+    si = evaluation.SourceIndex()
+    import audiobook.chunker as _chunker
+    monkeypatch.setattr(_chunker, "load_units", lambda sec, *a, **kw:
+                        units_a if sec == "01" else units_b)
+    si.resolve("01_test|0|0")
+    si.resolve("02_test|0|0")
+    prov_original = evaluation._source_provenance(si)
+    # Swap the stored bytes: same set, wrong framing → provenance must differ.
+    si._norm_bytes["01_test"], si._norm_bytes["02_test"] = (
+        si._norm_bytes["02_test"], si._norm_bytes["01_test"]
+    )
+    assert evaluation._source_provenance(si) != prov_original
+
+
+# P0.6 — YO digest field verification ————————————————————————————————————————
+
+def test_P06_yo_digest_field_mismatch_raises_candidate_stale(tmp_path, monkeypatch):
+    """P0.6: merge_yo raises YO_CANDIDATE_STALE when row digest fields don't match current state."""
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    # Corrupt the norm digest in the row.
+    row["norm_content_sha256"] = "0" * 64
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    before = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_CANDIDATE_STALE"):
+        evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    after = yo_path.read_bytes() if yo_path.exists() else None
+    assert before == after
+
+
+def test_P06_yo_fence_obs_fp_changed_raises_candidate_stale(tmp_path, monkeypatch):
+    """P0.6: merge_yo raises YO_CANDIDATE_STALE when re-observation at fence returns different fp."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    # First observation (batch loop) returns matching fp; fence re-observation returns different fp.
+    call_count = [0]
+    original_fp = row["restoration_fp"]
+
+    def shifting_obs(key, form, sources, config):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return RESTORED_obs("Ёлка", (0,), original_fp)
+        return RESTORED_obs("Ёлка", (0,), "0" * 64)
+
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", shifting_obs)
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    before = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_CANDIDATE_STALE"):
+        evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    after = yo_path.read_bytes() if yo_path.exists() else None
+    assert before == after
+
+
+# P0.7 — Duplicate source unit text → MANIFEST_UNIT_AMBIGUOUS ————————————————
+
+def test_P07_manifest_unit_ambiguous_duplicate_source_text_raises_unsupported(tmp_path, monkeypatch):
+    """P0.7: when two source units share the same text, ordinal is ambiguous → UNSUPPORTED."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    duplicate_text = "Елка."
+    units = setup_book(tmp_path, monkeypatch, [
+        {"type": "text", "text": duplicate_text},
+        {"type": "text", "text": duplicate_text},
+    ])
+    si = context_for(units).sources
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        f'{{"id": "0001", "text": "{duplicate_text}", "open_end": false}}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs)
+    assert obs.reason == "MANIFEST_UNIT_AMBIGUOUS"
+
+
+def test_P07_manifest_unique_source_text_positive_oracle(tmp_path, monkeypatch):
+    """P0.7 positive oracle: unique source unit text does not raise MANIFEST_UNIT_AMBIGUOUS."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    units = setup_book(tmp_path, monkeypatch, [
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Альфа."},
+    ])
+    si = context_for(units).sources
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "text": "Елка.", "open_end": false}\n'
+        '{"id": "0002", "text": "Альфа.", "open_end": false}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
+    # Must not be MANIFEST_UNIT_AMBIGUOUS — it may be UNSUPPORTED for other reasons or NONE/RESTORED.
+    assert not (isinstance(obs, UNSUPPORTED_obs) and obs.reason == "MANIFEST_UNIT_AMBIGUOUS")
+
+
+# Normative A15 — Resolver vs inventory source identity equivalence ————————————
+
+def test_normative_A15_synthetic_resolver_five_field_identity_match(tmp_path, monkeypatch):
+    """Normative A15: SourceIndex.resolve and todo_rows produce identical five-field identities."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    rows = todo_rows()
+    si = context_for(units).sources
+    mismatches = []
+    for row in rows:
+        key = row["source_key"]
+        resolved = si.resolve(key)
+        if resolved is None:
+            mismatches.append((key, "resolve returned None"))
+            continue
+        identity, _, _ = resolved
+        for field in evaluation.IDENTITY_FIELDS:
+            if row[field] != identity[field]:
+                mismatches.append((key, field, row[field], identity[field]))
+    assert mismatches == [], f"Resolver/inventory identity mismatch: {mismatches[:3]}"

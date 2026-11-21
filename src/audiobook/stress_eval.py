@@ -387,17 +387,23 @@ class SourceIndex:
     """Lazy normalized-source identities, including historical unselected keys."""
     def __init__(self, units=None):
         self.units = {} if units is None else units
+        self._norm_bytes: dict = {}  # section → bytes read at load time (for fence)
 
     def resolve(self, key):
         section, uid, index = _split_key(key)
         if section not in self.units:
-            from audiobook.chunker import load_units
-            if not (paths.TEXT / f"{section}.norm.txt").is_file():
+            norm = paths.TEXT / f"{section}.norm.txt"
+            if norm.is_symlink():
+                _error("SOURCE_READ_ERROR")
+            if not norm.is_file():
                 return None
             try:
+                raw = norm.read_bytes()
+                from audiobook.chunker import load_units
                 self.units[section] = load_units(*section.split("_", 1))
             except (OSError, ValueError, KeyError, IndexError, SystemExit):
                 _error("SOURCE_READ_ERROR")
+            self._norm_bytes[section] = raw
         units = self.units[section]
         if uid >= len(units):
             return None
@@ -1090,13 +1096,11 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
                 additions[key] = row
         updated = ledger + list(additions.values())
         updated_state = inspect_ledger(updated, sources)
-        source_pin = _source_provenance(sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
 
         def _fence():
-            if _source_provenance(sources) != source_pin:
-                _error("SOURCE_CHANGED")
+            _fence_check_sources(sources)
 
         _apply(plans[0], before_publish=_fence)
         _apply(plans[1])
@@ -1111,16 +1115,28 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
 
 
 def _source_provenance(sources):
-    """SHA256 of all loaded section norm files; SOURCE_CHANGED fence for merge paths."""
+    """SHA256 of stored section norm bytes with section+length framing; no disk re-read."""
     import hashlib
     h = hashlib.sha256()
-    for section in sorted(sources.units):
+    for section in sorted(sources._norm_bytes):
+        raw = sources._norm_bytes[section]
+        framing = len(section).to_bytes(2, 'big') + section.encode() + len(raw).to_bytes(8, 'big')
+        h.update(framing + raw)
+    return h.digest()
+
+
+def _fence_check_sources(sources):
+    """Re-read section norm files and verify bytes match stored snapshot; raises SOURCE_CHANGED."""
+    for section, expected in sorted(sources._norm_bytes.items()):
         norm = paths.TEXT / f"{section}.norm.txt"
         try:
-            h.update(norm.read_bytes())
+            if norm.is_symlink():
+                _error("SOURCE_CHANGED")
+            current = norm.read_bytes()
         except OSError:
-            h.update(b"\x00" + section.encode())
-    return h.digest()
+            _error("SOURCE_CHANGED")
+        if current != expected:
+            _error("SOURCE_CHANGED")
 
 
 def _accepted_vowels(gold, occ):
@@ -1244,6 +1260,11 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
     if len(matches) != 1:
         return UNSUPPORTED_obs("MANIFEST_AMBIGUOUS" if len(matches) > 1 else "MANIFEST_UNAVAILABLE")
     mrow = matches[0]
+    # Fail-closed if multiple source units share the same text: ordinal is ambiguous.
+    if section in sources.units:
+        duplicate_count = sum(1 for u in sources.units[section] if u["text"] == unit_text)
+        if duplicate_count > 1:
+            return UNSUPPORTED_obs("MANIFEST_UNIT_AMBIGUOUS")
     # Fail-closed on fragmented chunks: fragment ordinal is unknown without inventory.
     from audiobook.synth import row_leadin, chunk_fragments
     try:
@@ -1452,13 +1473,11 @@ def merge_source(config, incoming: Path):
                 additions[key] = row
         updated = ledger + list(additions.values())
         updated_state = inspect_ledger(updated, sources)
-        source_pin = _source_provenance(sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
 
         def _fence():
-            if _source_provenance(sources) != source_pin:
-                _error("SOURCE_CHANGED")
+            _fence_check_sources(sources)
 
         _apply(plans[0], before_publish=_fence)
         _apply(plans[1])
@@ -1608,6 +1627,11 @@ def merge_yo(config, incoming: Path):
             batch = parse_yo_evidence(incoming.read_text(encoding="utf-8"))
         except (OSError, UnicodeError):
             _error("YO_EVIDENCE_INVALID")
+        from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
+                                                   compute_prep_config_digest)
+        expected_norm_digest = compute_norm_digest(paths.TEXT)
+        expected_yo_map_digest = compute_yo_map_digest(_load_yo_map(config))
+        expected_prep_digest = compute_prep_config_digest(config)
         additions: list[dict] = []
         for row in batch:
             key = row["source_key"]
@@ -1620,6 +1644,13 @@ def merge_yo(config, incoming: Path):
             # Internal fp consistency check: row's claimed fp must match computed fp.
             indices = [int(p) for p in row["restored_vowel_indices"].split("|")]
             if _rfp_check(identity, row["restored_form_pre_respell"], indices) != row["restoration_fp"]:
+                _error("YO_CANDIDATE_STALE")
+            # Verify digest fields match current source state.
+            if row["norm_content_sha256"] != expected_norm_digest:
+                _error("YO_CANDIDATE_STALE")
+            if row["yo_map_sha256"] != expected_yo_map_digest:
+                _error("YO_CANDIDATE_STALE")
+            if row["prep_config_sha256"] != expected_prep_digest:
                 _error("YO_CANDIDATE_STALE")
             # B3: freshness check — observer must still produce RESTORED_obs with matching fp.
             obs = _yo_observe_key_by_source(key, row["form_source"], sources, config)
@@ -1639,11 +1670,21 @@ def merge_yo(config, incoming: Path):
             existing_by_fp[fp] = row
         if not additions:
             return {"added": 0, "skipped": len(batch)}
-        source_pin = _source_provenance(sources)
 
         def _yo_fence():
-            if _source_provenance(sources) != source_pin:
+            _fence_check_sources(sources)
+            from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
+                                                       compute_prep_config_digest)
+            if compute_norm_digest(paths.TEXT) != expected_norm_digest:
                 _error("SOURCE_CHANGED")
+            if compute_yo_map_digest(_load_yo_map(config)) != expected_yo_map_digest:
+                _error("SOURCE_CHANGED")
+            if compute_prep_config_digest(config) != expected_prep_digest:
+                _error("SOURCE_CHANGED")
+            for _row in additions:
+                _obs2 = _yo_observe_key_by_source(_row["source_key"], _row["form_source"], sources, config)
+                if not isinstance(_obs2, RESTORED_obs) or _obs2.fp != _row["restoration_fp"]:
+                    _error("YO_CANDIDATE_STALE")
 
         plan = _plan(yo_path, _yo_append_text(yo_data, additions), yo_data)
         _apply(plan, before_publish=_yo_fence)
