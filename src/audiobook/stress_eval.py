@@ -440,6 +440,11 @@ def _load_context(config):
                        frozenset(homographs), frozenset(names), before)
 
 
+def _load_sources(config=None):
+    """Source-only resolver for C1-compliant merge paths. Monkeypatchable in tests."""
+    return SourceIndex()
+
+
 def _selection(context, config):
     from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
                                                compute_prep_config_digest)
@@ -617,8 +622,6 @@ def validate_gold(row, occ=None, *, allow_blank=False, historical=False, allow_n
         text = row["form_source"].lower()
         if text.count("ё") == 1:
             return result
-        if occ is not None and yo_changed(occ) and occ.form_synth.lower().count("ё") == 1:
-            return result
         if historical and "ё" not in text and "е" in text:
             return result  # Unverifiable historical spelling, never used as active evidence.
         _error("GOLD_INVALID")
@@ -688,12 +691,12 @@ def _source_vowel_set(row: dict):
 
 
 def inspect_ledger(rows, context):
-    by_key = {row.source_key: row for row in context.rows}
+    sources = getattr(context, 'sources', context)
     active, stale, legacy_rows = {}, [], []
     duplicates = 0
     for raw in rows:
         row = validate_gold(raw, historical=True)
-        current = context.sources.resolve(row["source_key"])
+        current = sources.resolve(row["source_key"])
         if current is None or any(row[name] != current[0][name] for name in IDENTITY_FIELDS):
             stale.append(row)
             continue
@@ -701,14 +704,11 @@ def inspect_ledger(rows, context):
             # LEGACY_YO_UNRESOLVED: source predicate only (ADR §1.5); never consult observer.
             legacy_rows.append(row)
             continue
-        occ = by_key.get(row["source_key"])
-        usable_context = occ is not None and occ.alignment_status == "aligned" and vowel_count(occ.form_analysis) >= 2
-        row = validate_gold(row, occ if usable_context else None, historical=not usable_context)
+        row = validate_gold(row)
         key = row["source_key"]
         if key in active:
             vs_e, vs_n = _source_vowel_set(active[key]), _source_vowel_set(row)
-            if (vs_e is None or vs_n is None or vs_e != vs_n) and \
-               (active[key]["gold_vowel"], active[key]["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
+            if not (vs_e == vs_n and (vs_e is not None or active[key]["gold_vowel"] == row["gold_vowel"])):
                 _error("GOLD_ACTIVE_CONFLICT")
             duplicates += 1
             if tuple(row[n] for n in GOLD_FIELDS) < tuple(active[key][n] for n in GOLD_FIELDS):
@@ -843,6 +843,17 @@ def _todo_row(occ, sources):
     identity, text, word = current
     if (word.start(), word.end()) != (occ.norm_start, occ.norm_end):
         _error("SOURCE_IDENTITY_MISMATCH")
+    from audiobook.stress_inventory import _char_context
+    context = _char_context(text, word.start(), word.end() - word.start())
+    return validate_gold({**identity, "context": context, **{field: "" for field in LABEL_FIELDS}}, allow_blank=True)
+
+
+def _todo_row_by_key(key, sources):
+    """Like _todo_row but source-only: resolves by source_key without an occ (C1)."""
+    current = sources.resolve(key)
+    if current is None:
+        _error("GOLD_UNEXPECTED_KEY")
+    identity, text, word = current
     from audiobook.stress_inventory import _char_context
     context = _char_context(text, word.start(), word.end() - word.start())
     return validate_gold({**identity, "context": context, **{field: "" for field in LABEL_FIELDS}}, allow_blank=True)
@@ -1047,45 +1058,39 @@ def sample(config):
 def merge(config, incoming: Path, sample_path: Path | None = None):
     lock = acquire_eval_lock()
     try:
-        context = _load_context(config)
-        selection, _ = _load_saved_selection(context, config, sample_path)
+        sources = _load_sources(config)
         gold = paths.TEXT / "stress_gold.tsv"
         archive = paths.TEXT / "stress_gold.archive.tsv"
         if incoming.resolve() == archive.resolve():
             _error("GOLD_ARCHIVE_NOT_AUTHORITATIVE")
         ledger, gold_before = _read_ledger(gold)
-        state = inspect_ledger(ledger, context)
+        state = inspect_ledger(ledger, sources)
         try:
             batch = parse_gold(incoming.read_text(encoding="utf-8"), allow_blank=True)
         except (OSError, UnicodeError):
             _error("GOLD_INPUT_INVALID")
-        selected = set(selection.record["keys"])
-        by_key = {row.source_key: row for row in context.rows}
         additions = {}
         skipped = blank = 0
         for row in batch:
             key = row["source_key"]
-            if key not in selected:
-                _error("GOLD_UNEXPECTED_KEY")
-            expected = _todo_row(by_key[key], context.sources)
+            expected = _todo_row_by_key(key, sources)
             if any(row[name] != expected[name] for name in GOLD_FIELDS[:6]):
                 _error("GOLD_STALE_INPUT")
             if all(not row[field] for field in LABEL_FIELDS):
                 blank += 1
                 continue
-            row = validate_gold(row, by_key[key])
+            row = validate_gold(row)
             existing = additions.get(key, state.active.get(key))
             if existing is not None:
-                if (existing["gold_vowel"], existing["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
+                if existing["gold_vowel"] != row["gold_vowel"]:
                     _error("GOLD_ACTIVE_CONFLICT")
                 skipped += 1
             else:
                 additions[key] = row
         updated = ledger + list(additions.values())
-        updated_state = inspect_ledger(updated, context)
+        updated_state = inspect_ledger(updated, sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
-        _assert_current(context, config)
         for plan in plans:
             _apply(plan)
         # Owner todo is not modified here: safe retirement policy is pending
@@ -1105,8 +1110,6 @@ def _accepted_vowels(gold, occ):
         return frozenset()
     if label == "yo":
         spelling = gold["form_source"].lower()
-        if spelling.count("ё") != 1:
-            spelling = occ.form_synth.lower()
         return frozenset([vowel_count(spelling[:spelling.index("ё")])])
     return frozenset(map(int, label.removeprefix("variants:").split("|")))
 
@@ -1183,6 +1186,58 @@ def _yo_observe_key(occ, sources, config):
         config=config or {},
         yo_map=yo_map, table=table, sentinel=sentinel,
         phrase=phrase, open_end=open_end,
+        source_identity=identity,
+    )
+
+
+def _yo_observe_key_by_source(source_key, form_source, sources, config):
+    """Manifest-based YO observation for merge_yo without inventory access.
+
+    Finds chunk by unit_text match in manifest; derives token_idx from raw text.
+    Returns UNSUPPORTED_obs on missing or ambiguous data. Monkeypatchable in tests.
+    """
+    from audiobook.pronounce import load_table
+    from audiobook.stress_yo_observer import observe_su, UNSUPPORTED_obs
+    resolved = sources.resolve(source_key)
+    if resolved is None:
+        return UNSUPPORTED_obs("SOURCE_NOT_FOUND")
+    identity, unit_text, _ = resolved
+    section = _split_key(source_key)[0]
+    manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
+    raw = -1
+    try:
+        raw = _open_eval_file(manifest_path)
+        with os.fdopen(raw, "r", encoding="utf-8") as mf:
+            raw = -1
+            manifest_text = mf.read()
+    except (OSError, UnicodeError, NotImplementedError):
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    finally:
+        if raw >= 0:
+            os.close(raw)
+    try:
+        mrows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
+    except (ValueError, UnicodeError):
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    mrow = next((r for r in mrows if r.get("text") == unit_text), None)
+    if mrow is None:
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    words = list(_WORD.finditer(mrow["text"]))
+    matched = [i for i, m in enumerate(words) if m.group().lower() == form_source.lower()]
+    if len(matched) != 1:
+        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    from audiobook.synth import row_leadin
+    yo_map = _load_yo_map(config)
+    table = load_table(paths.TEXT / "pronounce.yaml")
+    sentinel = (config.get("model") or {}).get("sentinel", "")
+    return observe_su(
+        source_token=form_source,
+        raw_text=mrow["text"],
+        token_idx=matched[0],
+        config=config or {},
+        yo_map=yo_map, table=table, sentinel=sentinel,
+        phrase=row_leadin(mrow),
+        open_end=mrow.get("open_end", False),
         source_identity=identity,
     )
 
@@ -1337,41 +1392,38 @@ def merge_source(config, incoming: Path):
     """M1-M5 without sample validation. Any source-current key is eligible (C1)."""
     lock = acquire_eval_lock()
     try:
-        context = _load_context(config)
+        sources = _load_sources(config)
         gold = paths.TEXT / "stress_gold.tsv"
         archive = paths.TEXT / "stress_gold.archive.tsv"
         if incoming.resolve() == archive.resolve():
             _error("GOLD_ARCHIVE_NOT_AUTHORITATIVE")
         ledger, gold_before = _read_ledger(gold)
-        state = inspect_ledger(ledger, context)
+        state = inspect_ledger(ledger, sources)
         try:
             batch = parse_gold(incoming.read_text(encoding="utf-8"))
         except (OSError, UnicodeError):
             _error("GOLD_INPUT_INVALID")
-        by_key = {occ.source_key: occ for occ in context.rows}
         additions, skipped = {}, 0
         for row in batch:
             key = row["source_key"]
-            expected = context.sources.resolve(key)
+            expected = sources.resolve(key)
             if expected is None:
                 _error("GOLD_UNEXPECTED_KEY")
             identity, _, _ = expected
             if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
                 _error("GOLD_STALE_INPUT")
-            occ = by_key.get(key)
-            row = validate_gold(row, occ, allow_na_yo=True)
+            row = validate_gold(row, allow_na_yo=True)
             existing = additions.get(key, state.active.get(key))
             if existing is not None:
-                if (existing["gold_vowel"], existing["yo_correct"]) != (row["gold_vowel"], row["yo_correct"]):
+                if existing["gold_vowel"] != row["gold_vowel"]:
                     _error("GOLD_ACTIVE_CONFLICT")
                 skipped += 1
             else:
                 additions[key] = row
         updated = ledger + list(additions.values())
-        updated_state = inspect_ledger(updated, context)
+        updated_state = inspect_ledger(updated, sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
-        _assert_current(context, config)
         for plan in plans:
             _apply(plan)
         return {"added": len(additions), "skipped": skipped,
@@ -1484,11 +1536,10 @@ def _yo_path() -> Path:
 
 def merge_yo(config, incoming: Path):
     """Append verified YO evidence; validates observation version and fp conflict (G1.4 §6.3)."""
-    from audiobook.stress_yo_observer import restoration_fp as _rfp_check, RESTORED_obs
+    from audiobook.stress_yo_observer import restoration_fp as _rfp_check, RESTORED_obs, UNSUPPORTED_obs
     lock = acquire_eval_lock()
     try:
-        context = _load_context(config)
-        by_key = {occ.source_key: occ for occ in context.rows}
+        sources = _load_sources(config)
         yo_path = _yo_path()
         yo_data = _optional_bytes(yo_path)
         try:
@@ -1508,7 +1559,7 @@ def merge_yo(config, incoming: Path):
         additions: list[dict] = []
         for row in batch:
             key = row["source_key"]
-            current = context.sources.resolve(key)
+            current = sources.resolve(key)
             if current is None:
                 _error("YO_UNEXPECTED_KEY")
             identity, _, _ = current
@@ -1519,10 +1570,9 @@ def merge_yo(config, incoming: Path):
             if _rfp_check(identity, row["restored_form_pre_respell"], indices) != row["restoration_fp"]:
                 _error("YO_STALE_INPUT")
             # B3: freshness check — observer must still produce RESTORED_obs with matching fp.
-            occ = by_key.get(key)
-            if occ is None:
-                _error("YO_STALE_INPUT")
-            obs = _yo_observe_key(occ, context.sources, config)
+            obs = _yo_observe_key_by_source(key, row["form_source"], sources, config)
+            if isinstance(obs, UNSUPPORTED_obs):
+                _error("YO_OBSERVATION_UNSUPPORTED")
             if not isinstance(obs, RESTORED_obs) or obs.fp != row["restoration_fp"]:
                 _error("YO_STALE_INPUT")
             fp = row["restoration_fp"]
@@ -1534,7 +1584,6 @@ def merge_yo(config, incoming: Path):
             existing_by_fp[fp] = row
         updated = existing + additions
         plan = _plan(yo_path, serialize_yo_evidence(updated), yo_data)
-        _assert_current(context, config)
         _apply(plan)
         return {"added": len(additions), "skipped": len(batch) - len(additions)}
     finally:

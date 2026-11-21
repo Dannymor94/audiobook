@@ -171,31 +171,40 @@ def test_complete_ambiguous_human_gold_never_considered_correct(tmp_path, monkey
     assert not result["gates"]["hint_allows_ordering_only"]
 
 
-@pytest.mark.parametrize("label,correct", [("0", True), ("1", False), ("variants:0|1", True), ("yo", True)])
-def test_accepted_gold_variants_and_synth_yo(tmp_path, monkeypatch, label, correct):
+@pytest.mark.parametrize("label,correct", [("0", True), ("1", False), ("variants:0|1", True)])
+def test_accepted_gold_variants(tmp_path, monkeypatch, label, correct):
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
     ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
     monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+    monkeypatch.setattr(evaluation, "_load_sources", lambda _: ctx.sources)
     evaluation.sample({})
     evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], label, yo_correct="y")]))
-    # YO restoration enabled: observer confirms RESTORED_obs; sidecar verdict present → yo_missing=0.
     mock_fp, identity = _patch_yo_obs(monkeypatch, ctx)
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
     yo_path.write_text(evaluation.serialize_yo_evidence([_yo_sidecar_row(mock_fp, identity=identity)]), encoding="utf-8")
     result = evaluation.score({})
-    if label == "yo":
-        # ADR §1.5/T05: form_source "Елка" has е but no ё → gold_vowel=yo is LEGACY_YO_UNRESOLVED.
-        # Selected key has no active label → INCOMPLETE; metrics=null; CLI rc=2.
-        assert result["status"] == "INCOMPLETE"
-        assert result["metrics"] is None
-        from audiobook import __main__ as _main_mod
-        monkeypatch.setattr(_main_mod, "load_config", lambda: {})
-        assert evaluation.main(["score"]) == 2
-    else:
-        assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
-        assert result["metrics"]["overall"]["yo_precision"]["n"] == 1
-        assert result["gates"]["YO"] == "YO_NO_EVIDENCE"
+    assert result["metrics"]["overall"]["accuracy_resolved"]["k"] == int(correct)
+    assert result["metrics"]["overall"]["yo_precision"]["n"] == 1
+    assert result["gates"]["YO"] == "YO_NO_EVIDENCE"
+
+
+def test_synth_yo_fallback_gone_merge_rejects_source_e_yo(tmp_path, monkeypatch):
+    """A19/C1: merge() raises GOLD_INVALID for incoming yo on source-е form (synth fallback gone)."""
+    from audiobook.unitmap import AnnotationError
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    ctx = predictions(context_for(units, synth={"Елка.": "Ёлка."}))
+    monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+    monkeypatch.setattr(evaluation, "_load_sources", lambda _: ctx.sources)
+    evaluation.sample({})
+    gold = paths.TEXT / "stress_gold.tsv"
+    before_bytes = gold.read_bytes() if gold.exists() else None
+    # form_source "Елка" has е but no ё → GOLD_INVALID; ledger must be byte-identical.
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.merge({}, write_input(tmp_path, [labeled(todo_rows()[0], "yo", yo_correct="y")]))
+    after_bytes = gold.read_bytes() if gold.exists() else None
+    assert before_bytes == after_bytes
 
 
 def test_native_yo_position_and_unresolved_not_correct(tmp_path, monkeypatch):
@@ -1160,6 +1169,7 @@ class TestGateB2R4:
             _update_manifest(units)
             ctx = predictions(context_for(units, synth={token + ".": candidate + "."}))
             monkeypatch.setattr(evaluation, "_load_context", lambda _: ctx)
+            monkeypatch.setattr(evaluation, "_load_sources", lambda _: ctx.sources)
             identity = ctx.sources.resolve(ctx.rows[0].source_key)[0]
             fp = restoration_fp(identity, candidate, [0])
             calls = []

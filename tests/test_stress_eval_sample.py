@@ -50,6 +50,7 @@ def setup_book(tmp_path, monkeypatch, units=None):
     monkeypatch.setattr(paths, "OUT", out)
     monkeypatch.setattr(evaluation, "private_output_guard", lambda path: None)
     monkeypatch.setattr(evaluation, "_load_context", lambda _: context_for(units))
+    monkeypatch.setattr(evaluation, "_load_sources", lambda _: context_for(units).sources)
     manifest_dir = out / "sections" / "01_test"
     manifest_dir.mkdir(parents=True)
     with (manifest_dir / "manifest.jsonl").open("w", encoding="utf-8") as mf:
@@ -631,3 +632,13 @@ class TestAcquireReleaseLock:
         ev.release_eval_lock(h1)
         h2 = ev.acquire_eval_lock(lock_path)
         ev.release_eval_lock(h2)
+
+
+# ---------------------------------------------------------------------------
+# C1 Gate: _load_sources duck-type contract (A1)
+# ---------------------------------------------------------------------------
+
+def test_A1_load_sources_returns_source_index_protocol(tmp_path, monkeypatch):
+    """A1: SourceIndex (returned by _load_sources) exposes a callable resolve() method."""
+    si = context_for([{"type": "text", "text": "Бета."}]).sources
+    assert hasattr(si, "resolve") and callable(si.resolve)

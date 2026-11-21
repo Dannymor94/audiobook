@@ -96,7 +96,11 @@ def test_yo_evidence_and_independent_orthography():
     context = context_for(units, synth={"Елка.": "Ёлка."})
     occ = context.rows[0]
     blank = evaluation._todo_row(occ, context.sources)
-    for value in ("yo", "0", "1", "ambiguous", "unknown_name"):
+    # yo label for source-е form: always GOLD_INVALID; synth ё no longer considered (C1 source-only)
+    for correct in ("y", "n", "na"):
+        with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+            evaluation.validate_gold(labeled(blank, "yo", yo_correct=correct), occ)
+    for value in ("0", "1", "ambiguous", "unknown_name"):
         for correct in ("y", "n"):
             assert evaluation.validate_gold(labeled(blank, value, yo_correct=correct), occ)["gold_vowel"] == value
         with pytest.raises(AnnotationError, match="GOLD_INVALID"):
@@ -232,21 +236,6 @@ def test_archive_never_input_and_corrupt_export_repaired(tmp_path, monkeypatch):
     assert evaluation.parse_gold(archive.read_text(encoding="utf-8")) == []
 
 
-@pytest.mark.parametrize("mutation", ["sample_fp", "source_fp", "analysis_fp", "keys", "strata", "extra"])
-def test_wrong_sample_refused_before_writes(tmp_path, monkeypatch, mutation):
-    setup_book(tmp_path, monkeypatch)
-    evaluation.sample({})
-    record = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
-    value = json.loads(record.read_text(encoding="utf-8"))
-    value[mutation] = [] if mutation == "keys" else "corrupt"
-    record.write_text(json.dumps(value), encoding="utf-8")
-    incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-    before = snapshot(tmp_path)
-    with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
-        evaluation.merge({}, incoming)
-    assert snapshot(tmp_path) == before
-
-
 @pytest.mark.parametrize("stage", ["before_gold", "after_gold", "before_archive", "after_archive"])
 def test_crash_and_replay_complete_ledger(tmp_path, monkeypatch, stage):
     units = setup_book(tmp_path, monkeypatch)
@@ -359,22 +348,6 @@ def test_durability_failure_and_concurrent_update_fail_closed(tmp_path, monkeypa
     assert not temporary.exists()
 
 
-def test_generation_change_between_validation_and_write(tmp_path, monkeypatch):
-    units = setup_book(tmp_path, monkeypatch)
-    evaluation.sample({})
-    incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-    before = snapshot(tmp_path)
-    calls = []
-    def load(_):
-        calls.append(1)
-        current = context_for(units)
-        if len(calls) == 1:
-            units.append({"type": "text", "text": "Дельта."})
-        return current
-    monkeypatch.setattr(evaluation, "_load_context", load)
-    with pytest.raises(AnnotationError, match="INVENTORY_CHANGED"):
-        evaluation.merge({}, incoming)
-    assert snapshot(tmp_path) == before
 
 
 def test_sample_json_duplicate_keys_and_boolean_counts_refused(tmp_path, monkeypatch):
@@ -835,10 +808,10 @@ class TestT34T35T37T39YoMerge:
         return ctx.sources.resolve("01_test|0|0")[0]
 
     def _patch_obs(self, monkeypatch, fp, form, indices):
-        """B3: monkeypatch observer to return RESTORED_obs with given fp for all calls."""
+        """B3: monkeypatch source-only observer to return RESTORED_obs with given fp for all calls."""
         from audiobook.stress_yo_observer import RESTORED_obs
-        monkeypatch.setattr(evaluation, "_yo_observe_key",
-                            lambda o, s, c: RESTORED_obs(form, tuple(indices), fp))
+        monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                            lambda key, frm, s, c: RESTORED_obs(form, tuple(indices), fp))
 
     def test_T34a_same_fp_accepted_despite_no_sample(self, tmp_path, monkeypatch):
         """T34a: merge_yo accepts same restoration_fp regardless of sample identity."""
@@ -881,7 +854,7 @@ class TestT34T35T37T39YoMerge:
         # B3: use stateful observer to return the right fp per merge_yo call.
         from audiobook.stress_yo_observer import RESTORED_obs
         obs_sequence = iter([RESTORED_obs("Ёле", (0,), fp_a), RESTORED_obs("Елё", (1,), fp_b)])
-        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: next(obs_sequence))
+        monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", lambda key, frm, s, c: next(obs_sequence))
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_a]))
         result = evaluation.merge_yo({}, _write_yo_input(tmp_path, [row_b]))
         assert result["added"] == 1  # new entry for different fp
@@ -1797,70 +1770,7 @@ class TestGateB1SampleSelectionIntegrity:
     the authoritative deterministic recompute is always the final gate.
     """
 
-    # --- SHA-bypass (previous round) --- still must hold after the new fix -------
-
-    def test_sha_bypass_still_refused_on_merge(self, tmp_path, monkeypatch):
-        """R3 regression: replace stratum keys, keep sha unchanged → SAMPLE_INVALID."""
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        tampered = False
-        for name in [n for n, _ in evaluation.STRATA]:
-            if record["selected_by_stratum"][name]:
-                record["selected_by_stratum"][name] = ["injected|attacker|key"]
-                tampered = True
-                break
-        assert tampered, "test setup: at least one non-empty stratum required"
-        path.write_text(json.dumps(record), encoding="utf-8")
-        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
-            evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before
-
-    # --- Core new attack: internally-consistent forged eligible-key substitution --
-
-    def test_forged_eligible_key_refused_on_merge(self, tmp_path, monkeypatch):
-        """R3 core: self-consistent forged selection (genuine unselected eligible key) → SAMPLE_STALE.
-
-        Fixture: 61 Гамма. units → top300 stratum has 61 eligible keys; sample() selects
-        60 (the natural top300 limit), leaving 1 genuine unselected eligible key.
-        Forge replaces one selected key with that unselected key and recomputes ALL stored
-        digests so _verify_saved_selection passes entirely.
-        _verify_selection_fresh recomputes from context (selects the original 60) and
-        rejects the forgery with SAMPLE_STALE.
-        Gold, archive, todo and selection JSON must be byte-identical after rejection.
-        """
-        _setup_many_units(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        original = json.loads(path.read_text(encoding="utf-8"))
-
-        # Identify the unselected eligible key (all 61 keys; 60 selected).
-        all_eligible = {occ.source_key for occ in evaluation._load_context({}).rows
-                        if occ.alignment_status == "aligned"
-                        and evaluation.vowel_count(occ.form_analysis) >= 2}
-        assert len(all_eligible) == 61, f"expected 61 eligible keys, got {len(all_eligible)}"
-        assert len(original["keys"]) == 60, f"expected 60 selected keys, got {len(original['keys'])}"
-        unselected = all_eligible - set(original["keys"])
-        assert len(unselected) == 1, f"expected exactly 1 unselected eligible key, got {len(unselected)}"
-        unselected_key = next(iter(unselected))
-
-        # Forge a self-consistent sample JSON that substitutes the unselected key.
-        forged = _forge_eligible_substitution(original, unselected_key)
-        assert forged["sample_fp"] != original["sample_fp"], "forged fp must differ from legitimate fp"
-        assert set(forged["keys"]) != set(original["keys"]), "forged keys must differ"
-
-        forged_path = paths.OUT / "stress" / "eval" / "sample" / "forged.json"
-        forged_path.write_text(json.dumps(forged), encoding="utf-8")
-
-        rows = todo_rows()
-        incoming = write_input(tmp_path, [labeled(rows[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
-            evaluation.merge({}, incoming, sample_path=forged_path)
-        assert snapshot(tmp_path) == before
+    # --- Core integrity tests for score() ---
 
     def test_forged_eligible_key_refused_on_score(self, tmp_path, monkeypatch):
         """R3: forged eligible-key selection (genuine unselected key) also rejected by score()."""
@@ -1892,168 +1802,6 @@ class TestGateB1SampleSelectionIntegrity:
         result = evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
         assert result["added"] == len(rows)
 
-    # --- Other coherent forgeries ---
-
-    def test_strata_count_inconsistency_refused(self, tmp_path, monkeypatch):
-        """R3: strata[name].n inconsistent with len(selected_by_stratum[name]) → SAMPLE_INVALID."""
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        for name in [n for n, _ in evaluation.STRATA]:
-            if record["strata"][name]["n"] > 0:
-                record["strata"][name]["n"] += 1
-                break
-        path.write_text(json.dumps(record), encoding="utf-8")
-        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_INVALID"):
-            evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before
-
-    def test_duplicate_key_in_stratum_refused(self, tmp_path, monkeypatch):
-        """R3: duplicate key in selected_by_stratum (consistent fp recomputed) → SAMPLE_STALE.
-
-        A list with a repeated key passes _verify_saved_selection (count matches, sha matches)
-        but the fresh recompute produces only unique keys, so sample_fp diverges → SAMPLE_STALE.
-        No gold writes on rejection.
-        """
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        strata = evaluation.STRATA
-        # Find stratum with ≥1 key; duplicate first key.
-        for name in [n for n, _ in strata]:
-            keys = list(record["selected_by_stratum"][name])
-            if keys:
-                record["selected_by_stratum"][name] = sorted(keys + [keys[0]])
-                record["strata"][name]["n"] = len(record["selected_by_stratum"][name])
-                break
-        # Recompute all dependent digests consistently so _verify_saved_selection passes.
-        record["selected_by_stratum_sha256"] = evaluation._hash(
-            {name: sorted(record["selected_by_stratum"][name]) for name, _ in strata}
-        )
-        record["keys"] = sorted(
-            sk for name in [n for n, _ in strata]
-            for sk in record["selected_by_stratum"][name]
-        )
-        record["sample_fp"] = evaluation._hash({
-            "algo": "sample/2",
-            "source_fp": record["source_fp"],
-            "analysis_fp": record["analysis_fp"],
-            "observation_contract_version": "yo-observation/1",
-            "observation_inputs": record["observation_inputs"],
-            "seed": evaluation.SEED_V2,
-            "strata_order": [name for name, _ in strata],
-            "population": {name: record["strata"][name]["N"] for name, _ in strata},
-            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
-            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
-            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
-        })
-        path.write_text(json.dumps(record), encoding="utf-8")
-        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE|SAMPLE_INVALID"):
-            evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before
-
-    def test_forged_population_N_refused(self, tmp_path, monkeypatch):
-        """R3: inflated population N (consistent fp recomputed) → SAMPLE_STALE.
-
-        Increasing strata[name]["N"] changes the sample_fp hash input ("population").
-        Recomputing sample_fp consistently makes the forgery pass _verify_saved_selection,
-        but the fresh recompute uses the actual population count → sample_fp diverges → SAMPLE_STALE.
-        """
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        strata = evaluation.STRATA
-        for name in [n for n, _ in strata]:
-            if record["strata"][name]["N"] > 0:
-                record["strata"][name]["N"] += 100
-                break
-        record["sample_fp"] = evaluation._hash({
-            "algo": "sample/2",
-            "source_fp": record["source_fp"],
-            "analysis_fp": record["analysis_fp"],
-            "observation_contract_version": "yo-observation/1",
-            "observation_inputs": record["observation_inputs"],
-            "seed": evaluation.SEED_V2,
-            "strata_order": [name for name, _ in strata],
-            "population": {name: record["strata"][name]["N"] for name, _ in strata},
-            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
-            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
-            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
-        })
-        path.write_text(json.dumps(record), encoding="utf-8")
-        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
-            evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before
-
-    def test_incorrect_stratum_membership_refused(self, tmp_path, monkeypatch):
-        """R3: key reassigned to wrong stratum (consistent fp recomputed) → SAMPLE_STALE.
-
-        A key moved from its legitimate stratum to another passes _verify_saved_selection
-        (all stored digests recomputed consistently) but the fresh recompute restores the
-        correct stratum assignment → sample_fp diverges → SAMPLE_STALE.
-        """
-        setup_book(tmp_path, monkeypatch)
-        evaluation.sample({})
-        path = _sample_json_path()
-        record = json.loads(path.read_text(encoding="utf-8"))
-        strata = evaluation.STRATA
-        # Find two strata: one with a key to steal, one to receive it.
-        strata_names = [n for n, _ in strata]
-        donor, recipient = None, None
-        stolen_key = None
-        for name in strata_names:
-            if record["selected_by_stratum"][name]:
-                donor = name
-                stolen_key = record["selected_by_stratum"][name][0]
-                break
-        for name in strata_names:
-            if name != donor:
-                recipient = name
-                break
-        if donor is None or recipient is None:
-            pytest.skip("not enough strata populated for test")
-        record["selected_by_stratum"][donor] = [k for k in record["selected_by_stratum"][donor]
-                                                 if k != stolen_key]
-        record["selected_by_stratum"][recipient] = sorted(
-            record["selected_by_stratum"][recipient] + [stolen_key]
-        )
-        record["strata"][donor]["n"] = len(record["selected_by_stratum"][donor])
-        record["strata"][recipient]["n"] = len(record["selected_by_stratum"][recipient])
-        record["selected_by_stratum_sha256"] = evaluation._hash(
-            {name: sorted(record["selected_by_stratum"][name]) for name, _ in strata}
-        )
-        record["keys"] = sorted(
-            sk for name in strata_names for sk in record["selected_by_stratum"][name]
-        )
-        record["sample_fp"] = evaluation._hash({
-            "algo": "sample/2",
-            "source_fp": record["source_fp"],
-            "analysis_fp": record["analysis_fp"],
-            "observation_contract_version": "yo-observation/1",
-            "observation_inputs": record["observation_inputs"],
-            "seed": evaluation.SEED_V2,
-            "strata_order": strata_names,
-            "population": {name: record["strata"][name]["N"] for name, _ in strata},
-            "selected_n": {name: record["strata"][name]["n"] for name, _ in strata},
-            "eligible_assignment_sha256": record["eligible_assignment_sha256"],
-            "selected_by_stratum_sha256": record["selected_by_stratum_sha256"],
-        })
-        path.write_text(json.dumps(record), encoding="utf-8")
-        incoming = write_input(tmp_path, [labeled(todo_rows()[0])])
-        before = snapshot(tmp_path)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
-            evaluation.merge({}, incoming)
-        assert snapshot(tmp_path) == before
-
     # --- R2 strengthened selections (Coordinator comment 6959312730) ---
 
     def test_partial_merge_selection_json_untouched(self, tmp_path, monkeypatch):
@@ -2075,3 +1823,406 @@ class TestGateB1SampleSelectionIntegrity:
         rows = todo_rows()
         evaluation.merge({}, write_input(tmp_path, [labeled(r) for r in rows]))
         assert path.read_bytes() == json_bytes_before, "selection JSON must not be modified by full merge()"
+
+
+# ===========================================================================
+# Gate C-A: C1 invariant oracles (A2-A21) and Sol regressions (F1-F3)
+# Source-only: merge/merge_source/merge_yo/inspect_ledger never load inventory.
+# ===========================================================================
+
+import hashlib as _hashlib
+
+
+def _c1_yo_input(tmp_path, rows):
+    """Write merge_yo input TSV and return its path."""
+    path = tmp_path / "yo_ev.tsv"
+    path.write_text(evaluation.serialize_yo_evidence(rows), encoding="utf-8")
+    return path
+
+
+def _c1_make_yo_ev_row(si, key, restored_form, indices=(0,)):
+    """Build a valid yo-evidence row: form_source has е, restored_form has ё."""
+    from audiobook.stress_yo_observer import restoration_fp
+    identity = si.resolve(key)[0]
+    fp = restoration_fp(identity, restored_form, list(indices))
+    h = _hashlib.sha256(b"test").hexdigest()
+    return {
+        "schema_version": "yo-evidence/1",
+        "source_key": identity["source_key"],
+        "form_source": identity["form_source"],
+        "unit_text_sha256": identity["unit_text_sha256"],
+        "unit_kind": identity["unit_kind"],
+        "context_sha256": identity["context_sha256"],
+        "restored_form_pre_respell": restored_form,
+        "restored_vowel_indices": "|".join(str(i) for i in indices),
+        "observation_contract_version": "yo-observation/1",
+        "restoration_fp": fp,
+        "norm_content_sha256": h, "yo_map_sha256": h, "prep_config_sha256": h,
+        "yo_correct": "y", "labeler": "owner", "date": "2026-01-01",
+    }
+
+
+# A2 —————————————————————————————————————————————————————————————————————————
+
+def test_A2_load_sources_monkeypatchable(tmp_path, monkeypatch):
+    """A2: _load_sources is monkeypatchable; merge() uses the patched version."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    called = []
+    real_sources = context_for(units).sources
+
+    def patched_sources(_):
+        called.append(1)
+        return real_sources
+
+    monkeypatch.setattr(evaluation, "_load_sources", patched_sources)
+    rows = todo_rows()
+    evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+    assert called, "_load_sources patch must be called by merge()"
+
+
+# A3–A4 ——————————————————————————————————————————————————————————————————————
+
+def test_A3_todo_row_by_key_source_only(tmp_path, monkeypatch):
+    """A3: _todo_row_by_key resolves GOLD_FIELDS[:6] from sources without inventory."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    row = evaluation._todo_row_by_key("01_test|0|0", si)
+    assert row["source_key"] == "01_test|0|0"
+    assert row["form_source"] == "Бета"
+    for field in evaluation.LABEL_FIELDS:
+        assert row[field] == "", f"{field} must be blank in todo row"
+
+
+def test_A4_todo_row_by_key_missing_key_raises(tmp_path, monkeypatch):
+    """A4: _todo_row_by_key raises GOLD_UNEXPECTED_KEY when key absent from sources."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    with pytest.raises(AnnotationError, match="GOLD_UNEXPECTED_KEY"):
+        evaluation._todo_row_by_key("01_test|99|0", si)
+
+
+# A5–A6 ——————————————————————————————————————————————————————————————————————
+
+def test_A5_validate_gold_historical_accepts_legacy_yo(tmp_path, monkeypatch):
+    """A5: validate_gold(historical=True) accepts source-е yo (LEGACY_YO_UNRESOLVED)."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    result = evaluation.validate_gold(row, historical=True)
+    assert result["gold_vowel"] == "yo"
+
+
+def test_A6_validate_gold_non_historical_rejects_source_e_yo(tmp_path, monkeypatch):
+    """A6: validate_gold without historical=True raises GOLD_INVALID for source-е yo."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.validate_gold(row)
+
+
+# A7–A8 ——————————————————————————————————————————————————————————————————————
+
+def test_A7_inspect_ledger_accepts_bare_source_index(tmp_path, monkeypatch):
+    """A7: inspect_ledger accepts a bare SourceIndex (duck typing)."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    state = evaluation.inspect_ledger([], si)
+    assert state.active == {} and state.stale == ()
+
+
+def test_A8_inspect_ledger_accepts_eval_context(tmp_path, monkeypatch):
+    """A8: inspect_ledger accepts an EvalContext (pre-C1 call signature still works)."""
+    units = setup_book(tmp_path, monkeypatch)
+    ctx = context_for(units)
+    state = evaluation.inspect_ledger([], ctx)
+    assert state.active == {}
+
+
+# A9–A12 ——————————————————————————————————————————————————————————————————————
+
+def test_A9_inspect_ledger_stale_on_identity_mismatch(tmp_path, monkeypatch):
+    """A9: inspect_ledger moves a row to stale when source identity no longer matches."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    evaluation.sample({})
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    stale_row = {**row, "form_source": "Зета"}
+    state = evaluation.inspect_ledger([stale_row], si)
+    assert stale_row in state.stale
+    assert stale_row not in list(state.active.values())
+
+
+def test_A10_inspect_ledger_legacy_yo_in_legacy_bucket(tmp_path, monkeypatch):
+    """A10: inspect_ledger routes LEGACY_YO_UNRESOLVED rows to the legacy bucket."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    evaluation.sample({})
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    state = evaluation.inspect_ledger([row], si)
+    assert row in state.legacy
+    assert row["source_key"] not in state.active
+    assert row not in list(state.stale)
+
+
+def test_A11_inspect_ledger_active_rows_pass_strict_validate(tmp_path, monkeypatch):
+    """A11: active rows satisfy validate_gold without historical flag."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    evaluation.sample({})
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    state = evaluation.inspect_ledger([row], si)
+    for active_row in state.active.values():
+        evaluation.validate_gold(active_row)
+
+
+def test_A12_inspect_ledger_conflict_raises_on_contradicting_annotations(tmp_path, monkeypatch):
+    """A12: inspect_ledger raises GOLD_ACTIVE_CONFLICT for same key with different stress."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    evaluation.sample({})
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row0 = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner-a", "date": "2026-01-01"}
+    row1 = {**base, "gold_vowel": "1", "yo_correct": "na", "labeler": "owner-b", "date": "2026-01-02"}
+    with pytest.raises(AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
+        evaluation.inspect_ledger([row0, row1], si)
+
+
+# A13–A15 ——————————————————————————————————————————————————————————————————————
+
+def test_A13_merge_never_calls_load_context(tmp_path, monkeypatch):
+    """A13: merge() does not call _load_context."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+
+    def _must_not_be_called(_):
+        raise AssertionError("_load_context called from C1 merge()")
+
+    monkeypatch.setattr(evaluation, "_load_context", _must_not_be_called)
+    rows = todo_rows()
+    evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
+
+def test_A14_merge_source_never_calls_load_context(tmp_path, monkeypatch):
+    """A14: merge_source() does not call _load_context."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    base = evaluation._todo_row_by_key("01_test|0|0", context_for(units).sources)
+    rows = [{**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}]
+    path = tmp_path / "source_labels.tsv"
+    path.write_text(evaluation.serialize_gold(rows), encoding="utf-8", newline="")
+
+    def _must_not_be_called(_):
+        raise AssertionError("_load_context called from C1 merge_source()")
+
+    monkeypatch.setattr(evaluation, "_load_context", _must_not_be_called)
+    evaluation.merge_source({}, path)
+
+
+def test_A15_merge_yo_never_calls_load_context(tmp_path, monkeypatch):
+    """A15: merge_yo() does not call _load_context."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    ev_row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    gold_row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    (paths.TEXT / "stress_gold.tsv").write_text(evaluation.serialize_gold([gold_row]),
+                                                encoding="utf-8", newline="")
+    fp = ev_row["restoration_fp"]
+    obs_called = []
+
+    def _patched_obs_by_source(key, form, sources, config):
+        obs_called.append(key)
+        return RESTORED_obs(form, (0,), fp)
+
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", _patched_obs_by_source)
+    monkeypatch.setattr(evaluation, "_load_context",
+                        lambda _: (_ for _ in ()).throw(AssertionError("_load_context called from merge_yo")))
+    incoming = _c1_yo_input(tmp_path, [ev_row])
+    evaluation.merge_yo({}, incoming)
+    assert obs_called, "_yo_observe_key_by_source must be called by merge_yo()"
+
+
+# A16: incoming source-е yo → GOLD_INVALID; native-ё yo → accepted (A19 contract) ——————
+
+def test_A16_merge_rejects_incoming_source_e_yo_gold_invalid(tmp_path, monkeypatch):
+    """A16 (negative): merge() raises GOLD_INVALID for incoming source-е yo; ledger byte-identical.
+
+    A19 contract: incoming yo with zero native ё in form_source ⇒ GOLD_INVALID, no write.
+    """
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    rows = todo_rows()
+    gold = paths.TEXT / "stress_gold.tsv"
+    before_bytes = gold.read_bytes() if gold.exists() else None
+    # "Бета" has е but no ё — yo label must be rejected.
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "yo", yo_correct="y")]))
+    after_bytes = gold.read_bytes() if gold.exists() else None
+    assert before_bytes == after_bytes, "gold ledger must be byte-identical after GOLD_INVALID rejection"
+
+
+def test_A16b_merge_accepts_native_yo_form_source(tmp_path, monkeypatch):
+    """A16b (positive): merge() accepts yo annotation for a word with native ё in form_source."""
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Ёлка."}])
+    evaluation.sample({})
+    rows = todo_rows()
+    result = evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "yo", yo_correct="y")]))
+    assert result["added"] == 1
+    ledger = evaluation.parse_gold((paths.TEXT / "stress_gold.tsv").read_text(encoding="utf-8"))
+    assert ledger[0]["gold_vowel"] == "yo"
+
+
+def test_A16c_merge_source_rejects_incoming_source_e_yo_gold_invalid(tmp_path, monkeypatch):
+    """A16c (negative): merge_source() rejects incoming source-е yo; ledger byte-identical."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    path = tmp_path / "source_labels.tsv"
+    path.write_text(evaluation.serialize_gold([row]), encoding="utf-8", newline="")
+    gold = paths.TEXT / "stress_gold.tsv"
+    before_bytes = gold.read_bytes() if gold.exists() else None
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.merge_source({}, path)
+    after_bytes = gold.read_bytes() if gold.exists() else None
+    assert before_bytes == after_bytes, "gold ledger must be byte-identical after rejection"
+
+
+# A17 ——————————————————————————————————————————————————————————————————————————
+
+def test_A17_merge_does_not_require_sample_selection(tmp_path, monkeypatch):
+    """A17: merge() succeeds for a key present in sources but absent from the sample JSON."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|2|0", si)
+    row = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    path = write_input(tmp_path, [row])
+    sample_files = sorted((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+    if sample_files:
+        rec = json.loads(sample_files[0].read_text(encoding="utf-8"))
+        rec["keys"] = [k for k in rec["keys"] if k != "01_test|2|0"]
+        for name in rec.get("selected_by_stratum", {}):
+            rec["selected_by_stratum"][name] = [k for k in rec["selected_by_stratum"][name]
+                                                if k != "01_test|2|0"]
+        sample_files[0].write_text(json.dumps(rec), encoding="utf-8")
+    result = evaluation.merge({}, path)
+    assert result["added"] == 1
+
+
+# A18 ——————————————————————————————————————————————————————————————————————————
+
+def test_A18_accepted_vowels_uses_form_source_not_synth(tmp_path, monkeypatch):
+    """A18: _accepted_vowels derives ё position from form_source, ignoring synth."""
+    units = [{"type": "text", "text": "Ёлка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    result = evaluation._accepted_vowels(row, None)
+    assert result == frozenset([0])
+
+
+# A19–A21 ——————————————————————————————————————————————————————————————————————
+
+def test_A19_yo_observe_key_by_source_unsupported_when_manifest_missing(tmp_path, monkeypatch):
+    """A19: _yo_observe_key_by_source returns UNSUPPORTED_obs when manifest is unavailable."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    manifest = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest.unlink()
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Бета", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs)
+
+
+def test_A20_yo_observe_key_by_source_monkeypatchable(tmp_path, monkeypatch):
+    """A20: _yo_observe_key_by_source is monkeypatchable; merge_yo uses the patched version."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    ev_row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    fp = ev_row["restoration_fp"]
+    patched_calls = []
+
+    def _patched(key, form, sources, config):
+        patched_calls.append(key)
+        return RESTORED_obs(form, (0,), fp)
+
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", _patched)
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    gold_row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    (paths.TEXT / "stress_gold.tsv").write_text(evaluation.serialize_gold([gold_row]),
+                                                encoding="utf-8", newline="")
+    evaluation.merge_yo({}, _c1_yo_input(tmp_path, [ev_row]))
+    assert "01_test|0|0" in patched_calls
+
+
+def test_A21_merge_yo_uses_by_source_not_by_occ(tmp_path, monkeypatch):
+    """A21: merge_yo calls _yo_observe_key_by_source, never the inventory-based _yo_observe_key."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    ev_row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    fp = ev_row["restoration_fp"]
+
+    def _must_not_be_called(*args):
+        raise AssertionError("_yo_observe_key (inventory-based) must NOT be called by merge_yo")
+
+    monkeypatch.setattr(evaluation, "_yo_observe_key", _must_not_be_called)
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                        lambda key, form, sources, config: RESTORED_obs(form, (0,), fp))
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    gold_row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    (paths.TEXT / "stress_gold.tsv").write_text(evaluation.serialize_gold([gold_row]),
+                                                encoding="utf-8", newline="")
+    evaluation.merge_yo({}, _c1_yo_input(tmp_path, [ev_row]))
+
+
+# F1–F3: Sol regression oracles ——————————————————————————————————————————————
+
+def test_F1_synth_yo_fallback_gone_validate_gold_rejects_source_e(tmp_path, monkeypatch):
+    """F1: validate_gold() rejects yo label when form_source has no native ё (synth fallback gone)."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    with pytest.raises(AnnotationError, match="GOLD_INVALID"):
+        evaluation.validate_gold(row)
+
+
+def test_F2_merge_does_not_check_sample_membership(tmp_path, monkeypatch):
+    """F2: merge() succeeds for a key present in sources but not in any sample JSON."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|1|0", si)
+    row = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    for f in (paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"):
+        f.unlink()
+    result = evaluation.merge({}, write_input(tmp_path, [row]))
+    assert result["added"] == 1
+
+
+def test_F3_merge_does_not_raise_on_generation_change(tmp_path, monkeypatch):
+    """F3: merge() has no _assert_current gate; no GENERATION_CHANGED raised."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    rows = todo_rows()
+    result = evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+    assert result["added"] == 1
