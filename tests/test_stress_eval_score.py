@@ -819,8 +819,8 @@ def test_b3_merge_yo_stale_fp_rejected_even_if_internally_consistent(tmp_path, m
     }
     yo_path = tmp_path / "incoming.tsv"
     yo_path.write_text(evaluation.serialize_yo_evidence([yo_row]), encoding="utf-8")
-    # Observer says no restoration → fp can't be verified fresh → YO_STALE_INPUT; no write.
-    with pytest.raises(AnnotationError, match="YO_STALE_INPUT"):
+    # Observer says no restoration → YO_NOT_RESTORED; no write.
+    with pytest.raises(AnnotationError, match="YO_NOT_RESTORED|YO_CANDIDATE_STALE"):
         evaluation.merge_yo({}, yo_path)
     assert not (paths.TEXT / "stress_gold.yo_evidence.tsv").exists()
 

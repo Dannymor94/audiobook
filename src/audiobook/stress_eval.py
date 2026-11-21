@@ -852,7 +852,7 @@ def _todo_row_by_key(key, sources):
     """Like _todo_row but source-only: resolves by source_key without an occ (C1)."""
     current = sources.resolve(key)
     if current is None:
-        _error("GOLD_UNEXPECTED_KEY")
+        _error("SOURCE_KEY_UNRESOLVED")
     identity, text, word = current
     from audiobook.stress_inventory import _char_context
     context = _char_context(text, word.start(), word.end() - word.start())
@@ -1075,24 +1075,31 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
             key = row["source_key"]
             expected = _todo_row_by_key(key, sources)
             if any(row[name] != expected[name] for name in GOLD_FIELDS[:6]):
-                _error("GOLD_STALE_INPUT")
+                _error("SOURCE_IDENTITY_STALE")
             if all(not row[field] for field in LABEL_FIELDS):
                 blank += 1
                 continue
             row = validate_gold(row)
             existing = additions.get(key, state.active.get(key))
             if existing is not None:
-                if existing["gold_vowel"] != row["gold_vowel"]:
+                vs_e, vs_n = _source_vowel_set(existing), _source_vowel_set(row)
+                if not (vs_e == vs_n and (vs_e is not None or existing["gold_vowel"] == row["gold_vowel"])):
                     _error("GOLD_ACTIVE_CONFLICT")
                 skipped += 1
             else:
                 additions[key] = row
         updated = ledger + list(additions.values())
         updated_state = inspect_ledger(updated, sources)
+        source_pin = _source_provenance(sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
-        for plan in plans:
-            _apply(plan)
+
+        def _fence():
+            if _source_provenance(sources) != source_pin:
+                _error("SOURCE_CHANGED")
+
+        _apply(plans[0], before_publish=_fence)
+        _apply(plans[1])
         # Owner todo is not modified here: safe retirement policy is pending
         # architect decision (Issue #17). The versioned todo persists until
         # sample() regenerates it on the next run.
@@ -1103,9 +1110,22 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
         release_eval_lock(lock)
 
 
+def _source_provenance(sources):
+    """SHA256 of all loaded section norm files; SOURCE_CHANGED fence for merge paths."""
+    import hashlib
+    h = hashlib.sha256()
+    for section in sorted(sources.units):
+        norm = paths.TEXT / f"{section}.norm.txt"
+        try:
+            h.update(norm.read_bytes())
+        except OSError:
+            h.update(b"\x00" + section.encode())
+    return h.digest()
+
+
 def _accepted_vowels(gold, occ):
     """Translate validated human stress labels; never infer truth from F6."""
-    label = validate_gold(gold, occ)["gold_vowel"]
+    label = validate_gold(gold)["gold_vowel"]
     if label in ("ambiguous", "unknown_name"):
         return frozenset()
     if label == "yo":
@@ -1219,14 +1239,23 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
         mrows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
     except (ValueError, UnicodeError):
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    mrow = next((r for r in mrows if r.get("text") == unit_text), None)
-    if mrow is None:
+    # Require exactly one manifest row with matching text; ambiguous ⇒ fail-closed.
+    matches = [r for r in mrows if r.get("text") == unit_text]
+    if len(matches) != 1:
+        return UNSUPPORTED_obs("MANIFEST_AMBIGUOUS" if len(matches) > 1 else "MANIFEST_UNAVAILABLE")
+    mrow = matches[0]
+    # Fail-closed on fragmented chunks: fragment ordinal is unknown without inventory.
+    from audiobook.synth import row_leadin, chunk_fragments
+    try:
+        frags = chunk_fragments(mrow["text"], config or {})
+    except Exception:
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
+    if len(frags) > 1:
+        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
     words = list(_WORD.finditer(mrow["text"]))
     matched = [i for i, m in enumerate(words) if m.group().lower() == form_source.lower()]
     if len(matched) != 1:
-        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    from audiobook.synth import row_leadin
+        return UNSUPPORTED_obs("MANIFEST_AMBIGUOUS")
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
@@ -1408,24 +1437,31 @@ def merge_source(config, incoming: Path):
             key = row["source_key"]
             expected = sources.resolve(key)
             if expected is None:
-                _error("GOLD_UNEXPECTED_KEY")
+                _error("SOURCE_KEY_UNRESOLVED")
             identity, _, _ = expected
             if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
-                _error("GOLD_STALE_INPUT")
+                _error("SOURCE_IDENTITY_STALE")
             row = validate_gold(row, allow_na_yo=True)
             existing = additions.get(key, state.active.get(key))
             if existing is not None:
-                if existing["gold_vowel"] != row["gold_vowel"]:
+                vs_e, vs_n = _source_vowel_set(existing), _source_vowel_set(row)
+                if not (vs_e == vs_n and (vs_e is not None or existing["gold_vowel"] == row["gold_vowel"])):
                     _error("GOLD_ACTIVE_CONFLICT")
                 skipped += 1
             else:
                 additions[key] = row
         updated = ledger + list(additions.values())
         updated_state = inspect_ledger(updated, sources)
+        source_pin = _source_provenance(sources)
         plans = [_plan(gold, serialize_gold(updated), gold_before),
                  _plan(archive, serialize_gold(updated_state.stale), _optional_bytes(archive))]
-        for plan in plans:
-            _apply(plan)
+
+        def _fence():
+            if _source_provenance(sources) != source_pin:
+                _error("SOURCE_CHANGED")
+
+        _apply(plans[0], before_publish=_fence)
+        _apply(plans[1])
         return {"added": len(additions), "skipped": skipped,
                 "active": len(updated_state.active), "stale": len(updated_state.stale),
                 "duplicates": updated_state.duplicates}
@@ -1534,6 +1570,22 @@ def _yo_path() -> Path:
     return paths.TEXT / "stress_gold.yo_evidence.tsv"
 
 
+def _yo_append_text(yo_data: bytes | None, additions: list) -> str:
+    """Append sorted-new YO rows; exact old bytes preserved as prefix (A10/M5).
+
+    Callers must gate on non-empty additions before calling.
+    """
+    new_lines = "".join(
+        "\t".join(row[n] for n in YO_FIELDS) + "\n"
+        for row in sorted(additions, key=lambda r: tuple(r[n] for n in YO_FIELDS))
+    )
+    if yo_data is None:
+        return "\t".join(YO_FIELDS) + "\n" + new_lines
+    if not yo_data.endswith(b"\n"):
+        _error("YO_EVIDENCE_INVALID")
+    return yo_data.decode("utf-8") + new_lines
+
+
 def merge_yo(config, incoming: Path):
     """Append verified YO evidence; validates observation version and fp conflict (G1.4 §6.3)."""
     from audiobook.stress_yo_observer import restoration_fp as _rfp_check, RESTORED_obs, UNSUPPORTED_obs
@@ -1561,20 +1613,23 @@ def merge_yo(config, incoming: Path):
             key = row["source_key"]
             current = sources.resolve(key)
             if current is None:
-                _error("YO_UNEXPECTED_KEY")
+                _error("SOURCE_KEY_UNRESOLVED")
             identity, _, _ = current
             if any(row[name] != identity[name] for name in IDENTITY_FIELDS):
-                _error("YO_STALE_INPUT")
-            # Internal fp consistency check.
+                _error("SOURCE_IDENTITY_STALE")
+            # Internal fp consistency check: row's claimed fp must match computed fp.
             indices = [int(p) for p in row["restored_vowel_indices"].split("|")]
             if _rfp_check(identity, row["restored_form_pre_respell"], indices) != row["restoration_fp"]:
-                _error("YO_STALE_INPUT")
+                _error("YO_CANDIDATE_STALE")
             # B3: freshness check — observer must still produce RESTORED_obs with matching fp.
             obs = _yo_observe_key_by_source(key, row["form_source"], sources, config)
             if isinstance(obs, UNSUPPORTED_obs):
                 _error("YO_OBSERVATION_UNSUPPORTED")
+            from audiobook.stress_yo_observer import NONE_obs as _NONE_obs
+            if isinstance(obs, _NONE_obs):
+                _error("YO_NOT_RESTORED")
             if not isinstance(obs, RESTORED_obs) or obs.fp != row["restoration_fp"]:
-                _error("YO_STALE_INPUT")
+                _error("YO_CANDIDATE_STALE")
             fp = row["restoration_fp"]
             if fp in existing_by_fp:
                 if existing_by_fp[fp]["yo_correct"] != row["yo_correct"]:
@@ -1582,9 +1637,16 @@ def merge_yo(config, incoming: Path):
                 continue  # idempotent: same fp, same verdict
             additions.append(row)
             existing_by_fp[fp] = row
-        updated = existing + additions
-        plan = _plan(yo_path, serialize_yo_evidence(updated), yo_data)
-        _apply(plan)
+        if not additions:
+            return {"added": 0, "skipped": len(batch)}
+        source_pin = _source_provenance(sources)
+
+        def _yo_fence():
+            if _source_provenance(sources) != source_pin:
+                _error("SOURCE_CHANGED")
+
+        plan = _plan(yo_path, _yo_append_text(yo_data, additions), yo_data)
+        _apply(plan, before_publish=_yo_fence)
         return {"added": len(additions), "skipped": len(batch) - len(additions)}
     finally:
         release_eval_lock(lock)

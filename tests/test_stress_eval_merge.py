@@ -154,7 +154,7 @@ def test_entire_batch_validated_before_writes(tmp_path, monkeypatch, change):
     rows = todo_rows()
     incoming = write_input(tmp_path, [labeled(rows[0]), labeled(rows[1], **change)])
     before = snapshot(tmp_path)
-    with pytest.raises(AnnotationError, match="GOLD_STALE_INPUT|GOLD_UNEXPECTED_KEY"):
+    with pytest.raises(AnnotationError, match="SOURCE_IDENTITY_STALE|SOURCE_KEY_UNRESOLVED"):
         evaluation.merge({}, incoming)
     assert snapshot(tmp_path) == before
 
@@ -687,7 +687,7 @@ class TestT07MergeSourceIndependent:
         evaluation.sample({})
         row = todo_rows()[0]
         stale_row = {**labeled(row), "unit_text_sha256": "0" * 64}
-        with pytest.raises(AnnotationError, match="GOLD_STALE_INPUT"):
+        with pytest.raises(AnnotationError, match="SOURCE_IDENTITY_STALE"):
             evaluation.merge_source({}, write_input(tmp_path, [stale_row]))
 
 
@@ -1895,11 +1895,11 @@ def test_A3_todo_row_by_key_source_only(tmp_path, monkeypatch):
 
 
 def test_A4_todo_row_by_key_missing_key_raises(tmp_path, monkeypatch):
-    """A4: _todo_row_by_key raises GOLD_UNEXPECTED_KEY when key absent from sources."""
+    """A4: _todo_row_by_key raises SOURCE_KEY_UNRESOLVED when key absent from sources."""
     from audiobook.unitmap import AnnotationError
     units = setup_book(tmp_path, monkeypatch)
     si = context_for(units).sources
-    with pytest.raises(AnnotationError, match="GOLD_UNEXPECTED_KEY"):
+    with pytest.raises(AnnotationError, match="SOURCE_KEY_UNRESOLVED"):
         evaluation._todo_row_by_key("01_test|99|0", si)
 
 
@@ -2226,3 +2226,252 @@ def test_F3_merge_does_not_raise_on_generation_change(tmp_path, monkeypatch):
     rows = todo_rows()
     result = evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
     assert result["added"] == 1
+
+
+# ===========================================================================
+# C-A-R2 regression oracles — P0.1 / P0.2 / P0.3 / P1.1 / P1.2 / P1.4
+# ===========================================================================
+
+# P0.1 — YO physical history preservation ————————————————————————————————————
+
+def test_P01_yo_history_unsorted_preserved_on_append(tmp_path, monkeypatch):
+    """P0.1: existing YO rows in non-canonical order are NOT re-sorted on append.
+
+    The old file bytes must appear as an exact prefix in the new file.
+    Both units have е-words to allow valid е→ё YO evidence rows.
+    """
+    from audiobook.stress_yo_observer import RESTORED_obs
+    # Both units need е-words: Елка (key 0) and Белка (key 1).
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."},
+                                               {"type": "text", "text": "Белка."}])
+    si = context_for(units).sources
+
+    # Row A: key "01_test|0|0" (Елка → Ёлка); sorts BEFORE row_b by source_key.
+    row_a = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    # Row B: key "01_test|1|0" (Белка → Бёлка); sorts AFTER row_a.
+    row_b = _c1_make_yo_ev_row(si, "01_test|1|0", "Бёлка")
+
+    # Write row_b first → intentionally reverse-order history file.
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([row_b]), encoding="utf-8")
+    old_bytes = yo_path.read_bytes()
+    assert old_bytes.endswith(b"\n")
+
+    # Mock observer to return RESTORED for row_a.
+    fp_a = row_a["restoration_fp"]
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                        lambda key, form, sources, config: RESTORED_obs("Ёлка", (0,), fp_a))
+
+    evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row_a]))
+
+    new_bytes = yo_path.read_bytes()
+    # Old bytes must be an exact prefix of new bytes.
+    assert new_bytes.startswith(old_bytes), "existing YO bytes must be exact prefix after append"
+    # New file has the new row appended.
+    assert b"01_test|0|0" in new_bytes
+
+
+def test_P01_yo_duplicate_verdict_noop_bytes_identical(tmp_path, monkeypatch):
+    """P0.1: re-merging an already-present fp with the same verdict is a true byte-identical NOOP."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    fp = row["restoration_fp"]
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([row]), encoding="utf-8")
+    before_bytes = yo_path.read_bytes()
+
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                        lambda key, form, sources, config: RESTORED_obs("Ёлка", (0,), fp))
+    result = evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    assert result == {"added": 0, "skipped": 1}
+    assert yo_path.read_bytes() == before_bytes
+
+
+def test_P01_yo_missing_final_lf_rejected(tmp_path, monkeypatch):
+    """P0.1: existing YO file without final LF raises YO_EVIDENCE_INVALID; no write."""
+    from audiobook.unitmap import AnnotationError
+    from audiobook.stress_yo_observer import RESTORED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    # Write a YO file without the final newline.
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    content = evaluation.serialize_yo_evidence([row]).rstrip("\n")
+    yo_path.write_bytes(content.encode("utf-8"))
+    before_bytes = yo_path.read_bytes()
+    assert not before_bytes.endswith(b"\n")
+
+    with pytest.raises(AnnotationError, match="YO_EVIDENCE_INVALID"):
+        evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    assert yo_path.read_bytes() == before_bytes
+
+
+# P0.2 — Source freshness fence ——————————————————————————————————————————————
+
+def test_P02_source_changed_between_pin_and_publish_raises(tmp_path, monkeypatch):
+    """P0.2: SOURCE_CHANGED raised when _source_provenance differs at publish vs pin time."""
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    rows = todo_rows()
+
+    # Simulate a source mutation between pin and publish by returning different bytes.
+    call_count = [0]
+
+    def _shifting_provenance(sources):
+        call_count[0] += 1
+        return b"before" if call_count[0] == 1 else b"changed"
+
+    monkeypatch.setattr(evaluation, "_source_provenance", _shifting_provenance)
+    with pytest.raises(AnnotationError, match="SOURCE_CHANGED"):
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0])]))
+
+
+# P0.3 — Manifest uniqueness —————————————————————————————————————————————————
+
+def test_P03_duplicate_text_manifest_returns_unsupported(tmp_path, monkeypatch):
+    """P0.3: two manifest rows with identical text → UNSUPPORTED_obs (fail-closed)."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    section = "01_test"
+    manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        '{"id": "c0", "text": "Елка.", "open_end": false}\n'
+        '{"id": "c1", "text": "Елка.", "open_end": false}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs)
+
+
+def test_P03_fragment_ambiguous_manifest_returns_unsupported(tmp_path, monkeypatch):
+    """P0.3: chunk that splits into multiple fragments → UNSUPPORTED_obs (fragment ordinal unknown)."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    section = "01_test"
+    manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"id": "c0", "text": "Елка.", "open_end": false}\n', encoding="utf-8")
+    # Monkeypatch chunk_fragments to simulate a 2-fragment split.
+    import audiobook.synth as _synth
+    monkeypatch.setattr(_synth, "chunk_fragments",
+                        lambda text, cfg: [("Елка", 350, False), (".", 0, False)])
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs)
+
+
+# P1.1 — Semantic-equivalent conflict detection ———————————————————————————————
+
+def test_P11_yo_and_equivalent_numeric_index_accepted_as_skip(tmp_path, monkeypatch):
+    """P1.1: existing native-ё 'yo' label + incoming numeric '0' for same vowel → SKIP, not CONFLICT."""
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Ёлка."}])
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    yo_row = {**base, "gold_vowel": "yo", "yo_correct": "y", "labeler": "owner", "date": "2026-01-01"}
+    # First merge: add yo annotation.
+    evaluation.merge({}, write_input(tmp_path, [yo_row]))
+    # Second merge: submit numeric "0" for the same vowel — semantically equivalent.
+    num_row = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-02"}
+    result = evaluation.merge({}, write_input(tmp_path, [num_row]))
+    assert result["skipped"] == 1 and result["added"] == 0
+
+
+def test_P11_different_vowel_still_conflicts(tmp_path, monkeypatch):
+    """P1.1: genuinely different stress positions still raise GOLD_ACTIVE_CONFLICT."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    rows = todo_rows()
+    evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "0")]))
+    with pytest.raises(AnnotationError, match="GOLD_ACTIVE_CONFLICT"):
+        evaluation.merge({}, write_input(tmp_path, [labeled(rows[0], "1")]))
+
+
+# P1.2 — C1: _accepted_vowels independent of form_synth ——————————————————————
+
+def test_P12_accepted_vowels_independent_of_form_synth(tmp_path, monkeypatch):
+    """P1.2: _accepted_vowels returns the same frozenset regardless of occ.form_synth."""
+    units = setup_book(tmp_path, monkeypatch)
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    gold = {**base, "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+
+    class FakeOcc:
+        def __init__(self, form_synth):
+            self.form_synth = form_synth
+
+    result_a = evaluation._accepted_vowels(gold, FakeOcc("Бета"))
+    result_b = evaluation._accepted_vowels(gold, FakeOcc("Бёта"))
+    result_c = evaluation._accepted_vowels(gold, None)
+    assert result_a == result_b == result_c == frozenset([0])
+
+
+# P1.4 — Explicit error codes ————————————————————————————————————————————————
+
+def test_P14_merge_source_unresolved_key_raises_source_key_unresolved(tmp_path, monkeypatch):
+    """P1.4: merge_source raises SOURCE_KEY_UNRESOLVED for a key absent from sources."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "source_key": "01_test|99|0",
+           "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    path = tmp_path / "src.tsv"
+    path.write_text(evaluation.serialize_gold([row]), encoding="utf-8", newline="")
+    with pytest.raises(AnnotationError, match="SOURCE_KEY_UNRESOLVED"):
+        evaluation.merge_source({}, path)
+
+
+def test_P14_merge_source_stale_identity_raises_source_identity_stale(tmp_path, monkeypatch):
+    """P1.4: merge_source raises SOURCE_IDENTITY_STALE for a row with wrong identity fields."""
+    units = setup_book(tmp_path, monkeypatch)
+    evaluation.sample({})
+    si = context_for(units).sources
+    base = evaluation._todo_row_by_key("01_test|0|0", si)
+    row = {**base, "unit_text_sha256": "0" * 64,
+           "gold_vowel": "0", "yo_correct": "na", "labeler": "owner", "date": "2026-01-01"}
+    path = tmp_path / "src.tsv"
+    path.write_text(evaluation.serialize_gold([row]), encoding="utf-8", newline="")
+    with pytest.raises(AnnotationError, match="SOURCE_IDENTITY_STALE"):
+        evaluation.merge_source({}, path)
+
+
+def test_P14_merge_yo_none_obs_raises_yo_not_restored(tmp_path, monkeypatch):
+    """P1.4: merge_yo raises YO_NOT_RESTORED when observer returns NONE_obs."""
+    from audiobook.stress_yo_observer import NONE_obs
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                        lambda key, form, sources, config: NONE_obs())
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    before = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_NOT_RESTORED"):
+        evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    after = yo_path.read_bytes() if yo_path.exists() else None
+    assert before == after
+
+
+def test_P14_merge_yo_stale_fp_raises_yo_candidate_stale(tmp_path, monkeypatch):
+    """P1.4: merge_yo raises YO_CANDIDATE_STALE when observed fp != submitted fp."""
+    from audiobook.stress_yo_observer import RESTORED_obs
+    from audiobook.unitmap import AnnotationError
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+    row = _c1_make_yo_ev_row(si, "01_test|0|0", "Ёлка")
+    different_fp = "0" * 64
+    # Observer returns a different fp than what the row claims.
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source",
+                        lambda key, form, sources, config: RESTORED_obs("Ёлка", (0,), different_fp))
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    before = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_CANDIDATE_STALE"):
+        evaluation.merge_yo({}, _c1_yo_input(tmp_path, [row]))
+    after = yo_path.read_bytes() if yo_path.exists() else None
+    assert before == after
