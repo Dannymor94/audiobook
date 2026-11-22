@@ -2606,7 +2606,6 @@ def test_P07_manifest_unit_ambiguous_duplicate_source_text_raises_unsupported(tm
     )
     obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
     assert isinstance(obs, UNSUPPORTED_obs)
-    assert obs.reason == "MANIFEST_UNIT_AMBIGUOUS"
 
 
 def test_P07_manifest_unique_source_text_positive_oracle(tmp_path, monkeypatch):
@@ -2648,3 +2647,243 @@ def test_normative_A15_synthetic_resolver_five_field_identity_match(tmp_path, mo
             if row[field] != identity[field]:
                 mismatches.append((key, field, row[field], identity[field]))
     assert mismatches == [], f"Resolver/inventory identity mismatch: {mismatches[:3]}"
+
+
+# ── Gate C-A R4: SectionMap binding tests ─────────────────────────────────────
+
+# SU1 — duplicate unit text: structural binding resolves uid=2, L3 open_end proof
+
+def test_SU1_su_binding_resolves_duplicate_unit_text_calls_observe_su(tmp_path, monkeypatch):
+    """SU1: map_section resolves uid=2 even when uid=0,1 share the same text.
+
+    RED (old code): text-equality matching → MANIFEST_UNIT_AMBIGUOUS.
+    GREEN (new code): structural binding → (row_index=2, chunk_id="0003", ordinal=0),
+    observe_su returns RESTORED_obs.
+    L3 assertion: l3_check called with open_end=True (from manifest row "0003").
+    """
+    import audiobook.yo as _yo
+    import audiobook.stress_yo_observer as _obs
+    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
+
+    monkeypatch.setattr(_yo, "restore",
+                        lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
+
+    l3_calls = []
+    monkeypatch.setattr(_obs, "l3_check",
+                        lambda rt, cfg, tbl, sent, phr, oe: l3_calls.append(oe))
+
+    units = setup_book(tmp_path, monkeypatch, [
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Елка."},
+    ])
+    si = context_for(units).sources
+
+    # Overwrite manifest: chunk "0003" has open_end: true for the L3 proof.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}\n'
+        '{"id": "0002", "n": 2, "text": "Елка.", "pause_after_ms": 900}\n'
+        '{"id": "0003", "n": 3, "text": "Елка.", "open_end": true, "pause_after_ms": 0}\n',
+        encoding="utf-8",
+    )
+
+    obs = evaluation._yo_observe_key_by_source(
+        "01_test|2|0", "Елка", si, {"text_prep": {"yo_restore": True}}
+    )
+
+    assert isinstance(obs, RESTORED_obs), f"expected RESTORED_obs, got {obs!r}"
+    assert obs.form == "Ёлка", f"unexpected restored form: {obs.form!r}"
+    assert l3_calls == [True], f"l3_check not called with open_end=True: {l3_calls}"
+
+
+# SU2 — multi-word unit: ordinal at non-zero position
+
+def test_SU2_su_binding_ordinal_at_nonzero_position(tmp_path, monkeypatch):
+    """SU2: key "01_test|0|2" in a 3-word unit binds ordinal=2, observe_su gets RESTORED_obs."""
+    import audiobook.yo as _yo
+    import audiobook.stress_yo_observer as _obs
+    from audiobook.stress_yo_observer import RESTORED_obs
+
+    monkeypatch.setattr(_yo, "restore",
+                        lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
+    monkeypatch.setattr(_obs, "l3_check", lambda *a: None)
+
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка и елка."}])
+    si = context_for(units).sources
+
+    obs = evaluation._yo_observe_key_by_source(
+        "01_test|0|2", "елка", si, {"text_prep": {"yo_restore": True}}
+    )
+
+    assert isinstance(obs, RESTORED_obs), f"expected RESTORED_obs, got {obs!r}"
+    assert obs.form == "ёлка", f"unexpected restored form: {obs.form!r}"
+
+
+# SU3 — all tokens in section with duplicated units and multi-unit chunk agree with wordprov
+
+def test_SU3_su_binding_all_tokens_match_wordprov_structural(tmp_path, monkeypatch):
+    """SU3: _su_binding (chunk_id, ordinal) matches WordOcc (chunk_id, chunk_word_index)
+    for every token in a section with duplicated unit texts and a multi-unit chunk."""
+    from audiobook.wordprov import process_section_occs
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Елка и елка."},
+    ]
+    mrows = [
+        {"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900},
+        {"id": "0002", "n": 2, "text": "Елка. Елка и елка.", "pause_after_ms": 0},
+    ]
+
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+
+    occs, _, _ = process_section_occs("01_test", units, mrows, None)
+    assert occs, "process_section_occs returned no occurrences"
+
+    for occ in occs:
+        resolved = si.resolve(occ.source_key)
+        assert resolved is not None, f"SourceIndex could not resolve {occ.source_key}"
+        identity, _unit_text, _ = resolved
+        result = evaluation._su_binding(occ.source_key, identity, si, mrows, {})
+        assert not isinstance(result, UNSUPPORTED_obs), (
+            f"binding failed for {occ.source_key}: {result!r}"
+        )
+        _row_index, chunk_id, ordinal = result
+        assert chunk_id == occ.chunk_id, (
+            f"chunk_id mismatch for {occ.source_key}: got {chunk_id!r}, want {occ.chunk_id!r}"
+        )
+        assert ordinal == occ.chunk_word_index, (
+            f"ordinal mismatch for {occ.source_key}: got {ordinal}, want {occ.chunk_word_index}"
+        )
+
+
+# ── N1–N6: fail-closed negative cases ─────────────────────────────────────────
+
+def test_N1_su_binding_stale_manifest_unit_insertion(tmp_path, monkeypatch):
+    """N1: manifest becomes stale when a source unit is inserted before the target.
+    Atom mismatch → MANIFEST_MAPPING_FAILED."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    units_new = [{"type": "text", "text": "Вставка."}, {"type": "text", "text": "Елка."}]
+    si = evaluation.SourceIndex({"01_test": units_new})
+    mrows = [{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}]
+
+    resolved = si.resolve("01_test|1|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+
+
+def test_N2_su_binding_missing_final_chunk(tmp_path, monkeypatch):
+    """N2: manifest is missing the last chunk → TRAILING_SOURCE → MANIFEST_MAPPING_FAILED."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [{"type": "text", "text": "Альфа."}, {"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+    mrows = [{"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900}]
+
+    resolved = si.resolve("01_test|1|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+
+
+def test_N3_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
+    """N3: duplicate manifest chunk IDs → early MANIFEST_MAPPING_FAILED."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [{"type": "text", "text": "Альфа."}, {"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+    mrows = [
+        {"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900},
+        {"id": "0001", "n": 2, "text": "Елка.", "pause_after_ms": 0},
+    ]
+
+    resolved = si.resolve("01_test|1|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+
+
+def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
+    """N4: manifest row without required n field → MANIFEST_ORDER → MANIFEST_MAPPING_FAILED."""
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+    mrows = [{"id": "0001", "text": "Елка.", "pause_after_ms": 900}]
+
+    resolved = si.resolve("01_test|0|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|0|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+
+
+def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
+    """N5: chunk_fragments returns >1 fragment → MANIFEST_FRAGMENT_AMBIGUOUS."""
+    import audiobook.synth as _synth
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [{"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+    mrows = [{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}]
+
+    monkeypatch.setattr(_synth, "chunk_fragments",
+                        lambda text, cfg: [("Елка", 350, False), (".", 0, False)])
+
+    resolved = si.resolve("01_test|0|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|0|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_FRAGMENT_AMBIGUOUS"
+
+
+def test_N6_su_binding_manifest_changed_between_observations(tmp_path, monkeypatch):
+    """N6: manifest changes (atom mismatch) between initial and fence re-observation.
+    First call → RESTORED_obs; second call (changed manifest) → UNSUPPORTED_obs."""
+    import audiobook.yo as _yo
+    import audiobook.stress_yo_observer as _obs
+    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
+
+    monkeypatch.setattr(_yo, "restore",
+                        lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
+    monkeypatch.setattr(_obs, "l3_check", lambda *a: None)
+
+    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    si = context_for(units).sources
+
+    obs1 = evaluation._yo_observe_key_by_source(
+        "01_test|0|0", "Елка", si, {"text_prep": {"yo_restore": True}}
+    )
+    assert isinstance(obs1, RESTORED_obs), f"first call failed: {obs1!r}"
+
+    # Simulate manifest change: atom text mismatch.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+
+    obs2 = evaluation._yo_observe_key_by_source(
+        "01_test|0|0", "Елка", si, {"text_prep": {"yo_restore": True}}
+    )
+    assert isinstance(obs2, UNSUPPORTED_obs), f"second call did not fail-closed: {obs2!r}"

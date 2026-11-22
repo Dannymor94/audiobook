@@ -21,7 +21,7 @@ from pathlib import Path
 
 from audiobook import paths
 from audiobook.stress_fp import private_output_guard
-from audiobook.unitmap import AnnotationError, validate_section
+from audiobook.unitmap import AnnotationError, map_section, validate_section
 from audiobook.wordprov import gold_identity
 
 SEED = "t15-7/1"
@@ -1226,18 +1226,92 @@ def _yo_observe_key(occ, sources, config):
     )
 
 
+def _su_binding(source_key, identity, sources, mrows, config):
+    """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs.
+
+    Uses map_section for codepoint-exact structural alignment.
+    Fail-closed on any mapping error or inconsistency.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    section, uid, k = _split_key(source_key)
+    units = sources.units.get(section, [])
+    if not units:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    ids = [r.get("id") for r in mrows]
+    if len(ids) != len(set(ids)):
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    try:
+        smap = map_section(units, mrows, section=section)
+    except (AnnotationError, ValueError):
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    form_source = identity["form_source"]
+    target_ai = None
+    target_match_start = None
+    ki = 0
+    for ai, atom in enumerate(smap.stream):
+        if atom.unit_id != uid:
+            continue
+        for m in _WORD.finditer(atom.text):
+            if ki == k:
+                if m.group().lower() != form_source.lower():
+                    return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+                target_ai = ai
+                target_match_start = m.start()
+                break
+            ki += 1
+        if target_ai is not None:
+            break
+    if target_ai is None:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    span_idx = next(
+        (si for si, s in enumerate(smap.spans) if s.atom_start <= target_ai < s.atom_end),
+        None,
+    )
+    if span_idx is None:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    span = smap.spans[span_idx]
+    row_index = next((i for i, r in enumerate(mrows) if r.get("id") == span.chunk_id), None)
+    if row_index is None:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    mrow = mrows[row_index]
+    from audiobook.synth import chunk_fragments
+    try:
+        frags = chunk_fragments(mrow["text"], config or {})
+    except Exception:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    if len(frags) > 1:
+        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
+    ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
+    ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
+    from audiobook.voicecfg import prepare_text
+    open_end = mrow.get("open_end", False)
+    try:
+        pre = prepare_text(mrow["text"], config or {}, open_end)
+    except Exception:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    pre_words = _WORD.findall(pre)
+    if ordinal >= len(pre_words):
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    pw = pre_words[ordinal]
+    def _fold_yo(w):
+        return w.replace("ё", "е").replace("Ё", "Е")
+    if _fold_yo(pw.lower()) != _fold_yo(form_source.lower()):
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    return row_index, span.chunk_id, ordinal
+
+
 def _yo_observe_key_by_source(source_key, form_source, sources, config):
     """Manifest-based YO observation for merge_yo without inventory access.
 
-    Finds chunk by unit_text match in manifest; derives token_idx from raw text.
-    Returns UNSUPPORTED_obs on missing or ambiguous data. Monkeypatchable in tests.
+    Uses structural SectionMap binding for chunk/ordinal resolution.
+    Returns UNSUPPORTED_obs on missing or unmappable data. Monkeypatchable.
     """
     from audiobook.pronounce import load_table
     from audiobook.stress_yo_observer import observe_su, UNSUPPORTED_obs
     resolved = sources.resolve(source_key)
     if resolved is None:
         return UNSUPPORTED_obs("SOURCE_NOT_FOUND")
-    identity, unit_text, _ = resolved
+    identity, _unit_text, _ = resolved
     section = _split_key(source_key)[0]
     manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
     raw = -1
@@ -1255,35 +1329,19 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
         mrows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
     except (ValueError, UnicodeError):
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    # Require exactly one manifest row with matching text; ambiguous ⇒ fail-closed.
-    matches = [r for r in mrows if r.get("text") == unit_text]
-    if len(matches) != 1:
-        return UNSUPPORTED_obs("MANIFEST_AMBIGUOUS" if len(matches) > 1 else "MANIFEST_UNAVAILABLE")
-    mrow = matches[0]
-    # Fail-closed if multiple source units share the same text: ordinal is ambiguous.
-    if section in sources.units:
-        duplicate_count = sum(1 for u in sources.units[section] if u["text"] == unit_text)
-        if duplicate_count > 1:
-            return UNSUPPORTED_obs("MANIFEST_UNIT_AMBIGUOUS")
-    # Fail-closed on fragmented chunks: fragment ordinal is unknown without inventory.
-    from audiobook.synth import row_leadin, chunk_fragments
-    try:
-        frags = chunk_fragments(mrow["text"], config or {})
-    except Exception:
-        return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    if len(frags) > 1:
-        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
-    words = list(_WORD.finditer(mrow["text"]))
-    matched = [i for i, m in enumerate(words) if m.group().lower() == form_source.lower()]
-    if len(matched) != 1:
-        return UNSUPPORTED_obs("MANIFEST_AMBIGUOUS")
+    binding = _su_binding(source_key, identity, sources, mrows, config)
+    if isinstance(binding, UNSUPPORTED_obs):
+        return binding
+    row_index, chunk_id, ordinal = binding
+    mrow = mrows[row_index]
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
+    from audiobook.synth import row_leadin
     return observe_su(
-        source_token=form_source,
+        source_token=identity["form_source"],
         raw_text=mrow["text"],
-        token_idx=matched[0],
+        token_idx=ordinal,
         config=config or {},
         yo_map=yo_map, table=table, sentinel=sentinel,
         phrase=row_leadin(mrow),
