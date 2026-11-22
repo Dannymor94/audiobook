@@ -1263,7 +1263,7 @@ class TestR9FinalPublicationFence:
         assert score_path().read_bytes() == old_score
 
     def test_t02_yo_map_drift_raises_sample_stale(self, tmp_path, monkeypatch):
-        """T02: YO-map content changes between _assert_current and fence → SAMPLE_STALE."""
+        """T02: YO-map content changes between _assert_current and fence → YO_INPUTS_CHANGED."""
         from audiobook.stress_yo_observer import NONE_obs
         units = setup_book(tmp_path, monkeypatch)
         (paths.TEXT / "yo.norm.txt").write_text("елка ёлка ёлка\n", encoding="utf-8")
@@ -1283,12 +1283,12 @@ class TestR9FinalPublicationFence:
                 "елка ёлка ёлка\nберёза береза береза\n", encoding="utf-8")
 
         monkeypatch.setattr(evaluation, "_assert_current", inject)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
             evaluation.score(config)
         assert score_path().read_bytes() == old_score
 
     def test_t03_norm_content_drift_raises_sample_stale(self, tmp_path, monkeypatch):
-        """T03: norm file content changes between _assert_current and fence → SAMPLE_STALE."""
+        """T03: norm file content changes between _assert_current and fence → YO_INPUTS_CHANGED."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})
@@ -1300,7 +1300,7 @@ class TestR9FinalPublicationFence:
             (paths.TEXT / "extra.norm.txt").write_text("injected\n", encoding="utf-8")
 
         monkeypatch.setattr(evaluation, "_assert_current", inject)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
             evaluation.score({})
         assert score_path().read_bytes() == old_score
 
@@ -1759,7 +1759,7 @@ class TestR9FinalPublicationFence:
         assert not any(score_dir.glob("*.txn-*")), "No temp files should remain"
 
     def test_t09_fence_fires_before_replace_so_target_absent_on_error(self, tmp_path, monkeypatch):
-        """T09: fence fires inside _apply callback (post-fsync, pre-rename) — target absent on error."""
+        """T09: fence fires inside _apply callback (post-fsync, pre-rename) — target absent on error; norm bytes drift → YO_INPUTS_CHANGED."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         score_dir = paths.OUT / "stress" / "eval" / "score"
@@ -1770,13 +1770,13 @@ class TestR9FinalPublicationFence:
             orig_fence(*args, **kwargs)
 
         monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
             evaluation.score({})
         assert not any(score_dir.glob("s2-*.json")), "Target must not be written when fence raises"
         assert not any(score_dir.glob("*.txn-*")), "No temp files should remain after error"
 
     def test_t09b_pre_existing_score_preserved_when_fence_raises(self, tmp_path, monkeypatch):
-        """T09b: fence raises in no-op path — pre-existing score bytes unchanged."""
+        """T09b: fence raises in no-op path — pre-existing score bytes unchanged; norm bytes drift → YO_INPUTS_CHANGED."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})
@@ -1788,7 +1788,7 @@ class TestR9FinalPublicationFence:
             orig_fence(*args, **kwargs)
 
         monkeypatch.setattr(evaluation, "_score_publication_fence", inject_fence)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
             evaluation.score({})
         assert score_path().read_bytes() == old_score, "Pre-existing score must be preserved"
 
@@ -1851,7 +1851,7 @@ class TestR9FinalPublicationFence:
         monkeypatch.setattr(os, "fsync", spy_fsync)
         monkeypatch.setattr(os, "replace", spy_replace)
 
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
             evaluation.score({})
 
         assert score_path().read_bytes() == old_bytes, "Pre-existing score must be preserved on rename path"
@@ -1874,7 +1874,7 @@ class TestR9FinalPublicationFence:
             "os.replace must not be called on score target when fence raises"
 
     def test_t10_no_op_path_fence_fires_on_idempotent_call(self, tmp_path, monkeypatch):
-        """T10: second call takes no-op path but fence still fires and catches drift."""
+        """T10: second call takes no-op path but fence still fires; norm bytes drift → YO_INPUTS_CHANGED."""
         ready(tmp_path, monkeypatch)
         complete(tmp_path)
         evaluation.score({})  # write the file; second call will be no-op
@@ -1886,8 +1886,8 @@ class TestR9FinalPublicationFence:
             (paths.TEXT / "extra.norm.txt").write_text("injected-for-noop\n", encoding="utf-8")
 
         monkeypatch.setattr(evaluation, "_assert_current", inject)
-        with pytest.raises(AnnotationError, match="SAMPLE_STALE"):
-            evaluation.score({})  # no-op path → fence fires → SAMPLE_STALE
+        with pytest.raises(AnnotationError, match="YO_INPUTS_CHANGED"):
+            evaluation.score({})  # no-op path → fence fires → YO_INPUTS_CHANGED
         assert score_path().read_bytes() == old_score
 
     def test_r3_rename_positive_control(self, tmp_path, monkeypatch):

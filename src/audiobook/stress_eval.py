@@ -925,6 +925,7 @@ def _plan(path, text, expected):
 
 
 def _apply(plan, *, before_publish=None):
+    """Stage plan: write temp + fire fence. Returns True if staged (caller must commit), False if noop."""
     data = plan.text.encode("utf-8")
     if _optional_bytes(plan.path) != plan.expected:
         _error("GOLD_OUTPUT_CHANGED")
@@ -936,12 +937,12 @@ def _apply(plan, *, before_publish=None):
     existing = parent
     while not existing.exists():
         existing = existing.parent
-    created = False
+    cleanup = False
     try:
         _sync_directory(existing)  # Check durability capability before any write.
         parent.mkdir(parents=True, exist_ok=True)
         with plan.temporary.open("x", encoding="utf-8", newline="") as stream:
-            created = True
+            cleanup = True
             stream.write(plan.text)
             stream.flush()
             os.fsync(stream.fileno())
@@ -949,14 +950,27 @@ def _apply(plan, *, before_publish=None):
             before_publish()
         if _optional_bytes(plan.path) != plan.expected:
             _error("GOLD_OUTPUT_CHANGED")
-        os.replace(plan.temporary, plan.path)
-        _sync_directory(parent)
+        cleanup = False  # caller commits via os.replace
+        return True
     except OSError:
         _error("GOLD_WRITE_FAILED")
     finally:
-        if created:
+        if cleanup:
             plan.temporary.unlink(missing_ok=True)
-    return True
+
+
+def _apply_and_commit(plan, *, before_publish=None):
+    """Stage + commit in one step (used by all callers except sample())."""
+    staged = _apply(plan, before_publish=before_publish)
+    if staged:
+        try:
+            os.replace(plan.temporary, plan.path)
+            _sync_directory(plan.path.parent)
+        except OSError:
+            _error("GOLD_WRITE_FAILED")
+        finally:
+            plan.temporary.unlink(missing_ok=True)
+    return staged
 
 
 def _obs_to_witness(obs, f1_rule=None, f1_flag="none"):
@@ -1068,8 +1082,24 @@ def sample(config):
                 _error("YO_INPUTS_CHANGED")
             if _cfym_sample(paths.TEXT) != _snap:
                 _error("YO_MAP_STALE")
-        for plan in plans:
-            _apply(plan, before_publish=_yo_sample_fence)
+        _to_commit: list = []
+        try:
+            for plan in plans:
+                if _apply(plan, before_publish=_yo_sample_fence):
+                    _to_commit.append(plan)
+        except AnnotationError:
+            for _p in _to_commit:
+                _p.temporary.unlink(missing_ok=True)
+            raise
+        for plan in _to_commit:
+            try:
+                os.replace(plan.temporary, plan.path)
+                _sync_directory(plan.path.parent)
+            except OSError:
+                plan.temporary.unlink(missing_ok=True)
+                _error("GOLD_WRITE_FAILED")
+            finally:
+                plan.temporary.unlink(missing_ok=True)
         return {"sample_fp": selection.record["sample_fp"], "strata": selection.record["strata"],
                 "selected": len(selection.record["keys"]), "todo": len(requested),
                 "one_vowel_aligned": selection.one_vowel_aligned, "duplicates": state.duplicates}
@@ -1118,8 +1148,8 @@ def merge(config, incoming: Path, sample_path: Path | None = None):
         def _fence():
             _fence_check_sources(sources)
 
-        _apply(plans[0], before_publish=_fence)
-        _apply(plans[1])
+        _apply_and_commit(plans[0], before_publish=_fence)
+        _apply_and_commit(plans[1])
         # Owner todo is not modified here: safe retirement policy is pending
         # architect decision (Issue #17). The versioned todo persists until
         # sample() regenerates it on the next run.
@@ -1230,6 +1260,13 @@ def _yo_observe_key(occ, sources, config):
         open_end = False
     if occ.su_token_index is None:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
+    # B5: verify su_token_index against source-derived ordinal.
+    # su_fragment=None → su_token_index is relative to the whole-chunk text; strip pauses_ms so
+    # _su_resolve_detail treats the chunk as a single fragment and returns chunk-level ordinal.
+    _b5_config = {k: v for k, v in (config or {}).items() if k != "pauses_ms"} if occ.su_fragment is None else (config or {})
+    _detail = _su_resolve_detail(occ.source_key, identity, sources, rows, _b5_config)
+    if not isinstance(_detail, UNSUPPORTED_obs) and _detail[2] != occ.su_token_index:
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
@@ -1269,7 +1306,10 @@ def _su_resolve_detail(source_key, identity, sources, mrows, config):
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
     from audiobook.synth import chunk_fragments, row_leadin
     from audiobook.voicecfg import prepare_text
-    section, uid, k = _split_key(source_key)
+    try:
+        section, uid, k = _split_key(source_key)
+    except AnnotationError:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     units = sources.units.get(section, [])
     if not units:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
@@ -1322,12 +1362,12 @@ def _su_resolve_detail(source_key, identity, sources, mrows, config):
     for ai in range(span.atom_start, span.atom_end):
         for m in _WORD.finditer(smap.stream[ai].text):
             if pos >= len(pre_words):
-                return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+                return UNSUPPORTED_obs("PREP_TOKEN_MISMATCH")
             if not _is_forward_yo_pair(m.group(), pre_words[pos]):
-                return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+                return UNSUPPORTED_obs("PREP_TOKEN_MISMATCH")
             pos += 1
     if pos != len(pre_words):
-        return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+        return UNSUPPORTED_obs("PREP_TOKEN_MISMATCH")
     if ordinal >= pos:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     try:
@@ -1508,11 +1548,22 @@ def _yo_preflight(context, config):
             mrow = mrow_by_id.get(sp.chunk_id)
             if mrow is None:
                 _error("L3_COVERAGE_INCOMPLETE")
-            # Independent fragment count: source atom text vs manifest row text.
-            source_text = " ".join(smap_r7.stream[ai].text for ai in range(sp.atom_start, sp.atom_end))
-            expected_frags = chunk_fragments(source_text, config or {})
+            # Independent token check: source atom words must match manifest fragment words in order.
+            from audiobook.voicecfg import prepare_text as _prepare_r7
+            _atom_text = " ".join(smap_r7.stream[ai].text for ai in range(sp.atom_start, sp.atom_end))
+            try:
+                _atom_words = _WORD.findall(_prepare_r7(_atom_text, config or {}, False))
+            except Exception:
+                _error("L3_COVERAGE_INCOMPLETE")
             actual_frags = chunk_fragments(mrow["text"], config or {})
-            if len(expected_frags) != len(actual_frags):
+            _frag_words: list = []
+            for _ft, _p, _ie in actual_frags:
+                _rw = _ft.rstrip("?") if _ie and _ft.endswith("?") else _ft
+                try:
+                    _frag_words.extend(_WORD.findall(_prepare_r7(_rw, config or {}, False)))
+                except Exception:
+                    _error("L3_COVERAGE_INCOMPLETE")
+            if _atom_words != _frag_words:
                 _error("L3_COVERAGE_INCOMPLETE")
             if len(actual_frags) == 1:
                 su_set.append((mrow["text"], row_leadin(mrow), mrow.get("open_end", False)))
@@ -1669,7 +1720,7 @@ def score(config):
             _error("GOLD_OUTPUT_CHANGED")
         if _optional_bytes(yo_path) != yo_data_before:  # T41: dual ledger freshness
             _error("YO_OUTPUT_CHANGED")
-        _apply(plan, before_publish=lambda: _score_publication_fence(
+        _apply_and_commit(plan, before_publish=lambda: _score_publication_fence(
             context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, _norm_digest_now))
         return result
     finally:
@@ -1721,8 +1772,8 @@ def merge_source(config, incoming: Path):
         def _fence():
             _fence_check_sources(sources)
 
-        _apply(plans[0], before_publish=_fence)
-        _apply(plans[1])
+        _apply_and_commit(plans[0], before_publish=_fence)
+        _apply_and_commit(plans[1])
         return {"added": len(additions), "skipped": skipped,
                 "active": len(updated_state.active), "stale": len(updated_state.stale),
                 "duplicates": updated_state.duplicates}
@@ -1931,7 +1982,7 @@ def merge_yo(config, incoming: Path):
                     _error("YO_CANDIDATE_STALE")
 
         plan = _plan(yo_path, _yo_append_text(yo_data, additions), yo_data)
-        _apply(plan, before_publish=_yo_fence)
+        _apply_and_commit(plan, before_publish=_yo_fence)
         return {"added": len(additions), "skipped": len(batch) - len(additions)}
     finally:
         release_eval_lock(lock)

@@ -333,7 +333,7 @@ def test_fsync_and_atomic_rename_order(tmp_path, monkeypatch):
         replace(src, dst)
     monkeypatch.setattr(evaluation.os, "fsync", file_sync)
     monkeypatch.setattr(evaluation.os, "replace", atomic_replace)
-    assert evaluation._apply(evaluation.WritePlan(destination, temporary, "complete\n", None))
+    assert evaluation._apply_and_commit(evaluation.WritePlan(destination, temporary, "complete\n", None))
     assert events == ["directory", "file", "replace", "directory"]
     assert not temporary.exists()
 
