@@ -970,18 +970,21 @@ def _obs_to_witness(obs, f1_rule=None, f1_flag="none"):
     return ("UNSUPPORTED", f1_rule, f1_flag, OCV)  # fail-closed: UNSUPPORTED_obs + unknown types
 
 
-def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path):
+def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, norm_digest_before=None):
     """B4/R9: re-validate observation inputs and per-key witness at true publication boundary.
 
     Fires inside _apply for both no-op (existing==result) and atomic rename paths.
     Re-checks inventory/sample freshness, norm/map/prep content digests and exact per-key
     observation witness; also re-checks gold/YO authority bytes as belt-and-suspenders.
+    norm_digest_before: preflight snapshot; if bytes drifted during this operation → YO_INPUTS_CHANGED.
     """
     _assert_current(context, config)
     _verify_sample(record, sample_path)
     _verify_selection_fresh(record, context, config)
     from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
                                                compute_prep_config_digest, compute_fresh_yo_map)
+    if norm_digest_before is not None and compute_norm_digest(paths.TEXT) != norm_digest_before:
+        _error("YO_INPUTS_CHANGED")
     current_map = _load_yo_map(config)
     current_inputs = {
         "norm_content_sha256": compute_norm_digest(paths.TEXT),
@@ -1057,9 +1060,12 @@ def sample(config):
         if _optional_bytes(gold) != gold_before:
             _error("GOLD_OUTPUT_CHANGED")
         from audiobook.yo import book_map as _bm_sample
-        from audiobook.stress_yo_observer import compute_fresh_yo_map as _cfym_sample
+        from audiobook.stress_yo_observer import compute_fresh_yo_map as _cfym_sample, compute_norm_digest as _cnorm_s
         _snap = _bm_sample()
+        _norm_snap = _cnorm_s(paths.TEXT)
         def _yo_sample_fence():
+            if _cnorm_s(paths.TEXT) != _norm_snap:
+                _error("YO_INPUTS_CHANGED")
             if _cfym_sample(paths.TEXT) != _snap:
                 _error("YO_MAP_STALE")
         for plan in plans:
@@ -1332,23 +1338,24 @@ def _su_resolve_detail(source_key, identity, sources, mrows, config):
         if frags[0][0] != mrow["text"]:
             return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
         return row_index, span.chunk_id, ordinal, mrow["text"], row_leadin(mrow), open_end
-    # Multi-fragment: verify whole-population token coverage, then find target fragment.
+    # Multi-fragment: verify exact ordered token identity against prepared parent, then find target.
     from audiobook import leadin as _leadin_mod
     cum = 0
     target_result = None
-    frag_total = 0
+    all_frag_tokens: list[str] = []
     for frag_text, _pause, is_enum in frags:
         raw_frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
         try:
             pre_frag = prepare_text(raw_frag, config or {}, False)
         except Exception:
             return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-        cnt = len(_WORD.findall(pre_frag))
-        frag_total += cnt
+        frag_words = _WORD.findall(pre_frag)
+        all_frag_tokens.extend(frag_words)
+        cnt = len(frag_words)
         if target_result is None and cum + cnt > ordinal:
             target_result = (row_index, span.chunk_id, ordinal - cum, raw_frag, _leadin_mod.AUTO, False)
         cum += cnt
-    if frag_total != pos:
+    if all_frag_tokens != pre_words:
         return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
     if target_result is None:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
@@ -1487,7 +1494,7 @@ def _yo_preflight(context, config):
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
 
-    # R7: build SU_set via map_section structural cross-check; every source atom must be spanned.
+    # R7: build SU_set via map_section; independently verify fragment count from source atoms.
     su_set = []
     for section in sorted(sections):
         mrows_s = manifest_rows[section]
@@ -1496,18 +1503,21 @@ def _yo_preflight(context, config):
             smap_r7 = map_section(units_s, mrows_s, section=section)
         except (AnnotationError, ValueError):
             _error("L3_COVERAGE_INCOMPLETE")
-        covered = {ai for sp in smap_r7.spans for ai in range(sp.atom_start, sp.atom_end)}
-        if len(covered) < len(smap_r7.stream):
-            _error("L3_COVERAGE_INCOMPLETE")
-        spanned_ids = {sp.chunk_id for sp in smap_r7.spans}
-        for mrow in mrows_s:
-            if mrow.get("id") not in spanned_ids:
-                continue
-            frags = chunk_fragments(mrow["text"], config or {})
-            if len(frags) == 1:
+        mrow_by_id = {r.get("id"): r for r in mrows_s}
+        for sp in smap_r7.spans:
+            mrow = mrow_by_id.get(sp.chunk_id)
+            if mrow is None:
+                _error("L3_COVERAGE_INCOMPLETE")
+            # Independent fragment count: source atom text vs manifest row text.
+            source_text = " ".join(smap_r7.stream[ai].text for ai in range(sp.atom_start, sp.atom_end))
+            expected_frags = chunk_fragments(source_text, config or {})
+            actual_frags = chunk_fragments(mrow["text"], config or {})
+            if len(expected_frags) != len(actual_frags):
+                _error("L3_COVERAGE_INCOMPLETE")
+            if len(actual_frags) == 1:
                 su_set.append((mrow["text"], row_leadin(mrow), mrow.get("open_end", False)))
             else:
-                for frag_text, _pause, is_enum in frags:
+                for frag_text, _pause, is_enum in actual_frags:
                     raw = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
                     su_set.append((raw, _leadin.AUTO, False))
 
@@ -1577,8 +1587,9 @@ def score(config):
         record = selection.record
         # B4: reject sample/2 whose observation inputs no longer match current state.
         _yo_map_cur = _load_yo_map(config)
+        _norm_digest_now = compute_norm_digest(paths.TEXT)
         if record.get("observation_inputs") != {
-            "norm_content_sha256": compute_norm_digest(paths.TEXT),
+            "norm_content_sha256": _norm_digest_now,
             "yo_map_sha256": compute_yo_map_digest(_yo_map_cur),
             "prep_config_sha256": compute_prep_config_digest(config),
         }:
@@ -1659,7 +1670,7 @@ def score(config):
         if _optional_bytes(yo_path) != yo_data_before:  # T41: dual ledger freshness
             _error("YO_OUTPUT_CHANGED")
         _apply(plan, before_publish=lambda: _score_publication_fence(
-            context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path))
+            context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, _norm_digest_now))
         return result
     finally:
         release_eval_lock(lock)
@@ -1900,6 +1911,8 @@ def merge_yo(config, incoming: Path):
             additions.append(row)
             existing_by_fp[fp] = row
         if not additions:
+            if compute_norm_digest(paths.TEXT) != expected_norm_digest:
+                _error("YO_INPUTS_CHANGED")
             return {"added": 0, "skipped": len(batch)}
 
         def _yo_fence():
@@ -1907,7 +1920,7 @@ def merge_yo(config, incoming: Path):
             from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
                                                        compute_prep_config_digest)
             if compute_norm_digest(paths.TEXT) != expected_norm_digest:
-                _error("SOURCE_CHANGED")
+                _error("YO_INPUTS_CHANGED")
             if compute_yo_map_digest(_load_yo_map(config)) != expected_yo_map_digest:
                 _error("SOURCE_CHANGED")
             if compute_prep_config_digest(config) != expected_prep_digest:
