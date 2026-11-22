@@ -1279,7 +1279,9 @@ def _su_binding(source_key, identity, sources, mrows, config):
         frags = chunk_fragments(mrow["text"], config or {})
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    if len(frags) > 1:
+    if len(frags) != 1:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    if frags[0][0] != mrow["text"]:
         return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
     ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
     ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
@@ -1290,6 +1292,9 @@ def _su_binding(source_key, identity, sources, mrows, config):
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     pre_words = _WORD.findall(pre)
+    span_word_count = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, span.atom_end))
+    if span_word_count != len(pre_words):
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     if ordinal >= len(pre_words):
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     pw = pre_words[ordinal]

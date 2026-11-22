@@ -2654,68 +2654,101 @@ def test_normative_A15_synthetic_resolver_five_field_identity_match(tmp_path, mo
 # SU1 — duplicate unit text: structural binding resolves uid=2, L3 open_end proof
 
 def test_SU1_su_binding_resolves_duplicate_unit_text_calls_observe_su(tmp_path, monkeypatch):
-    """SU1: map_section resolves uid=2 even when uid=0,1 share the same text.
+    """SU1: map_section resolves uid=2 (Елка.) even when uid=1 shares the same text.
 
     RED (old code): text-equality matching → MANIFEST_UNIT_AMBIGUOUS.
-    GREEN (new code): structural binding → (row_index=2, chunk_id="0003", ordinal=0),
-    observe_su returns RESTORED_obs.
-    L3 assertion: l3_check called with open_end=True (from manifest row "0003").
+    GREEN (new code): structural binding → (row_index=2, chunk_id="0003", ordinal=0).
+    L3 runs for real (not monkeypatched): open_end=True from row "0003" is exercised.
+    merge_yo ledger verdict proves the full end-to-end path.
     """
     import audiobook.yo as _yo
-    import audiobook.stress_yo_observer as _obs
     from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
 
     monkeypatch.setattr(_yo, "restore",
                         lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
 
-    l3_calls = []
-    monkeypatch.setattr(_obs, "l3_check",
-                        lambda rt, cfg, tbl, sent, phr, oe: l3_calls.append(oe))
-
     units = setup_book(tmp_path, monkeypatch, [
-        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Альфа."},
         {"type": "text", "text": "Елка."},
         {"type": "text", "text": "Елка."},
     ])
     si = context_for(units).sources
 
-    # Overwrite manifest: chunk "0003" has open_end: true for the L3 proof.
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
     manifest_path.write_text(
-        '{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}\n'
+        '{"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900}\n'
         '{"id": "0002", "n": 2, "text": "Елка.", "pause_after_ms": 900}\n'
         '{"id": "0003", "n": 3, "text": "Елка.", "open_end": true, "pause_after_ms": 0}\n',
         encoding="utf-8",
     )
+    mrows = [
+        {"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900},
+        {"id": "0002", "n": 2, "text": "Елка.", "pause_after_ms": 900},
+        {"id": "0003", "n": 3, "text": "Елка.", "open_end": True, "pause_after_ms": 0},
+    ]
+    config = {"text_prep": {"yo_restore": True}}
 
-    obs = evaluation._yo_observe_key_by_source(
-        "01_test|2|0", "Елка", si, {"text_prep": {"yo_restore": True}}
+    resolved = si.resolve("01_test|2|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    # Structural binding: uid=2 → row_index=2, chunk_id="0003", ordinal=0.
+    binding = evaluation._su_binding("01_test|2|0", identity, si, mrows, config)
+    assert not isinstance(binding, UNSUPPORTED_obs), f"binding failed: {binding!r}"
+    row_index, chunk_id, ordinal = binding
+    assert (row_index, chunk_id, ordinal) == (2, "0003", 0), (
+        f"unexpected binding: row_index={row_index}, chunk_id={chunk_id!r}, ordinal={ordinal}"
     )
 
+    # Full observer path with real l3_check (open_end=True from "0003").
+    obs = evaluation._yo_observe_key_by_source("01_test|2|0", "Елка", si, config)
     assert isinstance(obs, RESTORED_obs), f"expected RESTORED_obs, got {obs!r}"
     assert obs.form == "Ёлка", f"unexpected restored form: {obs.form!r}"
-    assert l3_calls == [True], f"l3_check not called with open_end=True: {l3_calls}"
+
+    # merge_yo ledger verdict: full end-to-end proof.
+    from audiobook.stress_yo_observer import compute_prep_config_digest
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        obs.form, list(obs.indices), obs.fp, "y",
+        prep_cfg=compute_prep_config_digest(config),
+    )
+    result = evaluation.merge_yo(config, _write_yo_input(tmp_path, [row]))
+    assert result["added"] == 1 and result["skipped"] == 0, f"merge_yo failed: {result}"
 
 
 # SU2 — multi-word unit: ordinal at non-zero position
 
 def test_SU2_su_binding_ordinal_at_nonzero_position(tmp_path, monkeypatch):
-    """SU2: key "01_test|0|2" in a 3-word unit binds ordinal=2, observe_su gets RESTORED_obs."""
+    """SU2: key "01_test|0|2" in 3-Cyrillic-word unit "Елка и елка." binds ordinal=2.
+
+    Structural binding asserted directly; l3_check runs for real (not monkeypatched).
+    """
     import audiobook.yo as _yo
-    import audiobook.stress_yo_observer as _obs
-    from audiobook.stress_yo_observer import RESTORED_obs
+    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
 
     monkeypatch.setattr(_yo, "restore",
                         lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
-    monkeypatch.setattr(_obs, "l3_check", lambda *a: None)
 
     units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка и елка."}])
     si = context_for(units).sources
 
-    obs = evaluation._yo_observe_key_by_source(
-        "01_test|0|2", "елка", si, {"text_prep": {"yo_restore": True}}
+    mrows = [{"id": "0001", "n": 1, "text": "Елка и елка.", "pause_after_ms": 900}]
+    config = {"text_prep": {"yo_restore": True}}
+    resolved = si.resolve("01_test|0|2")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    # Structural binding: k=2 → ordinal=2 within chunk "0001".
+    binding = evaluation._su_binding("01_test|0|2", identity, si, mrows, config)
+    assert not isinstance(binding, UNSUPPORTED_obs), f"binding failed: {binding!r}"
+    row_index, chunk_id, ordinal = binding
+    assert (row_index, chunk_id, ordinal) == (0, "0001", 2), (
+        f"unexpected binding: row_index={row_index}, chunk_id={chunk_id!r}, ordinal={ordinal}"
     )
 
+    # Full observer path with real l3_check.
+    obs = evaluation._yo_observe_key_by_source("01_test|0|2", "елка", si, config)
     assert isinstance(obs, RESTORED_obs), f"expected RESTORED_obs, got {obs!r}"
     assert obs.form == "ёлка", f"unexpected restored form: {obs.form!r}"
 
@@ -2798,8 +2831,40 @@ def test_N2_su_binding_missing_final_chunk(tmp_path, monkeypatch):
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
 
 
-def test_N3_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
-    """N3: duplicate manifest chunk IDs → early MANIFEST_MAPPING_FAILED."""
+def test_N3_su_binding_duplicate_unit_text_insufficient_manifest(tmp_path, monkeypatch):
+    """N3: two source units share the same text; manifest has only one chunk for that text.
+
+    map_section detects TRAILING_SOURCE (second unit unmatched) → MANIFEST_MAPPING_FAILED.
+    _yo_observe_key_by_source also returns UNSUPPORTED_obs via the same path.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+
+    units = [{"type": "text", "text": "Елка."}, {"type": "text", "text": "Елка."}]
+    setup_book(tmp_path, monkeypatch, units)
+    si = evaluation.SourceIndex({"01_test": units})
+
+    # Manifest has only one chunk for "Елка." — the second unit is unmatched.
+    mrows = [{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}]
+
+    resolved = si.resolve("01_test|1|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+
+    result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
+    assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+
+    # Public path: _yo_observe_key_by_source (reads manifest from disk) also fails.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+
+
+def test_N3b_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
+    """N3b: duplicate manifest chunk IDs → early MANIFEST_MAPPING_FAILED (pre-map guard)."""
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
 
     units = [{"type": "text", "text": "Альфа."}, {"type": "text", "text": "Елка."}]
@@ -2836,54 +2901,97 @@ def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
 
 
 def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
-    """N5: chunk_fragments returns >1 fragment → MANIFEST_FRAGMENT_AMBIGUOUS."""
-    import audiobook.synth as _synth
+    """N5: production enum_pause_ms config causes chunk_fragments to return >1 fragment.
+
+    Strict len != 1 guard (CA-R4-1) rejects without monkeypatching chunk_fragments.
+    _yo_observe_key_by_source also returns UNSUPPORTED_obs via the same path.
+    """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
 
-    units = [{"type": "text", "text": "Елка."}]
+    # "Альфа, бета." splits at the enum comma when enum_pause_ms is set.
+    units = [{"type": "text", "text": "Альфа, бета."}]
     setup_book(tmp_path, monkeypatch, units)
     si = evaluation.SourceIndex({"01_test": units})
-    mrows = [{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}]
-
-    monkeypatch.setattr(_synth, "chunk_fragments",
-                        lambda text, cfg: [("Елка", 350, False), (".", 0, False)])
+    mrows = [{"id": "0001", "n": 1, "text": "Альфа, бета.", "pause_after_ms": 0}]
+    config = {"pauses_ms": {"enum_pause_ms": 100}}
 
     resolved = si.resolve("01_test|0|0")
     assert resolved is not None
     identity, _, _ = resolved
 
-    result = evaluation._su_binding("01_test|0|0", identity, si, mrows, {})
+    result = evaluation._su_binding("01_test|0|0", identity, si, mrows, config)
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
-    assert result.reason == "MANIFEST_FRAGMENT_AMBIGUOUS"
+
+    # Public path: _yo_observe_key_by_source (reads manifest from disk) also fails.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Альфа, бета.", "pause_after_ms": 0}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Альфа", si, config)
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
 
 
 def test_N6_su_binding_manifest_changed_between_observations(tmp_path, monkeypatch):
-    """N6: manifest changes (atom mismatch) between initial and fence re-observation.
-    First call → RESTORED_obs; second call (changed manifest) → UNSUPPORTED_obs."""
+    """N6: stale-manifest fence — merge_yo B3 re-check sees changed manifest.
+
+    1. First observation succeeds → RESTORED_obs.
+    2. Build valid YO evidence from observation.
+    3. Manifest changes (atom text mismatch) on disk.
+    4. merge_yo B3 calls _yo_observe_key_by_source → UNSUPPORTED_obs → YO_OBSERVATION_UNSUPPORTED.
+    5. YO ledger unchanged (byte-identical, no write).
+    """
     import audiobook.yo as _yo
-    import audiobook.stress_yo_observer as _obs
-    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
+    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs, compute_prep_config_digest
+    from audiobook.unitmap import AnnotationError
 
     monkeypatch.setattr(_yo, "restore",
                         lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
-    monkeypatch.setattr(_obs, "l3_check", lambda *a: None)
 
     units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
     si = context_for(units).sources
+    config = {"text_prep": {"yo_restore": True}}
 
-    obs1 = evaluation._yo_observe_key_by_source(
-        "01_test|0|0", "Елка", si, {"text_prep": {"yo_restore": True}}
-    )
-    assert isinstance(obs1, RESTORED_obs), f"first call failed: {obs1!r}"
+    obs1 = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, config)
+    assert isinstance(obs1, RESTORED_obs), f"first observation failed: {obs1!r}"
 
-    # Simulate manifest change: atom text mismatch.
+    # Verify second direct call (changed manifest) also fails.
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
     manifest_path.write_text(
         '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n',
         encoding="utf-8",
     )
-
-    obs2 = evaluation._yo_observe_key_by_source(
-        "01_test|0|0", "Елка", si, {"text_prep": {"yo_restore": True}}
-    )
+    obs2 = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, config)
     assert isinstance(obs2, UNSUPPORTED_obs), f"second call did not fail-closed: {obs2!r}"
+
+    # Restore correct manifest for the merge_yo proof.
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+
+    identity = si.resolve("01_test|0|0")[0]
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        obs1.form, list(obs1.indices), obs1.fp, "y",
+        prep_cfg=compute_prep_config_digest(config),
+    )
+
+    # Pre-merge ledger state (not yet written).
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+
+    # Now change manifest before merge_yo is called.
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+
+    # merge_yo B3 re-check sees changed manifest → YO_OBSERVATION_UNSUPPORTED (public rc=1 error).
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo(config, _write_yo_input(tmp_path, [row]))
+
+    # YO ledger unchanged (no write).
+    post_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    assert pre_bytes == post_bytes, "YO ledger was written despite failed merge_yo"
