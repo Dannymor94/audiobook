@@ -696,15 +696,22 @@ class TestGateCBSample:
         setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Тяжесть, ком, напряжение."}])
         evaluation.sample({"pauses_ms": {"enum_pause_ms": 200}})
 
-    def test_B10c_multi_chunk_su_coverage(self, tmp_path, monkeypatch):
-        """B10c: su_set covers all chunks in the manifest (3 unsplit chunks → 3 SUs)."""
+    def test_B10c_missing_middle_chunk_structural_check(self, tmp_path, monkeypatch):
+        """B10c: manifest missing a middle row → map_section structural cross-check → L3_COVERAGE_INCOMPLETE."""
+        from audiobook.stress_yo_observer import NONE_obs
         units = [
             {"type": "text", "text": "Альфа."},
             {"type": "text", "text": "Бета."},
             {"type": "text", "text": "Гамма."},
         ]
         setup_book(tmp_path, monkeypatch, units)
-        evaluation.sample({})
+        manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+        lines = manifest_path.read_text(encoding="utf-8").splitlines()
+        # Remove middle row (Бета.): 2 rows for 3 source units → structural cross-check fails.
+        manifest_path.write_text(lines[0] + "\n" + lines[2] + "\n", encoding="utf-8")
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        with pytest.raises(AnnotationError, match="L3_COVERAGE_INCOMPLETE"):
+            evaluation.sample({})
 
     def test_B10d_enum_plus_unsplit_mixed_coverage(self, tmp_path, monkeypatch):
         """B10d: manifest with both unsplit and enum chunks → R7 covers all SUs."""
@@ -715,13 +722,11 @@ class TestGateCBSample:
         setup_book(tmp_path, monkeypatch, units)
         evaluation.sample({"pauses_ms": {"enum_pause_ms": 200}})
 
-    def test_B12_yo_restore_off_r5_not_checked(self, tmp_path, monkeypatch):
-        """B12: yo_restore=False → R5 skipped; mismatched maps do not raise YO_MAP_STALE."""
+    def test_B12_yo_restore_off_r5_always_checks_provenance(self, tmp_path, monkeypatch):
+        """B12: yo_restore=False → R5 still checks byte provenance; fresh==cached passes without error."""
         setup_book(tmp_path, monkeypatch)
-        import audiobook.stress_yo_observer as syo
-        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
-        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {})
-        evaluation.sample({})  # yo_restore=False → R5 guard skips the check
+        # No .norm.txt files → book_map()={} and compute_fresh_yo_map()={} → R5 passes.
+        evaluation.sample({})  # Must complete without YO_MAP_STALE
 
     def test_B6_stale_manifest_blocks_r6(self, tmp_path, monkeypatch):
         """B6: context-manifest mismatch → PREPARED_WORD_MISMATCH_DISABLED (no longer filtered) → R6 blocks."""

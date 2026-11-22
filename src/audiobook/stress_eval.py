@@ -981,7 +981,7 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
     _verify_sample(record, sample_path)
     _verify_selection_fresh(record, context, config)
     from audiobook.stress_yo_observer import (compute_norm_digest, compute_yo_map_digest,
-                                               compute_prep_config_digest)
+                                               compute_prep_config_digest, compute_fresh_yo_map)
     current_map = _load_yo_map(config)
     current_inputs = {
         "norm_content_sha256": compute_norm_digest(paths.TEXT),
@@ -990,11 +990,9 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
     }
     if record.get("observation_inputs") != current_inputs:
         _error("SAMPLE_STALE")
-    if (config.get("text_prep") or {}).get("yo_restore"):
-        from audiobook.stress_yo_observer import compute_fresh_yo_map
-        fresh_map = compute_fresh_yo_map(paths.TEXT)
-        if fresh_map != current_map:
-            _error("YO_MAP_STALE")
+    from audiobook.yo import book_map as _bm_fence
+    if compute_fresh_yo_map(paths.TEXT) != _bm_fence():
+        _error("YO_MAP_STALE")
     for key, expected in obs_witness.items():
         occ = by_key.get(key)
         if occ is None:
@@ -1058,8 +1056,14 @@ def sample(config):
         _assert_current(context, config)
         if _optional_bytes(gold) != gold_before:
             _error("GOLD_OUTPUT_CHANGED")
+        from audiobook.yo import book_map as _bm_sample
+        from audiobook.stress_yo_observer import compute_fresh_yo_map as _cfym_sample
+        _snap = _bm_sample()
+        def _yo_sample_fence():
+            if _cfym_sample(paths.TEXT) != _snap:
+                _error("YO_MAP_STALE")
         for plan in plans:
-            _apply(plan)
+            _apply(plan, before_publish=_yo_sample_fence)
         return {"sample_fp": selection.record["sample_fp"], "strata": selection.record["strata"],
                 "selected": len(selection.record["keys"]), "todo": len(requested),
                 "one_vowel_aligned": selection.one_vowel_aligned, "duplicates": state.duplicates}
@@ -1249,15 +1253,16 @@ def _is_forward_yo_pair(source_w: str, prep_w: str) -> bool:
     return True
 
 
-def _su_binding(source_key, identity, sources, mrows, config):
-    """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs.
+def _su_resolve_detail(source_key, identity, sources, mrows, config):
+    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs.
 
-    Uses map_section for codepoint-exact structural alignment.
-    Full positional source-atom ↔ manifest-row ↔ prepared-text validation.
-    Fail-closed on any mapping error or inconsistency.
-    Multi-fragment chunks return MANIFEST_FRAGMENT_AMBIGUOUS (use _su_resolve for those).
+    Single authoritative structural resolver. Verifies whole-population fragment token coverage.
+    _su_binding and _su_resolve delegate here; never duplicate this atom walk.
+    Fail-closed on any mapping, alignment, or population-mismatch error.
     """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.synth import chunk_fragments, row_leadin
+    from audiobook.voicecfg import prepare_text
     section, uid, k = _split_key(source_key)
     units = sources.units.get(section, [])
     if not units:
@@ -1299,12 +1304,6 @@ def _su_binding(source_key, identity, sources, mrows, config):
     if row_index is None:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     mrow = mrows[row_index]
-    from audiobook.synth import chunk_fragments, row_leadin
-    from audiobook.voicecfg import prepare_text
-    try:
-        frags = chunk_fragments(mrow["text"], config or {})
-    except Exception:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
     ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
     open_end = mrow.get("open_end", False)
@@ -1325,69 +1324,19 @@ def _su_binding(source_key, identity, sources, mrows, config):
         return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
     if ordinal >= pos:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
-    if len(frags) != 1:
-        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
-    if frags[0][0] != mrow["text"]:
-        return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
-    return row_index, span.chunk_id, ordinal
-
-
-def _su_resolve(source_key, identity, sources, mrows, config):
-    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs.
-
-    Wraps _su_binding for single-fragment chunks; independently resolves multi-fragment chunks.
-    """
-    from audiobook.stress_yo_observer import UNSUPPORTED_obs
-    from audiobook.synth import chunk_fragments, row_leadin
-    from audiobook.voicecfg import prepare_text
-    binding = _su_binding(source_key, identity, sources, mrows, config)
-    if not isinstance(binding, UNSUPPORTED_obs):
-        row_index, chunk_id, ordinal = binding
-        mrow = mrows[row_index]
-        return row_index, chunk_id, ordinal, mrow["text"], row_leadin(mrow), mrow.get("open_end", False)
-    if binding.reason != "MANIFEST_FRAGMENT_AMBIGUOUS":
-        return binding
-    # Multi-fragment: redo atom walk to find ordinal, then map to specific fragment.
-    from audiobook.unitmap import map_section
-    section, uid, k = _split_key(source_key)
-    units = sources.units.get(section, [])
-    if not units:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    try:
-        smap = map_section(units, mrows, section=section)
-    except Exception:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    target_ai, target_match_start, ki = None, None, 0
-    for ai, atom in enumerate(smap.stream):
-        if atom.unit_id != uid:
-            continue
-        for m in _WORD.finditer(atom.text):
-            if ki == k:
-                if m.group() != identity["form_source"]:
-                    return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
-                target_ai, target_match_start = ai, m.start()
-                break
-            ki += 1
-        if target_ai is not None:
-            break
-    if target_ai is None:
-        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
-    span_idx = next((si for si, s in enumerate(smap.spans) if s.atom_start <= target_ai < s.atom_end), None)
-    if span_idx is None:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    span = smap.spans[span_idx]
-    row_index = next((i for i, r in enumerate(mrows) if r.get("id") == span.chunk_id), None)
-    if row_index is None:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    mrow = mrows[row_index]
-    ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
-    ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
     try:
         frags = chunk_fragments(mrow["text"], config or {})
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    if len(frags) == 1:
+        if frags[0][0] != mrow["text"]:
+            return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
+        return row_index, span.chunk_id, ordinal, mrow["text"], row_leadin(mrow), open_end
+    # Multi-fragment: verify whole-population token coverage, then find target fragment.
     from audiobook import leadin as _leadin_mod
     cum = 0
+    target_result = None
+    frag_total = 0
     for frag_text, _pause, is_enum in frags:
         raw_frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
         try:
@@ -1395,10 +1344,41 @@ def _su_resolve(source_key, identity, sources, mrows, config):
         except Exception:
             return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
         cnt = len(_WORD.findall(pre_frag))
-        if cum + cnt > ordinal:
-            return row_index, span.chunk_id, ordinal - cum, raw_frag, _leadin_mod.AUTO, False
+        frag_total += cnt
+        if target_result is None and cum + cnt > ordinal:
+            target_result = (row_index, span.chunk_id, ordinal - cum, raw_frag, _leadin_mod.AUTO, False)
         cum += cnt
-    return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
+    if frag_total != pos:
+        return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
+    if target_result is None:
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
+    return target_result
+
+
+def _su_binding(source_key, identity, sources, mrows, config):
+    """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs (C-A contract).
+
+    Multi-fragment chunks return MANIFEST_FRAGMENT_AMBIGUOUS. Use _su_resolve for those.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.synth import chunk_fragments
+    result = _su_resolve_detail(source_key, identity, sources, mrows, config)
+    if isinstance(result, UNSUPPORTED_obs):
+        return result
+    row_index, chunk_id, ordinal = result[:3]
+    mrow = mrows[row_index]
+    try:
+        frags = chunk_fragments(mrow["text"], config or {})
+    except Exception:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    if len(frags) != 1:
+        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
+    return row_index, chunk_id, ordinal
+
+
+def _su_resolve(source_key, identity, sources, mrows, config):
+    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs."""
+    return _su_resolve_detail(source_key, identity, sources, mrows, config)
 
 
 def _yo_observe_key_by_source(source_key, form_source, sources, config):
@@ -1466,9 +1446,9 @@ def _yo_preflight(context, config):
     yo_restore = bool((config.get("text_prep") or {}).get("yo_restore"))
     cached_map = _load_yo_map(config)
 
-    # R5: compare fresh-bytes map vs mtime-cached map.
-    fresh_map = compute_fresh_yo_map(paths.TEXT) if yo_restore else {}
-    if yo_restore and fresh_map != cached_map:
+    # R5: always verify byte provenance regardless of yo_restore setting.
+    from audiobook.yo import book_map as _bm
+    if compute_fresh_yo_map(paths.TEXT) != _bm():
         _error("YO_MAP_STALE")
 
     # Load all section manifests once for R6 token check and R7 SU enumeration.
@@ -1507,9 +1487,22 @@ def _yo_preflight(context, config):
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
 
+    # R7: build SU_set via map_section structural cross-check; every source atom must be spanned.
     su_set = []
     for section in sorted(sections):
-        for mrow in manifest_rows[section]:
+        mrows_s = manifest_rows[section]
+        units_s = context.sources.units.get(section, [])
+        try:
+            smap_r7 = map_section(units_s, mrows_s, section=section)
+        except (AnnotationError, ValueError):
+            _error("L3_COVERAGE_INCOMPLETE")
+        covered = {ai for sp in smap_r7.spans for ai in range(sp.atom_start, sp.atom_end)}
+        if len(covered) < len(smap_r7.stream):
+            _error("L3_COVERAGE_INCOMPLETE")
+        spanned_ids = {sp.chunk_id for sp in smap_r7.spans}
+        for mrow in mrows_s:
+            if mrow.get("id") not in spanned_ids:
+                continue
             frags = chunk_fragments(mrow["text"], config or {})
             if len(frags) == 1:
                 su_set.append((mrow["text"], row_leadin(mrow), mrow.get("open_end", False)))
@@ -1517,10 +1510,6 @@ def _yo_preflight(context, config):
                 for frag_text, _pause, is_enum in frags:
                     raw = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
                     su_set.append((raw, _leadin.AUTO, False))
-
-    source_unit_count = sum(len(context.sources.units.get(s, [])) for s in sorted(sections))
-    if len(su_set) < source_unit_count:
-        _error("L3_COVERAGE_INCOMPLETE")
 
     l3_errors: list = []
     for raw_text, phrase, open_end in su_set:

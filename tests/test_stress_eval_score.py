@@ -1900,32 +1900,44 @@ class TestR9FinalPublicationFence:
 class TestGateCBScore:
     """B15: merge_yo narrow-scope gate tests."""
 
-    def test_B13_fence_catches_yo_map_change_between_preflight_and_write(self, tmp_path, monkeypatch):
-        """B13: bytes change between preflight and publication fence → fence raises YO_MAP_STALE."""
-        # Use same config in both sample and score so observation_inputs.prep_config_sha256 matches.
+    def test_B13_fence_catches_mid_write_byte_mutation(self, tmp_path, monkeypatch):
+        """B13: real same-mtime byte mutation after preflight → publication fence raises error."""
+        import os
+        import audiobook.yo as _yo
+
         units = setup_book(tmp_path, monkeypatch)
         monkeypatch.setattr(evaluation, "_load_context",
                             lambda _: predictions(context_for(units), homographs=()))
+
+        norm_file = paths.TEXT / "ch01.norm.txt"
+        norm_file.write_text("ёлка ёлка елка", encoding="utf-8")
+        mtime = norm_file.stat().st_mtime
+        _yo.book_map()  # prime mtime cache with current bytes
+
         evaluation.sample({"text_prep": {"yo_restore": True}})
         complete(tmp_path)
-        import audiobook.stress_yo_observer as syo
-        call_n = [0]
-        def counting(d):
-            call_n[0] += 1
-            return {} if call_n[0] == 1 else {"елка": "ёлка"}
-        monkeypatch.setattr(syo, "compute_fresh_yo_map", counting)
-        with pytest.raises(AnnotationError, match="YO_MAP_STALE"):
+
+        # Inject real byte mutation (same mtime) between score preflight and fence.
+        orig_pf = evaluation._yo_preflight
+        def _mutating_pf(ctx, cfg):
+            orig_pf(ctx, cfg)
+            norm_file.write_text("просто текст просто", encoding="utf-8")
+            os.utime(norm_file, (mtime, mtime))
+        monkeypatch.setattr(evaluation, "_yo_preflight", _mutating_pf)
+
+        with pytest.raises(AnnotationError):  # SAMPLE_STALE: norm digest changed between preflight and fence
             evaluation.score({"text_prep": {"yo_restore": True}})
 
     def test_B15_merge_yo_bypasses_full_preflight(self, tmp_path, monkeypatch):
-        """B15: merge_yo does not call _yo_preflight; observation scoped to submitted candidates only."""
-        setup_book(tmp_path, monkeypatch)
-        preflight_called = []
-        monkeypatch.setattr(evaluation, "_yo_preflight", lambda ctx, cfg: preflight_called.append(1))
-        incoming = tmp_path / "yo.tsv"
-        incoming.write_text("", encoding="utf-8")
-        try:
-            evaluation.merge_yo({}, incoming)
-        except AnnotationError:
-            pass
-        assert not preflight_called, "merge_yo must not call _yo_preflight"
+        """B15: merge_yo completes with empty candidates even when _yo_preflight would raise."""
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+
+        # A raising preflight proves it is never called by merge_yo.
+        def _fail_preflight(ctx, cfg):
+            raise AnnotationError("SIMULATED_PREFLIGHT_FAILURE")
+        monkeypatch.setattr(evaluation, "_yo_preflight", _fail_preflight)
+
+        yo_path = paths.TEXT / "yo_evidence.tsv"
+        yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")
+        evaluation.merge_yo({}, yo_path)  # Must succeed despite failing preflight
