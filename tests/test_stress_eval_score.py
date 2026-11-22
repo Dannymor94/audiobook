@@ -12,7 +12,8 @@ import pytest
 
 from audiobook import paths, stress_eval as evaluation, stress_metrics
 from audiobook.unitmap import AnnotationError
-from test_stress_eval_sample import context_for, setup_book
+from test_stress_eval_sample import (context_for, setup_book, cb_snapshot, cb_prime_lock,
+                                     cb_reject, cb_mutate_same_mtime)
 from test_stress_eval_merge import labeled, todo_rows, write_input, snapshot
 
 
@@ -379,7 +380,23 @@ with MonkeyPatch.context() as patch:
  ready(Path(sys.argv[1]),patch)
  complete(Path(sys.argv[1]))
  stress_eval.score({})
- print(score_path().read_bytes().hex())
+ from audiobook import paths
+ artifacts={str(p.relative_to(Path(sys.argv[1]))):p.read_bytes().hex()
+            for base in (paths.TEXT,paths.OUT/"stress"/"eval")
+            for p in base.rglob("*") if p.is_file() and p.suffix in (".tsv",".json")}
+ yo_dir=Path(sys.argv[1])/"yo-case"
+ yo_dir.mkdir()
+ from test_stress_eval_score import cb_real_candidate
+ with MonkeyPatch.context() as yo_patch:
+  cfg,norm,incoming,candidate=cb_real_candidate(yo_dir,yo_patch)
+  stress_eval.sample(cfg)
+  complete(yo_dir)
+  stress_eval.merge_yo(cfg,incoming)
+  stress_eval.score(cfg)
+  artifacts.update({str(p.relative_to(Path(sys.argv[1]))):p.read_bytes().hex()
+                    for base in (paths.TEXT,paths.OUT/"stress"/"eval")
+                    for p in base.rglob("*") if p.is_file() and p.suffix in (".tsv",".json")})
+ print(json.dumps(artifacts,sort_keys=True))
 '''
     outputs = []
     for seed in (1, 2, 3):
@@ -390,6 +407,7 @@ with MonkeyPatch.context() as patch:
         assert run.returncode == 0, run.stderr
         outputs.append(run.stdout)
     assert outputs[0] == outputs[1] == outputs[2]
+    assert len(json.loads(outputs[0])) == 11  # Five ordinary + six with genuine YO evidence.
 
 
 # ---------------------------------------------------------------------------
@@ -1925,8 +1943,8 @@ class TestGateCBScore:
             os.utime(norm_file, (mtime, mtime))
         monkeypatch.setattr(evaluation, "_yo_preflight", _mutating_pf)
 
-        with pytest.raises(AnnotationError):  # SAMPLE_STALE: norm digest changed between preflight and fence
-            evaluation.score({"text_prep": {"yo_restore": True}})
+        cb_reject(tmp_path, "YO_INPUTS_CHANGED",
+                  lambda: evaluation.score({"text_prep": {"yo_restore": True}}), exclude=(norm_file,))
 
     def test_B15_merge_yo_bypasses_full_preflight(self, tmp_path, monkeypatch):
         """B15: merge_yo completes with empty candidates even when _yo_preflight would raise."""
@@ -1941,3 +1959,246 @@ class TestGateCBScore:
         yo_path = paths.TEXT / "yo_evidence.tsv"
         yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")
         evaluation.merge_yo({}, yo_path)  # Must succeed despite failing preflight
+
+
+def cb_real_candidate(tmp_path, monkeypatch, *, units=None):
+    """Real source binding, production prepare_text and restoration_fp; no observation stubs."""
+    from audiobook import yo
+    from audiobook.stress_yo_observer import (RESTORED_obs, compute_norm_digest,
+                                             compute_yo_map_digest, compute_prep_config_digest)
+    units = setup_book(tmp_path, monkeypatch, units if units is not None else [
+        {'type': 'text', 'text': 'Елка.'}, {'type': 'text', 'text': 'Бета.'}])
+    cfg = {'text_prep': {'yo_restore': True}}
+    norm = paths.TEXT / 'fixture.norm.txt'
+    norm.write_text('ёлка ёлка елка', encoding='utf-8')
+    assert yo.book_map() == {'елка': 'ёлка'}
+    ctx = context_for(units)
+    key = '01_test|0|0'
+    identity = ctx.sources.resolve(key)[0]
+    obs = evaluation._yo_observe_key_by_source(key, 'Елка', ctx.sources, cfg)
+    assert isinstance(obs, RESTORED_obs)
+    candidate = _yo_sidecar_row(identity=identity, fp=obs.fp, restored_form=obs.form,
+                                restored_indices='|'.join(map(str, obs.indices)))
+    candidate.update(norm_content_sha256=compute_norm_digest(paths.TEXT),
+                     yo_map_sha256=compute_yo_map_digest(yo.book_map()),
+                     prep_config_sha256=compute_prep_config_digest(cfg))
+    incoming = tmp_path / 'incoming-yo.tsv'
+    incoming.write_text(evaluation.serialize_yo_evidence([candidate]), encoding='utf-8')
+    return cfg, norm, incoming, candidate
+
+
+class TestGateCBR4Score:
+    @pytest.mark.parametrize('noop', [False, True])
+    def test_B13_score_write_and_noop_same_map_byte_drift(self, tmp_path, monkeypatch, noop):
+        from audiobook import yo
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        units = setup_book(tmp_path, monkeypatch)
+        monkeypatch.setattr(evaluation, '_load_context', lambda _: predictions(context_for(units)))
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('просто текст', encoding='utf-8')
+        # Resample with the real input-byte digest, then create a complete ledger.
+        evaluation.sample({})
+        complete(tmp_path)
+        if noop:
+            evaluation.score({})
+        original = evaluation._apply
+        reached = []
+        def apply(plan, *, before_publish=None):
+            def fence():
+                reached.append(plan.path)
+                cb_mutate_same_mtime(norm, 'другой текст')
+                assert compute_fresh_yo_map(paths.TEXT) == yo.book_map() == {}
+                assert before_publish is not None
+                before_publish()
+            return original(plan, before_publish=fence)
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.score({}), exclude=(norm,))
+        assert len(reached) == 1
+
+    @pytest.mark.parametrize('noop', [False, True])
+    def test_B13_merge_yo_write_and_noop_same_map_byte_drift(self, tmp_path, monkeypatch, noop):
+        from audiobook import yo
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        cfg, norm, incoming, candidate = cb_real_candidate(tmp_path, monkeypatch)
+        if noop:
+            assert evaluation.merge_yo(cfg, incoming)['added'] == 1
+        original = evaluation._yo_observe_key_by_source
+        reached = []
+        def observe(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if not reached:
+                reached.append(True)
+                cb_mutate_same_mtime(norm, 'ёлка ёлка елка просто')
+                assert compute_fresh_yo_map(paths.TEXT) == yo.book_map() == {'елка': 'ёлка'}
+            return result
+        monkeypatch.setattr(evaluation, '_yo_observe_key_by_source', observe)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.merge_yo(cfg, incoming), exclude=(norm,))
+        assert reached == [True]
+
+    @pytest.mark.parametrize('failing_su', ['unrelated', 'candidate'])
+    def test_B15_real_candidate_targeted_l3(self, tmp_path, monkeypatch, failing_su):
+        from audiobook import stress_yo_observer as observer
+        cfg, norm, incoming, candidate = cb_real_candidate(tmp_path, monkeypatch)
+        original = observer.l3_check
+        calls = []
+        def l3(raw, *args, **kwargs):
+            calls.append(raw)
+            if raw == ('Бета.' if failing_su == 'unrelated' else 'Елка.'):
+                raise observer.L3Mismatch('COMPOSED_FINAL_MISMATCH')
+            return original(raw, *args, **kwargs)
+        monkeypatch.setattr(observer, 'l3_check', l3)
+        # Demonstrate the unrelated SU actually fails the full population gate.
+        if failing_su == 'unrelated':
+            cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.sample(cfg))
+            assert 'Бета.' in calls
+            calls.clear()
+            before = cb_snapshot(tmp_path)
+            assert evaluation.merge_yo(cfg, incoming) == {'added': 1, 'skipped': 0}
+            assert evaluation.parse_yo_evidence(evaluation._yo_path().read_text(encoding='utf-8')) == [candidate]
+            after = cb_snapshot(tmp_path)
+            assert {k: v for k, v in after.items() if k != evaluation._yo_path().relative_to(tmp_path)} == before
+            assert calls and set(calls) == {'Елка.'}
+            stable = cb_snapshot(tmp_path)
+            assert evaluation.merge_yo(cfg, incoming) == {'added': 0, 'skipped': 1}
+            assert cb_snapshot(tmp_path) == stable
+        else:
+            cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.merge_yo(cfg, incoming))
+            assert calls == ['Елка.']
+
+    def test_B11_source_merge_and_archive_never_call_observer(self, tmp_path, monkeypatch):
+        units = setup_book(tmp_path, monkeypatch)
+        source_row = labeled(evaluation._todo_row_by_key('01_test|0|0', context_for(units).sources))
+        incoming = write_input(tmp_path, [source_row])
+        def forbidden(*args, **kwargs):
+            pytest.fail('source-only operation invoked the YO observer or inventory')
+        monkeypatch.setattr(evaluation, '_load_context', forbidden)
+        monkeypatch.setattr(evaluation, '_yo_preflight', forbidden)
+        monkeypatch.setattr(evaluation, '_yo_observe_key', forbidden)
+        monkeypatch.setattr(evaluation, '_yo_observe_key_by_source', forbidden)
+        from audiobook import stress_yo_observer as observer
+        monkeypatch.setattr(observer, 'observe_su', forbidden)
+        monkeypatch.setattr(observer, 'l3_check', forbidden)
+        assert evaluation.merge_source({}, incoming)['added'] == 1
+        before = cb_snapshot(tmp_path)
+        audit = evaluation.audit_archive_compatibility({})
+        assert audit.status == 'PASS'
+        assert cb_snapshot(tmp_path) == before
+        assert evaluation.merge_source({}, incoming)['skipped'] == 1
+        assert cb_snapshot(tmp_path) == before
+        # Populate the archive through a genuine stale-neighbor source identity.
+        units[0]['text'] = 'Дельта.'
+        current = labeled(evaluation._todo_row_by_key('01_test|0|0', context_for(units).sources))
+        incoming = write_input(tmp_path, [current])
+        result = evaluation.merge_source({}, incoming)
+        assert result['active'] == result['stale'] == 1
+        archive = paths.TEXT / 'stress_gold.archive.tsv'
+        assert evaluation.parse_gold(archive.read_text(encoding='utf-8')) == [source_row]
+        before = cb_snapshot(tmp_path)
+        assert evaluation.audit_archive_compatibility({}).status == 'PASS'
+        assert cb_snapshot(tmp_path) == before
+
+    def test_B16_internal_digest_preserves_public_fingerprints_and_score_schema(self, tmp_path, monkeypatch):
+        from audiobook import stress_yo_observer as observer
+        units = ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        first = evaluation.score({})
+        # File framing is internal; the accepted public norm digest concatenates bytes.
+        # Move a space between adjacent files: public inputs remain byte-for-byte equal.
+        first_file = paths.TEXT / 'a.norm.txt'
+        second_file = paths.TEXT / 'b.norm.txt'
+        first_file.write_text('просто', encoding='utf-8')
+        second_file.write_text(' текст', encoding='utf-8')
+        def internal_digest():
+            source_snapshot = evaluation.SourceIndex()
+            source_snapshot._norm_bytes = {p.name.removesuffix('.norm.txt'): p.read_bytes()
+                                           for p in sorted(paths.TEXT.glob('*.norm.txt'))}
+            return evaluation._source_provenance(source_snapshot)
+        # This intentionally changes public provenance once, then pins it for the comparison.
+        evaluation.sample({})
+        # _load_saved_selection authenticates the public sample; remove obsolete synthetic record.
+        evaluation._sample_path_v2(first['sample_fp']).unlink()
+        first = evaluation.score({})
+        record_path = evaluation._sample_path_v2(first['sample_fp'])
+        before_record = record_path.read_bytes()
+        # Freeze sample/2's public hash construction independently of the selector.
+        canonical = lambda v: json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+        digest = lambda v: hashlib.sha256(canonical(v)).hexdigest()
+        keys = ['01_test|0|0', '01_test|1|0', '01_test|2|0']
+        strata = ['omograph', 'top300', 'name', 'override_covered', 'yo_changed', 'tail']
+        assignments = digest([[key, 'top300'] for key in keys])
+        selected = digest({name: keys if name == 'top300' else [] for name in strata})
+        record = json.loads(before_record)
+        assert first['sample_fp'] == digest({
+            'algo': 'sample/2', 'source_fp': first['source_fp'], 'analysis_fp': first['analysis_fp'],
+            'observation_contract_version': 'yo-observation/1',
+            'observation_inputs': record['observation_inputs'], 'seed': 't15-7/2',
+            'strata_order': strata, 'population': {n: 3 if n == 'top300' else 0 for n in strata},
+            'selected_n': {n: 3 if n == 'top300' else 0 for n in strata},
+            'eligible_assignment_sha256': assignments, 'selected_by_stratum_sha256': selected})
+        public_inputs = observer.compute_norm_digest(paths.TEXT)
+        internal_before = internal_digest()
+        first_file.write_text('просто ', encoding='utf-8')
+        second_file.write_text('текст', encoding='utf-8')
+        assert internal_digest() != internal_before
+        assert observer.compute_norm_digest(paths.TEXT) == public_inputs
+        assert observer.compute_fresh_yo_map(paths.TEXT) == {}
+        assert evaluation.sample({})['sample_fp'] == first['sample_fp']
+        second = evaluation.score({})
+        assert record_path.read_bytes() == before_record
+        assert first == second
+        assert first['schema'] == 'stress-score/2'
+        assert set(first) == {
+            'schema', 'source_fp', 'analysis_fp', 'sample_fp', 'eligible_assignment_sha256',
+            'selected_by_stratum_sha256', 'inventory_generation_fp', 'observation_contract_version',
+            'norm_content_sha256', 'yo_map_sha256', 'prep_config_sha256', 'gold_sha256',
+            'yo_evidence_sha256', 'counts', 'metrics', 'wilson', 'gates', 'status'}
+
+    def test_B13_empty_merge_yo_noop_byte_fence(self, tmp_path, monkeypatch):
+        from audiobook import stress_yo_observer as observer, yo
+        setup_book(tmp_path, monkeypatch)
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('просто текст', encoding='utf-8')
+        incoming = tmp_path / 'empty-yo.tsv'
+        incoming.write_text(evaluation.serialize_yo_evidence([]), encoding='utf-8')
+        original = observer.compute_prep_config_digest
+        changed = []
+        def digest(cfg):
+            result = original(cfg)
+            if not changed:
+                cb_mutate_same_mtime(norm, 'другой текст')
+                assert observer.compute_fresh_yo_map(paths.TEXT) == yo.book_map() == {}
+                changed.append(True)
+            return result
+        monkeypatch.setattr(observer, 'compute_prep_config_digest', digest)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.merge_yo({}, incoming), exclude=(norm,))
+        assert changed == [True]
+
+    @pytest.mark.parametrize('fault', ['altered', 'reordered', 'missing', 'duplicate'])
+    def test_B6_merge_yo_malformed_fragments_never_append(self, tmp_path, monkeypatch, fault):
+        from audiobook import synth
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        text = 'Елка, ком, напряжение.'
+        cfg, norm, incoming, candidate = cb_real_candidate(tmp_path, monkeypatch, units=[{'type': 'text', 'text': text}])
+        cfg['pauses_ms'] = {'enum_pause_ms': 200}
+        # Prep config digest only includes text_prep; the genuine candidate remains current.
+        assert evaluation._yo_observe_key_by_source('01_test|0|0', 'Елка',
+                                                   context_for([{'type': 'text', 'text': text}]).sources, cfg).fp == candidate['restoration_fp']
+        fragments = synth.chunk_fragments(text, cfg)
+        assert len(fragments) == 3
+        broken = list(fragments)
+        if fault == 'altered':
+            broken[1] = ('дом', *fragments[1][1:])
+        elif fault == 'reordered':
+            broken[0], broken[1] = broken[1], broken[0]
+        elif fault == 'missing':
+            del broken[1]
+        else:
+            broken[1] = broken[0]
+        monkeypatch.setattr(synth, 'chunk_fragments', lambda *args: broken)
+        cb_prime_lock()
+        before = cb_snapshot(tmp_path)
+        observed = evaluation._yo_observe_key_by_source('01_test|0|0', 'Елка',
+            context_for([{'type': 'text', 'text': text}]).sources, cfg)
+        assert observed == UNSUPPORTED_obs('FRAGMENT_CONCAT_MISMATCH')
+        assert cb_snapshot(tmp_path) == before
+        cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.merge_yo(cfg, incoming))

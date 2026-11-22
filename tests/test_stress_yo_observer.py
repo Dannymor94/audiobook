@@ -530,3 +530,61 @@ class TestGateCBObserver:
         """B9: single-vowel SU (no е→ё candidate) → l3_check passes, returns NONE_obs."""
         result = _obs("там", "там.", 0, yo_restore=True)
         assert isinstance(result, NONE_obs)
+
+
+class TestGateCBR4Observer:
+    def test_B3_unrelated_map_change_preserves_candidate_fp(self, tmp_path, monkeypatch):
+        from audiobook import yo, paths
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        monkeypatch.setattr(paths, 'TEXT', tmp_path)
+        norm = tmp_path / 'fixture.norm.txt'
+        norm.write_text('рёки рёки реки', encoding='utf-8')
+        first_map = compute_fresh_yo_map(tmp_path)
+        monkeypatch.setattr(yo, 'book_map', lambda: compute_fresh_yo_map(tmp_path))
+        first = _obs('реки', 'реки текут.', 0, yo_map=first_map, yo_restore=True)
+        assert isinstance(first, RESTORED_obs)
+        norm.write_text('рёки рёки реки ёлка ёлка елка', encoding='utf-8')
+        second_map = compute_fresh_yo_map(tmp_path)
+        assert second_map == {**first_map, 'елка': 'ёлка'}
+        assert compute_yo_map_digest(first_map) != compute_yo_map_digest(second_map)
+        second = _obs('реки', 'реки текут.', 0, yo_map=second_map, yo_restore=True)
+        assert first == second
+        assert first.fp == restoration_fp(_identity('s|0|0', 'реки'), 'рёки', [0])
+
+    @pytest.mark.parametrize('source,raw,enabled,reason', [
+        ('реки', 'рёка', True, 'INVALID_EDIT_PATTERN'),
+        ('реки', 'рёкии', True, 'INVALID_EDIT_PATTERN'),
+        ('реки', 'рёги', True, 'INVALID_EDIT_PATTERN'),
+        ('рёки', 'реки', True, 'INVALID_EDIT_PATTERN'),
+        ('реки', 'трава', False, 'PREPARED_WORD_MISMATCH_DISABLED'),
+    ])
+    def test_B8_distinct_unsupported_edits(self, source, raw, enabled, reason):
+        assert _obs(source, raw, 0, yo_restore=enabled) == UNSUPPORTED_obs(reason)
+
+    @pytest.mark.parametrize('phrase', [None, '', 'Вводная фраза'])
+    @pytest.mark.parametrize('open_end', [False, True])
+    def test_B9_final_utf8_and_phrase_value_parity(self, monkeypatch, phrase, open_end):
+        from audiobook import synth
+        from audiobook.voicecfg import prepare_text
+        from audiobook import leadin
+        from audiobook.pronounce import respell
+        raw, cfg, table, sentinel = 'Дом.', {}, {}, ' [end]'
+        pre = prepare_text(raw, cfg, open_end)
+        composed = synth.apply_sentinel(respell(leadin.pad(pre, phrase) if phrase else pre, table), sentinel)
+        final, actual_phrase = synth.prepare_synth_text(raw, cfg, table, sentinel, phrase, open_end)
+        assert final.encode('utf-8') == composed.encode('utf-8')
+        assert type(actual_phrase) is type(phrase)
+        assert actual_phrase == phrase
+        l3_check(raw, cfg, table, sentinel, phrase, open_end)
+        # No eligible multi-vowel word: L3 must still reject a single changed UTF-8 byte.
+        monkeypatch.setattr(synth, 'prepare_synth_text', lambda *a, **k: (final + '!', actual_phrase))
+        with pytest.raises(L3Mismatch, match='^COMPOSED_FINAL_MISMATCH$'):
+            l3_check(raw, cfg, table, sentinel, phrase, open_end)
+
+    @pytest.mark.parametrize('phrase,changed', [(None, ''), ('', None), ('фраза', 'другая')])
+    def test_B9_phrase_type_and_value_divergence(self, monkeypatch, phrase, changed):
+        from audiobook import synth
+        final, _ = synth.prepare_synth_text('Дом.', {}, {}, '', phrase, False)
+        monkeypatch.setattr(synth, 'prepare_synth_text', lambda *a, **k: (final, changed))
+        with pytest.raises(L3Mismatch, match='^COMPOSED_PHRASE_MISMATCH$'):
+            l3_check('Дом.', {}, {}, '', phrase, False)

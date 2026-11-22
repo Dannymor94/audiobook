@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -771,3 +772,246 @@ class TestGateCBSample:
         assert obs["prep_config_sha256"] == "cc" * 32
         assert len(record["sample_fp"]) == 64
         assert record["sample_fp"] != obs["yo_map_sha256"]  # fp is a composite, not a single digest
+
+
+# R4 oracles deliberately retain RED failures until the CORE commit is integrated.
+def cb_snapshot(root, *, exclude=()):
+    """Include every final/protected/temp file, including hidden transaction files."""
+    return {p.relative_to(root): p.read_bytes() for p in root.rglob('*')
+            if p.is_file() and p not in exclude}
+
+
+def cb_prime_lock():
+    evaluation.release_eval_lock(evaluation.acquire_eval_lock())
+
+
+def cb_reject(root, code, call, *, exclude=()):
+    cb_prime_lock()
+    before = cb_snapshot(root, exclude=exclude)
+    from unittest.mock import patch
+    with patch.object(evaluation.os, 'replace', wraps=os.replace) as publish:
+        with pytest.raises(AnnotationError, match='^unitmap: ' + code + '$') as error:
+            call()
+        assert error.value.code == code
+        assert cb_snapshot(root, exclude=exclude) == before
+        publish.assert_not_called()
+
+
+def cb_mutate_same_mtime(path, content):
+    before = path.stat()
+    old = path.read_bytes()
+    path.write_text(content, encoding='utf-8')
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.read_bytes() != old
+    assert path.stat().st_mtime_ns == before.st_mtime_ns
+
+
+class TestGateCBR4Sample:
+    @pytest.mark.parametrize('enabled', [False, True])
+    def test_B1_B12_stale_real_bytes_even_when_disabled(self, tmp_path, monkeypatch, enabled):
+        from audiobook import yo
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        setup_book(tmp_path, monkeypatch)
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('ёлка ёлка елка', encoding='utf-8')
+        assert yo.book_map() == {'елка': 'ёлка'}
+        cb_mutate_same_mtime(norm, 'просто текст')
+        assert yo.book_map() == {'елка': 'ёлка'}
+        assert compute_fresh_yo_map(paths.TEXT) == {}
+        cb_reject(tmp_path, 'YO_MAP_STALE', lambda: evaluation.sample(
+            {'text_prep': {'yo_restore': enabled}}))
+
+    def test_B2_changed_bytes_refreshed_runtime_map_positive(self, tmp_path, monkeypatch):
+        from audiobook import yo
+        from audiobook.stress_yo_observer import compute_fresh_yo_map, compute_norm_digest
+        setup_book(tmp_path, monkeypatch)
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('просто текст', encoding='utf-8')
+        assert yo.book_map() == {}
+        old_digest = compute_norm_digest(paths.TEXT)
+        cb_mutate_same_mtime(norm, 'ёлка ёлка елка')
+        assert yo.book_map() == {}  # Same cache key, genuinely stale.
+        yo._book_map.cache_clear()
+        assert yo.book_map() == compute_fresh_yo_map(paths.TEXT) == {'елка': 'ёлка'}
+        result = evaluation.sample({'text_prep': {'yo_restore': True}})
+        record = json.loads(evaluation._sample_path_v2(result['sample_fp']).read_text(encoding='utf-8'))
+        assert record['observation_inputs']['norm_content_sha256'] == compute_norm_digest(paths.TEXT)
+        assert compute_norm_digest(paths.TEXT) != old_digest
+        assert result['selected'] == 3
+
+    @pytest.mark.parametrize('operation', ['sample', 'score'])
+    def test_B4_unselected_eligible_unsupported(self, tmp_path, monkeypatch, operation):
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        # One form, 101 occurrences: the top300 stratum has target 60.
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': 'Бета.'}] * 101)
+        context = context_for(units)
+        selection = evaluation._selection(context, {})
+        unselected = sorted({r.source_key for r in context.rows} - set(selection.record['keys']))
+        assert unselected
+        if operation == 'score':
+            evaluation.sample({})
+        original = evaluation._yo_observe_key
+        visited = []
+        def observe(occ, sources, cfg):
+            visited.append(occ.source_key)
+            if occ.source_key == unselected[0]:
+                return UNSUPPORTED_obs('ORDINAL_UNRESOLVED')
+            return original(occ, sources, cfg)
+        monkeypatch.setattr(evaluation, '_yo_observe_key', observe)
+        cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: getattr(evaluation, operation)({}))
+        assert unselected[0] in visited
+
+    @pytest.mark.parametrize('mutation', ['altered', 'reordered', 'missing', 'duplicate'])
+    def test_B6_exact_fragment_concatenation(self, tmp_path, monkeypatch, mutation):
+        from audiobook import synth
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': 'Тяжесть, ком, напряжение.'}])
+        ctx = context_for(units)
+        cfg = {'pauses_ms': {'enum_pause_ms': 200}}
+        original = synth.chunk_fragments(units[0]['text'], cfg)
+        assert len(original) == 3
+        broken = list(original)
+        if mutation == 'altered':
+            broken[1] = ('дом?', original[1][1], original[1][2])
+        elif mutation == 'reordered':
+            broken[0], broken[1] = broken[1], broken[0]
+        elif mutation == 'missing':
+            del broken[1]
+        else:
+            broken[1] = broken[0]
+        monkeypatch.setattr(synth, 'chunk_fragments', lambda text, config: broken)
+        manifest = [{'id': '0001', 'n': 1, 'text': units[0]['text'], 'pause_after_ms': 900}]
+        before = cb_snapshot(tmp_path)
+        # Every source token must authenticate the whole concatenation, not just its own fragment.
+        for occ in ctx.rows:
+            identity = ctx.sources.resolve(occ.source_key)[0]
+            result = evaluation._su_resolve(occ.source_key, identity, ctx.sources, manifest, cfg)
+            assert result == UNSUPPORTED_obs('FRAGMENT_CONCAT_MISMATCH')
+        assert cb_snapshot(tmp_path) == before
+
+    def test_B5_repeated_token_exact_source_and_local_ordinal(self, tmp_path, monkeypatch):
+        from audiobook import leadin
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': 'Бета Бета, ком, напряжение.'}])
+        ctx = context_for(units)
+        cfg = {'pauses_ms': {'enum_pause_ms': 200}}
+        rows = [{'id': '0001', 'n': 1, 'text': units[0]['text'], 'pause_after_ms': 900}]
+        expected = [(0, 'Бета Бета'), (1, 'Бета Бета'), (0, 'ком'), (0, 'напряжение.')]
+        for occ, (ordinal, raw) in zip(ctx.rows, expected, strict=True):
+            identity = ctx.sources.resolve(occ.source_key)[0]
+            result = evaluation._su_resolve(occ.source_key, identity, ctx.sources, rows, cfg)
+            assert result == (0, '0001', ordinal, raw, leadin.AUTO, False)
+        # Source key points to the second repeated word. In-range ordinal 0 must not pass.
+        wrong = type(ctx.rows[1])(**{**asdict(ctx.rows[1]), "su_token_index": 0})
+        monkeypatch.setattr(evaluation, '_load_context', lambda _: evaluation.EvalContext(
+            (ctx.rows[0], wrong, *ctx.rows[2:]), ctx.source_fp, ctx.analysis_fp, ctx.sources,
+            ctx.homographs, ctx.names, ctx.generation))
+        cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.sample(cfg))
+
+    @pytest.mark.parametrize('fault', ['missing', 'reordered'])
+    def test_B10c_required_fragment_membership(self, tmp_path, monkeypatch, fault):
+        from audiobook import synth
+        from audiobook.stress_yo_observer import NONE_obs
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': 'Тяжесть, ком, напряжение.'}])
+        cfg = {'pauses_ms': {'enum_pause_ms': 200}}
+        frags = synth.chunk_fragments(units[0]['text'], cfg)
+        assert len(frags) == 3
+        broken = [frags[0], frags[2]] if fault == 'missing' else list(reversed(frags))
+        # Isolate the independently required R7 check from occurrence-level R6.
+        monkeypatch.setattr(evaluation, '_yo_observe_key', lambda *args: NONE_obs())
+        monkeypatch.setattr(synth, 'chunk_fragments', lambda *args: broken)
+        cb_reject(tmp_path, 'L3_COVERAGE_INCOMPLETE', lambda: evaluation.sample(cfg))
+
+    @pytest.mark.parametrize('texts', [ ['Просто текст.'], ['Тяжесть, ком, напряжение.'],
+                                      ['Дом.', 'Тяжесть, ком, напряжение.', 'Бета.'] ])
+    def test_B9_B10_exact_production_su_l3_calls(self, tmp_path, monkeypatch, texts):
+        from audiobook import synth, stress_yo_observer as observer
+        from audiobook.stress_yo_observer import NONE_obs
+        from audiobook import leadin
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': t} for t in texts])
+        cfg = {'pauses_ms': {'enum_pause_ms': 200}, 'model': {'sentinel': ' [end]'}}
+        # Literal expected identities, independent of the evaluator's enumeration.
+        manifest_path = paths.OUT / 'sections' / '01_test' / 'manifest.jsonl'
+        mrows = [json.loads(line) for line in manifest_path.read_text(encoding='utf-8').splitlines()]
+        for mrow in mrows:
+            if mrow['text'] != 'Тяжесть, ком, напряжение.':
+                mrow.update(leadin='Вводная фраза', open_end=True)
+        manifest_path.write_text(''.join(json.dumps(r) + '\n' for r in mrows), encoding='utf-8')
+        expected = []
+        for text in texts:
+            if text == 'Тяжесть, ком, напряжение.':
+                expected.extend((raw, leadin.AUTO, False) for raw in ('Тяжесть', 'ком', 'напряжение.'))
+            else:
+                expected.append((text, 'Вводная фраза', True))
+        # Capture actual production preparation with a fake engine; no models or audio files.
+        production = []
+        original_prepare = synth.prepare_synth_text
+        class Prepared(Exception):
+            pass
+        def capture(raw, config, table, sentinel, phrase=leadin.AUTO, open_end=False):
+            production.append((raw, phrase, open_end))
+            if len(production) == len(expected):
+                raise Prepared()
+            return original_prepare(raw, config, table, sentinel, phrase, open_end)
+        # _synth_one_chunk would call the engine; a tiny local engine stops before any render.
+        class Engine:
+            def synth(self, *args, **kwargs):
+                import numpy as np
+                return np.zeros(1, dtype=np.float32)
+        monkeypatch.setattr(synth, 'prepare_synth_text', capture)
+        with pytest.raises(Prepared):
+            for mrow in mrows:
+                synth._synth_one_chunk({**mrow, 'hash': '0' * 40}, cfg, {}, ' [end]', Engine(), 0)
+        monkeypatch.setattr(synth, 'prepare_synth_text', original_prepare)
+        assert production == expected
+        calls = []
+        original_l3 = observer.l3_check
+        def record(raw, config, table, sentinel, phrase, open_end):
+            calls.append((raw, phrase, open_end))
+            return original_l3(raw, config, table, sentinel, phrase, open_end)
+        monkeypatch.setattr(observer, 'l3_check', record)
+        monkeypatch.setattr(evaluation, '_yo_observe_key', lambda *args: NONE_obs())
+        evaluation._yo_preflight(context_for(units), cfg)
+        assert calls == production == expected
+
+    @pytest.mark.parametrize('noop,boundary', [(False, 0), (False, 1), (False, 2), (False, 3),
+                                               (True, 0), (True, 1), (True, 2)])
+    def test_B13_sample_every_write_and_noop(self, tmp_path, monkeypatch, boundary, noop):
+        from audiobook import yo
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        setup_book(tmp_path, monkeypatch)
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('просто текст', encoding='utf-8')
+        assert yo.book_map() == {}
+        if noop:
+            evaluation.sample({})
+        original = evaluation._apply
+        visited = []
+        def apply(plan, *, before_publish=None):
+            index = len(visited)
+            visited.append(plan.path)
+            def fence():
+                if index == boundary:
+                    cb_mutate_same_mtime(norm, 'другой текст')
+                    assert compute_fresh_yo_map(paths.TEXT) == yo.book_map() == {}
+                if before_publish:
+                    before_publish()
+            return original(plan, before_publish=fence)
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.sample({}), exclude=(norm,))
+        assert len(visited) == boundary + 1
+        assert len(visited) == boundary + 1
+
+    @pytest.mark.parametrize('prepared', ['Бета Гамма.', ''])
+    def test_B7_cyrillic_token_count_mismatch(self, tmp_path, monkeypatch, prepared):
+        from audiobook import voicecfg
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        units = setup_book(tmp_path, monkeypatch, [{'type': 'text', 'text': 'Бета.'}])
+        ctx = context_for(units)
+        occ = ctx.rows[0]
+        identity = ctx.sources.resolve(occ.source_key)[0]
+        monkeypatch.setattr(voicecfg, 'prepare_text', lambda *a, **k: prepared)
+        before = cb_snapshot(tmp_path)
+        result = evaluation._su_resolve(occ.source_key, identity, ctx.sources,
+                                       [{'id': '0001', 'n': 1, 'text': 'Бета.', 'pause_after_ms': 900}], {})
+        assert result == UNSUPPORTED_obs('PREP_TOKEN_MISMATCH')
+        assert cb_snapshot(tmp_path) == before
