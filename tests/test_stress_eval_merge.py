@@ -2656,13 +2656,13 @@ def test_normative_A15_synthetic_resolver_five_field_identity_match(tmp_path, mo
 def test_SU1_su_binding_resolves_duplicate_unit_text_calls_observe_su(tmp_path, monkeypatch):
     """SU1: map_section resolves uid=2 (Елка.) even when uid=1 shares the same text.
 
-    RED (old code): text-equality matching → MANIFEST_UNIT_AMBIGUOUS.
-    GREEN (new code): structural binding → (row_index=2, chunk_id="0003", ordinal=0).
-    L3 runs for real (not monkeypatched): open_end=True from row "0003" is exercised.
-    merge_yo ledger verdict proves the full end-to-end path.
+    CA-R5-2: rows 0002/0003 open_end values yield demonstrably different L3 bytes
+    (precondition); direct observe_su equivalence for row-0003; merge_yo preserves
+    nonempty pre-existing ledger prefix after two sequential calls.
     """
     import audiobook.yo as _yo
-    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs
+    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs, compute_prep_config_digest
+    from audiobook.synth import row_leadin
 
     monkeypatch.setattr(_yo, "restore",
                         lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
@@ -2686,35 +2686,97 @@ def test_SU1_su_binding_resolves_duplicate_unit_text_calls_observe_su(tmp_path, 
         {"id": "0002", "n": 2, "text": "Елка.", "pause_after_ms": 900},
         {"id": "0003", "n": 3, "text": "Елка.", "open_end": True, "pause_after_ms": 0},
     ]
-    config = {"text_prep": {"yo_restore": True}}
+    config = {"text_prep": {"yo_restore": True, "open_end": "ellipsis"}}
 
-    resolved = si.resolve("01_test|2|0")
-    assert resolved is not None
-    identity, _, _ = resolved
+    # --- CA-R5-2 precondition: rows 0002 and 0003 compose to different L3 bytes ---
+    from audiobook.voicecfg import prepare_text
+    from audiobook.pronounce import respell, load_table
+    from audiobook.synth import apply_sentinel
+    from audiobook import leadin as _leadin
+    table = load_table(paths.TEXT / "pronounce.yaml")
+    sentinel = (config.get("model") or {}).get("sentinel", "")
+    # row 0002: open_end=False → prepare_text produces "Ёлка." (period kept, no ellipsis)
+    pre_2 = prepare_text(mrows[1]["text"], config, False)
+    p_2 = _leadin.fires(pre_2, config)
+    l3_2 = apply_sentinel(respell(_leadin.pad(pre_2, p_2) if p_2 else pre_2, table), sentinel).encode("utf-8")
+    # row 0003: open_end=True + ellipsis mode → prepare_text produces "Ёлка.…"
+    pre_3 = prepare_text(mrows[2]["text"], config, True)
+    p_3 = _leadin.fires(pre_3, config)
+    l3_3 = apply_sentinel(respell(_leadin.pad(pre_3, p_3) if p_3 else pre_3, table), sentinel).encode("utf-8")
+    assert l3_2 != l3_3, (
+        f"L3 precondition failed: rows 0002 and 0003 must compose to different bytes"
+        f"\n  0002: {l3_2!r}\n  0003: {l3_3!r}"
+    )
 
     # Structural binding: uid=2 → row_index=2, chunk_id="0003", ordinal=0.
-    binding = evaluation._su_binding("01_test|2|0", identity, si, mrows, config)
+    resolved2 = si.resolve("01_test|2|0")
+    assert resolved2 is not None
+    identity2, _, _ = resolved2
+    binding = evaluation._su_binding("01_test|2|0", identity2, si, mrows, config)
     assert not isinstance(binding, UNSUPPORTED_obs), f"binding failed: {binding!r}"
     row_index, chunk_id, ordinal = binding
     assert (row_index, chunk_id, ordinal) == (2, "0003", 0), (
         f"unexpected binding: row_index={row_index}, chunk_id={chunk_id!r}, ordinal={ordinal}"
     )
 
-    # Full observer path with real l3_check (open_end=True from "0003").
-    obs = evaluation._yo_observe_key_by_source("01_test|2|0", "Елка", si, config)
-    assert isinstance(obs, RESTORED_obs), f"expected RESTORED_obs, got {obs!r}"
-    assert obs.form == "Ёлка", f"unexpected restored form: {obs.form!r}"
+    # Indirect observation via _yo_observe_key_by_source (reads disk manifest).
+    obs_indirect = evaluation._yo_observe_key_by_source("01_test|2|0", "Елка", si, config)
+    assert isinstance(obs_indirect, RESTORED_obs), f"expected RESTORED_obs, got {obs_indirect!r}"
+    assert obs_indirect.form == "Ёлка", f"unexpected restored form: {obs_indirect.form!r}"
 
-    # merge_yo ledger verdict: full end-to-end proof.
-    from audiobook.stress_yo_observer import compute_prep_config_digest
-    row = _yo_row(
-        identity["source_key"], identity["form_source"],
-        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
-        obs.form, list(obs.indices), obs.fp, "y",
+    # --- CA-R5-2: direct observe_su equivalence for row-0003 ---
+    from audiobook.stress_yo_observer import observe_su
+    yo_map = evaluation._load_yo_map(config)
+    obs_direct = observe_su(
+        source_token="Елка",
+        raw_text=mrows[2]["text"],
+        token_idx=0,
+        config=config,
+        yo_map=yo_map,
+        table=table,
+        sentinel=sentinel,
+        phrase=row_leadin(mrows[2]),
+        open_end=mrows[2].get("open_end", False),
+        source_identity=identity2,
+    )
+    assert isinstance(obs_direct, RESTORED_obs), f"direct observe_su failed: {obs_direct!r}"
+    assert obs_indirect.form == obs_direct.form, (
+        f"form mismatch: indirect={obs_indirect.form!r} direct={obs_direct.form!r}"
+    )
+    assert obs_indirect.fp == obs_direct.fp, (
+        f"fp mismatch: indirect={obs_indirect.fp!r} direct={obs_direct.fp!r}"
+    )
+
+    # --- CA-R5-2: merge_yo with row_A (uid=1, "0002") establishes nonempty prefix ---
+    obs_A = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, config)
+    assert isinstance(obs_A, RESTORED_obs), f"row_A observation failed: {obs_A!r}"
+    identity_A = si.resolve("01_test|1|0")[0]
+    row_A = _yo_row(
+        identity_A["source_key"], identity_A["form_source"],
+        identity_A["unit_text_sha256"], identity_A["unit_kind"], identity_A["context_sha256"],
+        obs_A.form, list(obs_A.indices), obs_A.fp, "y",
         prep_cfg=compute_prep_config_digest(config),
     )
-    result = evaluation.merge_yo(config, _write_yo_input(tmp_path, [row]))
-    assert result["added"] == 1 and result["skipped"] == 0, f"merge_yo failed: {result}"
+    result_A = evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_A], "yo_A.tsv"))
+    assert result_A["added"] == 1, f"row_A merge failed: {result_A}"
+
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    prefix_bytes = yo_path.read_bytes()
+    assert prefix_bytes, "pre-existing ledger must be nonempty after row_A"
+
+    # merge_yo with row_B (uid=2, "0003") must preserve the nonempty prefix.
+    row_B = _yo_row(
+        identity2["source_key"], identity2["form_source"],
+        identity2["unit_text_sha256"], identity2["unit_kind"], identity2["context_sha256"],
+        obs_indirect.form, list(obs_indirect.indices), obs_indirect.fp, "y",
+        prep_cfg=compute_prep_config_digest(config),
+    )
+    result_B = evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_B], "yo_B.tsv"))
+    assert result_B["added"] == 1, f"row_B merge failed: {result_B}"
+    after_bytes = yo_path.read_bytes()
+    assert after_bytes.startswith(prefix_bytes), (
+        "merge_yo did not preserve nonempty pre-existing ledger prefix"
+    )
 
 
 # SU2 — multi-word unit: ordinal at non-zero position
@@ -2798,8 +2860,12 @@ def test_SU3_su_binding_all_tokens_match_wordprov_structural(tmp_path, monkeypat
 
 def test_N1_su_binding_stale_manifest_unit_insertion(tmp_path, monkeypatch):
     """N1: manifest becomes stale when a source unit is inserted before the target.
-    Atom mismatch → MANIFEST_MAPPING_FAILED."""
+
+    Atom mismatch → MANIFEST_MAPPING_FAILED (internal); YO_OBSERVATION_UNSUPPORTED (public rc=1).
+    Pre-existing ledger unchanged.
+    """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
     units_new = [{"type": "text", "text": "Вставка."}, {"type": "text", "text": "Елка."}]
@@ -2812,11 +2878,35 @@ def test_N1_su_binding_stale_manifest_unit_insertion(tmp_path, monkeypatch):
 
     result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_MAPPING_FAILED", f"unexpected reason: {result.reason!r}"
+
+    # Public path: disk manifest (written by setup_book as single Елка chunk) → UNSUPPORTED_obs.
+    obs = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+
+    # merge_yo public error (rc=1); pre-existing ledger unchanged.
+    monkeypatch.setattr(evaluation, "_load_sources", lambda _: si)
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n1.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
 def test_N2_su_binding_missing_final_chunk(tmp_path, monkeypatch):
-    """N2: manifest is missing the last chunk → TRAILING_SOURCE → MANIFEST_MAPPING_FAILED."""
+    """N2: manifest is missing the last chunk → TRAILING_SOURCE → MANIFEST_MAPPING_FAILED.
+
+    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
+    """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     units = [{"type": "text", "text": "Альфа."}, {"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
@@ -2829,15 +2919,40 @@ def test_N2_su_binding_missing_final_chunk(tmp_path, monkeypatch):
 
     result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_MAPPING_FAILED", f"unexpected reason: {result.reason!r}"
+
+    # Public path: write stale manifest (only Альфа) to disk.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+
+    # merge_yo public error (rc=1); pre-existing ledger unchanged.
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n2.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
 def test_N3_su_binding_duplicate_unit_text_insufficient_manifest(tmp_path, monkeypatch):
     """N3: two source units share the same text; manifest has only one chunk for that text.
 
-    map_section detects TRAILING_SOURCE (second unit unmatched) → MANIFEST_MAPPING_FAILED.
-    _yo_observe_key_by_source also returns UNSUPPORTED_obs via the same path.
+    map_section detects TRAILING_SOURCE → MANIFEST_MAPPING_FAILED (internal).
+    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
     """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     units = [{"type": "text", "text": "Елка."}, {"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
@@ -2852,6 +2967,7 @@ def test_N3_su_binding_duplicate_unit_text_insufficient_manifest(tmp_path, monke
 
     result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_MAPPING_FAILED", f"unexpected reason: {result.reason!r}"
 
     # Public path: _yo_observe_key_by_source (reads manifest from disk) also fails.
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
@@ -2862,10 +2978,28 @@ def test_N3_su_binding_duplicate_unit_text_insufficient_manifest(tmp_path, monke
     obs = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, {})
     assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
 
+    # merge_yo public error (rc=1); manifest on disk is already stale (single Елка chunk).
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n3.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
+
 
 def test_N3b_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
-    """N3b: duplicate manifest chunk IDs → early MANIFEST_MAPPING_FAILED (pre-map guard)."""
+    """N3b: duplicate manifest chunk IDs → early MANIFEST_MAPPING_FAILED (pre-map guard).
+
+    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
+    """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     units = [{"type": "text", "text": "Альфа."}, {"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
@@ -2881,11 +3015,40 @@ def test_N3b_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
 
     result = evaluation._su_binding("01_test|1|0", identity, si, mrows, {})
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_MAPPING_FAILED", f"unexpected reason: {result.reason!r}"
+
+    # Public path: write manifest with duplicate IDs to disk.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900}\n'
+        '{"id": "0001", "n": 2, "text": "Елка.", "pause_after_ms": 0}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+
+    # merge_yo public error (rc=1); pre-existing ledger unchanged.
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n3b.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
 def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
-    """N4: manifest row without required n field → MANIFEST_ORDER → MANIFEST_MAPPING_FAILED."""
+    """N4: manifest row without required n field → MANIFEST_ORDER → MANIFEST_MAPPING_FAILED.
+
+    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
+    """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
@@ -2898,15 +3061,40 @@ def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
 
     result = evaluation._su_binding("01_test|0|0", identity, si, mrows, {})
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_MAPPING_FAILED", f"unexpected reason: {result.reason!r}"
+
+    # Public path: write manifest with missing n field to disk.
+    manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+    manifest_path.write_text(
+        '{"id": "0001", "text": "Елка.", "pause_after_ms": 900}\n',
+        encoding="utf-8",
+    )
+    obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, {})
+    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+
+    # merge_yo public error (rc=1); pre-existing ledger unchanged.
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n4.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
 def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
     """N5: production enum_pause_ms config causes chunk_fragments to return >1 fragment.
 
-    Strict len != 1 guard (CA-R4-1) rejects without monkeypatching chunk_fragments.
-    _yo_observe_key_by_source also returns UNSUPPORTED_obs via the same path.
+    len(frags)!=1 guard rejects with MANIFEST_FRAGMENT_AMBIGUOUS (CA-R5-1).
+    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
     """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError
 
     # "Альфа, бета." splits at the enum comma when enum_pause_ms is set.
     units = [{"type": "text", "text": "Альфа, бета."}]
@@ -2921,6 +3109,7 @@ def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
 
     result = evaluation._su_binding("01_test|0|0", identity, si, mrows, config)
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
+    assert result.reason == "MANIFEST_FRAGMENT_AMBIGUOUS", f"unexpected reason: {result.reason!r}"
 
     # Public path: _yo_observe_key_by_source (reads manifest from disk) also fails.
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
@@ -2931,67 +3120,104 @@ def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
     obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Альфа", si, config)
     assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
 
+    # merge_yo public error (rc=1) using key "01_test|0|1" ("бета" has е→ё path as "бёта").
+    # Manifest on disk still has the fragmented chunk.
+    resolved_1 = si.resolve("01_test|0|1")
+    assert resolved_1 is not None
+    identity_1, _, _ = resolved_1
+    fp_1 = _restoration_fp_for(identity_1, "бёта", [0])  # 'е' is vowel_ordinal=0 in "бета"
+    row_1 = _yo_row(
+        identity_1["source_key"], identity_1["form_source"],
+        identity_1["unit_text_sha256"], identity_1["unit_kind"], identity_1["context_sha256"],
+        "бёта", [0], fp_1, "y",
+    )
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+        evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_1], "yo_n5.tsv"))
+    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
+
 
 def test_N6_su_binding_manifest_changed_between_observations(tmp_path, monkeypatch):
-    """N6: stale-manifest fence — merge_yo B3 re-check sees changed manifest.
+    """N6: manifest mutates INSIDE _yo_fence (after B3 passes, before publication).
 
-    1. First observation succeeds → RESTORED_obs.
-    2. Build valid YO evidence from observation.
-    3. Manifest changes (atom text mismatch) on disk.
-    4. merge_yo B3 calls _yo_observe_key_by_source → UNSUPPORTED_obs → YO_OBSERVATION_UNSUPPORTED.
-    5. YO ledger unchanged (byte-identical, no write).
+    CA-R5-3: merge_yo B3 passes (call 1); inside _yo_fence the manifest is changed
+    (call 2); fence re-observation returns UNSUPPORTED_obs → YO_CANDIDATE_STALE (not
+    YO_OBSERVATION_UNSUPPORTED from B3). YO ledger byte-identical to pre-existing state.
     """
     import audiobook.yo as _yo
-    from audiobook.stress_yo_observer import RESTORED_obs, UNSUPPORTED_obs, compute_prep_config_digest
+    from audiobook.stress_yo_observer import RESTORED_obs, compute_prep_config_digest
     from audiobook.unitmap import AnnotationError
 
     monkeypatch.setattr(_yo, "restore",
                         lambda text, mapping=None: text.replace("Елка", "Ёлка").replace("елка", "ёлка"))
 
-    units = setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    units = setup_book(tmp_path, monkeypatch, [
+        {"type": "text", "text": "Альфа."},
+        {"type": "text", "text": "Елка."},
+        {"type": "text", "text": "Елка."},
+    ])
     si = context_for(units).sources
-    config = {"text_prep": {"yo_restore": True}}
+    config = {"text_prep": {"yo_restore": True, "open_end": "ellipsis"}}
 
-    obs1 = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, config)
-    assert isinstance(obs1, RESTORED_obs), f"first observation failed: {obs1!r}"
-
-    # Verify second direct call (changed manifest) also fails.
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
     manifest_path.write_text(
-        '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n',
-        encoding="utf-8",
-    )
-    obs2 = evaluation._yo_observe_key_by_source("01_test|0|0", "Елка", si, config)
-    assert isinstance(obs2, UNSUPPORTED_obs), f"second call did not fail-closed: {obs2!r}"
-
-    # Restore correct manifest for the merge_yo proof.
-    manifest_path.write_text(
-        '{"id": "0001", "n": 1, "text": "Елка.", "pause_after_ms": 900}\n',
+        '{"id": "0001", "n": 1, "text": "Альфа.", "pause_after_ms": 900}\n'
+        '{"id": "0002", "n": 2, "text": "Елка.", "pause_after_ms": 900}\n'
+        '{"id": "0003", "n": 3, "text": "Елка.", "open_end": true, "pause_after_ms": 0}\n',
         encoding="utf-8",
     )
 
-    identity = si.resolve("01_test|0|0")[0]
-    row = _yo_row(
-        identity["source_key"], identity["form_source"],
-        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
-        obs1.form, list(obs1.indices), obs1.fp, "y",
+    # Establish pre-existing ledger with row_A (uid=1, chunk "0002").
+    obs_A = evaluation._yo_observe_key_by_source("01_test|1|0", "Елка", si, config)
+    assert isinstance(obs_A, RESTORED_obs), f"row_A observation failed: {obs_A!r}"
+    identity_A = si.resolve("01_test|1|0")[0]
+    row_A = _yo_row(
+        identity_A["source_key"], identity_A["form_source"],
+        identity_A["unit_text_sha256"], identity_A["unit_kind"], identity_A["context_sha256"],
+        obs_A.form, list(obs_A.indices), obs_A.fp, "y",
+        prep_cfg=compute_prep_config_digest(config),
+    )
+    result_A = evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_A], "yo_A.tsv"))
+    assert result_A["added"] == 1, f"pre-existing ledger setup failed: {result_A}"
+
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    pre_bytes = yo_path.read_bytes()
+    assert pre_bytes  # nonempty pre-existing ledger
+
+    # Build row_B (uid=2, chunk "0003").
+    obs_B = evaluation._yo_observe_key_by_source("01_test|2|0", "Елка", si, config)
+    assert isinstance(obs_B, RESTORED_obs), f"row_B observation failed: {obs_B!r}"
+    identity_B = si.resolve("01_test|2|0")[0]
+    row_B = _yo_row(
+        identity_B["source_key"], identity_B["form_source"],
+        identity_B["unit_text_sha256"], identity_B["unit_kind"], identity_B["context_sha256"],
+        obs_B.form, list(obs_B.indices), obs_B.fp, "y",
         prep_cfg=compute_prep_config_digest(config),
     )
 
-    # Pre-merge ledger state (not yet written).
-    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    # Intercept _yo_observe_key_by_source: on 2nd call (inside _yo_fence), mutate manifest.
+    call_count = [0]
+    real_obs_fn = evaluation._yo_observe_key_by_source
 
-    # Now change manifest before merge_yo is called.
-    manifest_path.write_text(
-        '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n',
-        encoding="utf-8",
-    )
+    def _intercept(key, form, sources_arg, config_arg):
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            manifest_path.write_text(
+                '{"id": "0001", "n": 1, "text": "Вставка.", "pause_after_ms": 900}\n'
+                '{"id": "0002", "n": 2, "text": "Вставка.", "pause_after_ms": 900}\n'
+                '{"id": "0003", "n": 3, "text": "Вставка.", "open_end": true, "pause_after_ms": 0}\n',
+                encoding="utf-8",
+            )
+        return real_obs_fn(key, form, sources_arg, config_arg)
 
-    # merge_yo B3 re-check sees changed manifest → YO_OBSERVATION_UNSUPPORTED (public rc=1 error).
-    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
-        evaluation.merge_yo(config, _write_yo_input(tmp_path, [row]))
+    monkeypatch.setattr(evaluation, "_yo_observe_key_by_source", _intercept)
 
-    # YO ledger unchanged (no write).
-    post_bytes = yo_path.read_bytes() if yo_path.exists() else None
-    assert pre_bytes == post_bytes, "YO ledger was written despite failed merge_yo"
+    # B3 passes (call 1 → manifest correct); fence mutates (call 2) → YO_CANDIDATE_STALE.
+    with pytest.raises(AnnotationError, match="YO_CANDIDATE_STALE"):
+        evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_B], "yo_B.tsv"))
+
+    # YO ledger byte-identical to pre-existing state (no write occurred).
+    assert yo_path.read_bytes() == pre_bytes, \
+        "YO ledger was written despite YO_CANDIDATE_STALE"

@@ -1226,10 +1226,26 @@ def _yo_observe_key(occ, sources, config):
     )
 
 
+def _is_forward_yo_pair(source_w: str, prep_w: str) -> bool:
+    """True if prep_w equals source_w or differs only by forward е→ё / Е→Ё substitutions."""
+    if source_w == prep_w:
+        return True
+    if len(source_w) != len(prep_w):
+        return False
+    for sc, pc in zip(source_w, prep_w):
+        if sc == pc:
+            continue
+        if (sc == 'е' and pc == 'ё') or (sc == 'Е' and pc == 'Ё'):
+            continue
+        return False
+    return True
+
+
 def _su_binding(source_key, identity, sources, mrows, config):
     """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs.
 
     Uses map_section for codepoint-exact structural alignment.
+    Full positional source-atom ↔ manifest-row ↔ prepared-text validation.
     Fail-closed on any mapping error or inconsistency.
     """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
@@ -1253,8 +1269,8 @@ def _su_binding(source_key, identity, sources, mrows, config):
             continue
         for m in _WORD.finditer(atom.text):
             if ki == k:
-                if m.group().lower() != form_source.lower():
-                    return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+                if m.group() != form_source:
+                    return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
                 target_ai = ai
                 target_match_start = m.start()
                 break
@@ -1262,7 +1278,7 @@ def _su_binding(source_key, identity, sources, mrows, config):
         if target_ai is not None:
             break
     if target_ai is None:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     span_idx = next(
         (si for si, s in enumerate(smap.spans) if s.atom_start <= target_ai < s.atom_end),
         None,
@@ -1280,9 +1296,9 @@ def _su_binding(source_key, identity, sources, mrows, config):
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     if len(frags) != 1:
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    if frags[0][0] != mrow["text"]:
         return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
+    if frags[0][0] != mrow["text"]:
+        return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
     ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
     ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
     from audiobook.voicecfg import prepare_text
@@ -1292,16 +1308,18 @@ def _su_binding(source_key, identity, sources, mrows, config):
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     pre_words = _WORD.findall(pre)
-    span_word_count = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, span.atom_end))
-    if span_word_count != len(pre_words):
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    if ordinal >= len(pre_words):
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    pw = pre_words[ordinal]
-    def _fold_yo(w):
-        return w.replace("ё", "е").replace("Ё", "Е")
-    if _fold_yo(pw.lower()) != _fold_yo(form_source.lower()):
-        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    pos = 0
+    for ai in range(span.atom_start, span.atom_end):
+        for m in _WORD.finditer(smap.stream[ai].text):
+            if pos >= len(pre_words):
+                return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+            if not _is_forward_yo_pair(m.group(), pre_words[pos]):
+                return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+            pos += 1
+    if pos != len(pre_words):
+        return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
+    if ordinal >= pos:
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     return row_index, span.chunk_id, ordinal
 
 
