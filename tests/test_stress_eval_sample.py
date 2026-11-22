@@ -652,20 +652,29 @@ class TestGateCBSample:
     """B1 / B2 / B4 / B10 / B12: preflight acceptance tests via sample()."""
 
     def test_B1_r5_stale_cache_blocks_sample(self, tmp_path, monkeypatch):
-        """B1: fresh YO map disagrees with mtime-cached map → YO_MAP_STALE (R5 fail-closed)."""
+        """B1: same-mtime changed bytes → fresh map disagrees with lru_cache → YO_MAP_STALE."""
         setup_book(tmp_path, monkeypatch)
-        import audiobook.stress_yo_observer as syo
-        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
-        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {"реке": "рёке_changed"})
+        import audiobook.yo as _yo
+        norm_file = paths.TEXT / "ch01.norm.txt"
+        # Write ё-word so build_map produces {"елка": "ёлка"}.
+        norm_file.write_text("ёлка ёлка елка", encoding="utf-8")
+        mtime = norm_file.stat().st_mtime
+        # Prime lru_cache with current bytes.
+        _yo.book_map()
+        # Change bytes without changing mtime → cache stays stale.
+        norm_file.write_text("просто текст просто", encoding="utf-8")
+        os.utime(norm_file, (mtime, mtime))
         with pytest.raises(AnnotationError, match="YO_MAP_STALE"):
             evaluation.sample({"text_prep": {"yo_restore": True}})
 
     def test_B2_r5_maps_agree_no_error(self, tmp_path, monkeypatch):
-        """B2: fresh map equals cached map → R5 passes, sample succeeds."""
+        """B2: same bytes serve lru_cache and fresh reader → R5 passes."""
         setup_book(tmp_path, monkeypatch)
-        import audiobook.stress_yo_observer as syo
-        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
-        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {"реке": "рёке"})
+        import audiobook.yo as _yo
+        norm_file = paths.TEXT / "ch01.norm.txt"
+        norm_file.write_text("ёлка ёлка елка", encoding="utf-8")
+        # Prime cache with current bytes; bytes unchanged → maps agree.
+        _yo.book_map()
         evaluation.sample({"text_prep": {"yo_restore": True}})
 
     def test_B4_r6_unsupported_obs_blocks_sample(self, tmp_path, monkeypatch):
@@ -713,3 +722,47 @@ class TestGateCBSample:
         monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
         monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {})
         evaluation.sample({})  # yo_restore=False → R5 guard skips the check
+
+    def test_B6_stale_manifest_blocks_r6(self, tmp_path, monkeypatch):
+        """B6: context-manifest mismatch → PREPARED_WORD_MISMATCH_DISABLED (no longer filtered) → R6 blocks."""
+        setup_book(tmp_path, monkeypatch)  # manifest: "Бета.", "Гамма.", "Альфа."
+        # Context reports "Дельта." but manifest still has "Бета." for chunk 0001.
+        stale_units = [{"type": "text", "text": "Дельта."},
+                       {"type": "text", "text": "Гамма."},
+                       {"type": "text", "text": "Альфа."}]
+        monkeypatch.setattr(evaluation, "_load_context", lambda _: context_for(stale_units))
+        with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+            evaluation.sample({})
+
+    def test_B11_manifest_missing_chunk_blocks_sample(self, tmp_path, monkeypatch):
+        """B11: manifest has fewer rows than source units → L3_COVERAGE_INCOMPLETE (R7 structural cross-check)."""
+        from audiobook.stress_yo_observer import NONE_obs
+        units = [{"type": "text", "text": "Альфа."},
+                 {"type": "text", "text": "Бета."},
+                 {"type": "text", "text": "Гамма."}]
+        setup_book(tmp_path, monkeypatch, units)
+        # Remove last manifest row → 2 rows but 3 source units.
+        manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
+        lines = manifest_path.read_text(encoding="utf-8").splitlines()
+        manifest_path.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
+        # Bypass R6 (observation-level) so R7 structural cross-check fires.
+        monkeypatch.setattr(evaluation, "_yo_observe_key", lambda o, s, c: NONE_obs())
+        with pytest.raises(AnnotationError, match="L3_COVERAGE_INCOMPLETE"):
+            evaluation.sample({})
+
+    def test_B16_observation_inputs_stored_as_separate_record_field(self, tmp_path, monkeypatch):
+        """B16: observation_inputs is a first-class sample record field; digests independently readable."""
+        import audiobook.stress_yo_observer as syo
+        setup_book(tmp_path, monkeypatch)
+        monkeypatch.setattr(syo, "compute_norm_digest", lambda d: "a" * 64)
+        monkeypatch.setattr(syo, "compute_yo_map_digest", lambda m: "b" * 64)
+        monkeypatch.setattr(syo, "compute_prep_config_digest", lambda c: "cc" * 32)
+        result = evaluation.sample({})
+        record_file = next((paths.OUT / "stress" / "eval" / "sample").glob("s2-*.json"))
+        record = json.loads(record_file.read_text(encoding="utf-8"))
+        obs = record.get("observation_inputs", {})
+        assert obs["norm_content_sha256"] == "a" * 64
+        assert obs["yo_map_sha256"] == "b" * 64
+        assert obs["prep_config_sha256"] == "cc" * 32
+        assert len(record["sample_fp"]) == 64
+        assert record["sample_fp"] != obs["yo_map_sha256"]  # fp is a composite, not a single digest

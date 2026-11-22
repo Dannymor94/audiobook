@@ -1900,6 +1900,23 @@ class TestR9FinalPublicationFence:
 class TestGateCBScore:
     """B15: merge_yo narrow-scope gate tests."""
 
+    def test_B13_fence_catches_yo_map_change_between_preflight_and_write(self, tmp_path, monkeypatch):
+        """B13: bytes change between preflight and publication fence → fence raises YO_MAP_STALE."""
+        # Use same config in both sample and score so observation_inputs.prep_config_sha256 matches.
+        units = setup_book(tmp_path, monkeypatch)
+        monkeypatch.setattr(evaluation, "_load_context",
+                            lambda _: predictions(context_for(units), homographs=()))
+        evaluation.sample({"text_prep": {"yo_restore": True}})
+        complete(tmp_path)
+        import audiobook.stress_yo_observer as syo
+        call_n = [0]
+        def counting(d):
+            call_n[0] += 1
+            return {} if call_n[0] == 1 else {"елка": "ёлка"}
+        monkeypatch.setattr(syo, "compute_fresh_yo_map", counting)
+        with pytest.raises(AnnotationError, match="YO_MAP_STALE"):
+            evaluation.score({"text_prep": {"yo_restore": True}})
+
     def test_B15_merge_yo_bypasses_full_preflight(self, tmp_path, monkeypatch):
         """B15: merge_yo does not call _yo_preflight; observation scoped to submitted candidates only."""
         setup_book(tmp_path, monkeypatch)

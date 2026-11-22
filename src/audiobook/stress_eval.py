@@ -990,6 +990,11 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
     }
     if record.get("observation_inputs") != current_inputs:
         _error("SAMPLE_STALE")
+    if (config.get("text_prep") or {}).get("yo_restore"):
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        fresh_map = compute_fresh_yo_map(paths.TEXT)
+        if fresh_map != current_map:
+            _error("YO_MAP_STALE")
     for key, expected in obs_witness.items():
         occ = by_key.get(key)
         if occ is None:
@@ -1245,7 +1250,7 @@ def _is_forward_yo_pair(source_w: str, prep_w: str) -> bool:
 
 
 def _su_binding(source_key, identity, sources, mrows, config):
-    """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs.
+    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs.
 
     Uses map_section for codepoint-exact structural alignment.
     Full positional source-atom ↔ manifest-row ↔ prepared-text validation.
@@ -1293,18 +1298,14 @@ def _su_binding(source_key, identity, sources, mrows, config):
     if row_index is None:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     mrow = mrows[row_index]
-    from audiobook.synth import chunk_fragments
+    from audiobook.synth import chunk_fragments, row_leadin
+    from audiobook.voicecfg import prepare_text
     try:
         frags = chunk_fragments(mrow["text"], config or {})
     except Exception:
         return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
-    if len(frags) != 1:
-        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
-    if frags[0][0] != mrow["text"]:
-        return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
     ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
     ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
-    from audiobook.voicecfg import prepare_text
     open_end = mrow.get("open_end", False)
     try:
         pre = prepare_text(mrow["text"], config or {}, open_end)
@@ -1323,7 +1324,24 @@ def _su_binding(source_key, identity, sources, mrows, config):
         return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
     if ordinal >= pos:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
-    return row_index, span.chunk_id, ordinal
+    if len(frags) == 1:
+        if frags[0][0] != mrow["text"]:
+            return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
+        return row_index, span.chunk_id, ordinal, mrow["text"], row_leadin(mrow), open_end
+    # Multi-fragment: map ordinal (within full prepared text) to specific fragment + within-fragment ordinal.
+    from audiobook import leadin as _leadin_mod
+    cum = 0
+    for frag_text, _pause, is_enum in frags:
+        raw_frag = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+        try:
+            pre_frag = prepare_text(raw_frag, config or {}, False)
+        except Exception:
+            return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+        cnt = len(_WORD.findall(pre_frag))
+        if cum + cnt > ordinal:
+            return row_index, span.chunk_id, ordinal - cum, raw_frag, _leadin_mod.AUTO, False
+        cum += cnt
+    return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
 
 
 def _yo_observe_key_by_source(source_key, form_source, sources, config):
@@ -1358,20 +1376,18 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
     binding = _su_binding(source_key, identity, sources, mrows, config)
     if isinstance(binding, UNSUPPORTED_obs):
         return binding
-    row_index, chunk_id, ordinal = binding
-    mrow = mrows[row_index]
+    row_index, chunk_id, ordinal, raw_text, phrase_out, open_end_out = binding
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
-    from audiobook.synth import row_leadin
     return observe_su(
         source_token=identity["form_source"],
-        raw_text=mrow["text"],
+        raw_text=raw_text,
         token_idx=ordinal,
         config=config or {},
         yo_map=yo_map, table=table, sentinel=sentinel,
-        phrase=row_leadin(mrow),
-        open_end=mrow.get("open_end", False),
+        phrase=phrase_out,
+        open_end=open_end_out,
         source_identity=identity,
     )
 
@@ -1418,16 +1434,13 @@ def _yo_preflight(context, config):
         manifest_rows[section] = mrows
         manifest_by_id[section] = {r.get("id"): r for r in mrows}
 
-    # R6: every eligible occurrence must be NONE or RESTORED.
-    # PREPARED_WORD_MISMATCH_DISABLED fires only when yo_restore=False and
-    # manifest text has drifted from context (content-sync issue, not observer
-    # failure); exclude it so stale-neighbor round-trips don't falsely block.
+    # R6: every eligible occurrence must be NONE or RESTORED. Any UNSUPPORTED blocks.
     unsupported_counts: dict = {}
     for occ in context.rows:
         if occ.alignment_status != "aligned":
             continue
         obs = _yo_observe_key(occ, context.sources, config)
-        if isinstance(obs, UNSUPPORTED_obs) and obs.reason != "PREPARED_WORD_MISMATCH_DISABLED":
+        if isinstance(obs, UNSUPPORTED_obs):
             unsupported_counts[obs.reason] = unsupported_counts.get(obs.reason, 0) + 1
 
     if unsupported_counts:
@@ -1448,17 +1461,17 @@ def _yo_preflight(context, config):
                     raw = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
                     su_set.append((raw, _leadin.AUTO, False))
 
+    source_unit_count = sum(len(context.sources.units.get(s, [])) for s in sorted(sections))
+    if len(su_set) < source_unit_count:
+        _error("L3_COVERAGE_INCOMPLETE")
+
     l3_errors: list = []
-    checked_su = 0
     for raw_text, phrase, open_end in su_set:
         try:
             l3_check(raw_text, config or {}, table, sentinel, phrase, open_end)
         except L3Mismatch as exc:
             l3_errors.append(str(exc))
-        checked_su += 1
 
-    if checked_su < len(su_set):
-        _error("L3_COVERAGE_INCOMPLETE")
     if l3_errors:
         _error("YO_OBSERVATION_UNSUPPORTED")
 
