@@ -2893,10 +2893,11 @@ def test_N1_su_binding_stale_manifest_unit_insertion(tmp_path, monkeypatch):
         "Ёлка", [0], fp, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n1.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -2938,10 +2939,11 @@ def test_N2_su_binding_missing_final_chunk(tmp_path, monkeypatch):
         "Ёлка", [0], fp, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n2.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -2986,10 +2988,11 @@ def test_N3_su_binding_duplicate_unit_text_insufficient_manifest(tmp_path, monke
         "Ёлка", [0], fp, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n3.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -3035,10 +3038,11 @@ def test_N3b_su_binding_duplicate_manifest_ids(tmp_path, monkeypatch):
         "Ёлка", [0], fp, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n3b.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -3080,10 +3084,11 @@ def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
         "Ёлка", [0], fp, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo({}, _write_yo_input(tmp_path, [row], "yo_n4.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -3132,10 +3137,11 @@ def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
         "бёта", [0], fp_1, "y",
     )
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
-    pre_bytes = yo_path.read_bytes() if yo_path.exists() else None
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
     with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_1], "yo_n5.tsv"))
-    assert (yo_path.read_bytes() if yo_path.exists() else None) == pre_bytes, \
+    assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
 
 
@@ -3221,3 +3227,45 @@ def test_N6_su_binding_manifest_changed_between_observations(tmp_path, monkeypat
     # YO ledger byte-identical to pre-existing state (no write occurred).
     assert yo_path.read_bytes() == pre_bytes, \
         "YO ledger was written despite YO_CANDIDATE_STALE"
+
+
+def test_N_public_merge_yo_cli_rc1(tmp_path, monkeypatch, capsys):
+    """Public CLI: merge-yo with stale manifest → ERROR YO_OBSERVATION_UNSUPPORTED, rc=1.
+
+    Uses N1 scenario (unit inserted before target). Writes a genuinely nonempty
+    pre-existing YO ledger and asserts it is byte-identical after the CLI call.
+    Verifies rc=1 and 'ERROR' + 'YO_OBSERVATION_UNSUPPORTED' in stdout.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.unitmap import AnnotationError as _AE
+
+    # N1 scenario: original book has one unit "Елка."; sources now have an extra
+    # unit "Вставка." inserted before it, making the manifest stale.
+    setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Елка."}])
+    units_new = [{"type": "text", "text": "Вставка."}, {"type": "text", "text": "Елка."}]
+    si = evaluation.SourceIndex({"01_test": units_new})
+    monkeypatch.setattr(evaluation, "_load_sources", lambda _: si)
+
+    resolved = si.resolve("01_test|1|0")
+    assert resolved is not None
+    identity, _, _ = resolved
+    fp = _restoration_fp_for(identity, "Ёлка", [0])
+    row = _yo_row(
+        identity["source_key"], identity["form_source"],
+        identity["unit_text_sha256"], identity["unit_kind"], identity["context_sha256"],
+        "Ёлка", [0], fp, "y",
+    )
+    yo_input = _write_yo_input(tmp_path, [row], "yo_n_cli.tsv")
+
+    yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
+    yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
+    pre_bytes = yo_path.read_bytes()
+
+    monkeypatch.setattr("audiobook.__main__.load_config", lambda: {})
+    rc = evaluation.main(["merge-yo", str(yo_input)])
+
+    assert rc == 1, f"expected rc=1, got {rc}"
+    out = capsys.readouterr().out
+    assert "ERROR" in out, f"'ERROR' not in stdout: {out!r}"
+    assert "YO_OBSERVATION_UNSUPPORTED" in out, f"'YO_OBSERVATION_UNSUPPORTED' not in stdout: {out!r}"
+    assert yo_path.read_bytes() == pre_bytes, "YO ledger modified by failed CLI call"
