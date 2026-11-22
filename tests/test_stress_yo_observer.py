@@ -486,3 +486,47 @@ class TestInternalHelpers:
         fp1 = restoration_fp(ident, "рёки", [0], contract_version="yo-evidence/1")
         fp2 = restoration_fp(ident, "рёки", [0], contract_version="yo-evidence/2")
         assert fp1 != fp2
+
+
+# ---------------------------------------------------------------------------
+# Gate C-B B-series synthetic acceptance tests (R5 / R6 / R7)
+# ---------------------------------------------------------------------------
+
+class TestGateCBObserver:
+    """B3 / B5 / B7 / B8 / B9: observer-level acceptance tests."""
+
+    def test_B3_fresh_yo_map_stable_for_unchanged_bytes(self, tmp_path):
+        """B3: compute_fresh_yo_map is content-based — same bytes → same dict each call."""
+        from audiobook.stress_yo_observer import compute_fresh_yo_map
+        norm = tmp_path / "ch01.norm.txt"
+        norm.write_text("слова ёлка ёлка ёлка\n", encoding="utf-8")
+        m1 = compute_fresh_yo_map(tmp_path)
+        m2 = compute_fresh_yo_map(tmp_path)
+        assert m1 == m2
+
+    def test_B5_token_index_out_of_range_returns_unsupported(self):
+        """B5: su_token_index beyond word count → TOKEN_INDEX_OUT_OF_RANGE (no silent index-0 fallback)."""
+        result = _obs("Бета", "Бета.", 99)
+        assert isinstance(result, UNSUPPORTED_obs)
+        assert result.reason == "TOKEN_INDEX_OUT_OF_RANGE"
+
+    def test_B7_l3_divergence_propagates_as_unsupported(self, monkeypatch):
+        """B7: when prepare_synth_text disagrees with observer path, observe_su returns UNSUPPORTED."""
+        import audiobook.synth as _synth
+        monkeypatch.setattr(_synth, "prepare_synth_text",
+                            lambda t, cfg, tb, s, ph, oe: ("WRONG_TEXT" + s, None))
+        result = _obs("Бета", "Бета.", 0)
+        assert isinstance(result, UNSUPPORTED_obs)
+        assert "MISMATCH" in result.reason
+
+    def test_B8_reverse_yo_ye_is_invalid_edit_pattern(self):
+        """B8: ё→е in source (reverse direction) is not a forward restoration → INVALID_EDIT_PATTERN."""
+        # source has native ё; prepared word (from empty yo_map) has е — reverse change
+        result = _obs("ёлка", "елка.", 0, yo_restore=True)
+        assert isinstance(result, UNSUPPORTED_obs)
+        assert result.reason == "INVALID_EDIT_PATTERN"
+
+    def test_B9_one_vowel_su_l3_passes_returns_none(self):
+        """B9: single-vowel SU (no е→ё candidate) → l3_check passes, returns NONE_obs."""
+        result = _obs("там", "там.", 0, yo_restore=True)
+        assert isinstance(result, NONE_obs)

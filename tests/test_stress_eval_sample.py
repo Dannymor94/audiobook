@@ -642,3 +642,74 @@ def test_A1_load_sources_returns_source_index_protocol(tmp_path, monkeypatch):
     """A1: SourceIndex (returned by _load_sources) exposes a callable resolve() method."""
     si = context_for([{"type": "text", "text": "Бета."}]).sources
     assert hasattr(si, "resolve") and callable(si.resolve)
+
+
+# ---------------------------------------------------------------------------
+# Gate C-B B-series synthetic acceptance tests (R5 / R6 / R7)
+# ---------------------------------------------------------------------------
+
+class TestGateCBSample:
+    """B1 / B2 / B4 / B10 / B12: preflight acceptance tests via sample()."""
+
+    def test_B1_r5_stale_cache_blocks_sample(self, tmp_path, monkeypatch):
+        """B1: fresh YO map disagrees with mtime-cached map → YO_MAP_STALE (R5 fail-closed)."""
+        setup_book(tmp_path, monkeypatch)
+        import audiobook.stress_yo_observer as syo
+        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
+        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {"реке": "рёке_changed"})
+        with pytest.raises(AnnotationError, match="YO_MAP_STALE"):
+            evaluation.sample({"text_prep": {"yo_restore": True}})
+
+    def test_B2_r5_maps_agree_no_error(self, tmp_path, monkeypatch):
+        """B2: fresh map equals cached map → R5 passes, sample succeeds."""
+        setup_book(tmp_path, monkeypatch)
+        import audiobook.stress_yo_observer as syo
+        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
+        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {"реке": "рёке"})
+        evaluation.sample({"text_prep": {"yo_restore": True}})
+
+    def test_B4_r6_unsupported_obs_blocks_sample(self, tmp_path, monkeypatch):
+        """B4: aligned occurrence returns UNSUPPORTED (non-mismatch reason) → R6 blocks sample."""
+        setup_book(tmp_path, monkeypatch)
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        monkeypatch.setattr(evaluation, "_yo_observe_key",
+                            lambda o, s, c: UNSUPPORTED_obs("MANIFEST_UNAVAILABLE"))
+        with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+            evaluation.sample({})
+
+    def test_B10a_single_fragment_su_r7_passes(self, tmp_path, monkeypatch):
+        """B10a: chunk without enum commas → 1 SU in su_set, R7 l3_check passes."""
+        setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Просто текст."}])
+        evaluation.sample({"pauses_ms": {"enum_pause_ms": 200}})
+
+    def test_B10b_enum_chunk_multiple_su_r7_covers_all(self, tmp_path, monkeypatch):
+        """B10b: enum chunk → k SU in su_set (parent excluded), R7 l3_check per fragment."""
+        setup_book(tmp_path, monkeypatch, [{"type": "text", "text": "Тяжесть, ком, напряжение."}])
+        evaluation.sample({"pauses_ms": {"enum_pause_ms": 200}})
+
+    def test_B10c_multi_chunk_su_coverage(self, tmp_path, monkeypatch):
+        """B10c: su_set covers all chunks in the manifest (3 unsplit chunks → 3 SUs)."""
+        units = [
+            {"type": "text", "text": "Альфа."},
+            {"type": "text", "text": "Бета."},
+            {"type": "text", "text": "Гамма."},
+        ]
+        setup_book(tmp_path, monkeypatch, units)
+        evaluation.sample({})
+
+    def test_B10d_enum_plus_unsplit_mixed_coverage(self, tmp_path, monkeypatch):
+        """B10d: manifest with both unsplit and enum chunks → R7 covers all SUs."""
+        units = [
+            {"type": "text", "text": "Просто текст."},
+            {"type": "text", "text": "Тяжесть, ком, напряжение."},
+        ]
+        setup_book(tmp_path, monkeypatch, units)
+        evaluation.sample({"pauses_ms": {"enum_pause_ms": 200}})
+
+    def test_B12_yo_restore_off_r5_not_checked(self, tmp_path, monkeypatch):
+        """B12: yo_restore=False → R5 skipped; mismatched maps do not raise YO_MAP_STALE."""
+        setup_book(tmp_path, monkeypatch)
+        import audiobook.stress_yo_observer as syo
+        monkeypatch.setattr(evaluation, "_load_yo_map", lambda c: {"реке": "рёке"})
+        monkeypatch.setattr(syo, "compute_fresh_yo_map", lambda d: {})
+        evaluation.sample({})  # yo_restore=False → R5 guard skips the check

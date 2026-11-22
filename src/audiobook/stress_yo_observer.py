@@ -76,6 +76,13 @@ def compute_norm_digest(text_dir: Path) -> str:
     return hashlib.sha256(combined).hexdigest()
 
 
+def compute_fresh_yo_map(text_dir: Path) -> dict:
+    """Build the YO map directly from current file bytes, bypassing any mtime cache."""
+    from audiobook.yo import build_map
+    files = sorted(text_dir.glob("*.norm.txt"))
+    return build_map([f.read_text(encoding="utf-8") for f in files])
+
+
 # ---------------------------------------------------------------------------
 # restoration_fp
 # ---------------------------------------------------------------------------

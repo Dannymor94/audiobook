@@ -899,14 +899,17 @@ def test_t13_reg_yo_observe_key_uses_manifest_not_stub(tmp_path, monkeypatch):
 
 
 def test_t13_reg_unsupported_obs_raises_in_yo_check(tmp_path, monkeypatch):
-    """T13-reg: UNSUPPORTED from _yo_observe_key → score() raises YO_OBSERVER_UNSUPPORTED (fail closed)."""
+    """T13-reg: UNSUPPORTED from _yo_observe_key → sample/score raise YO_OBSERVATION_UNSUPPORTED (fail closed).
+
+    C-B: preflight now catches UNSUPPORTED before any write in both sample and score.
+    """
     units = [{"type": "text", "text": "Елка."}]
     setup_book(tmp_path, monkeypatch, units)
+    evaluation.sample({})  # Must succeed before patch is applied.
     from audiobook import stress_yo_observer as _obs
     monkeypatch.setattr(evaluation, "_yo_observe_key",
                         lambda o, s, c: _obs.UNSUPPORTED_obs("MANIFEST_UNAVAILABLE"))
-    evaluation.sample({})
-    with pytest.raises(AnnotationError, match="YO_OBSERVER_UNSUPPORTED"):
+    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
         evaluation.score({})
 
 
@@ -1154,7 +1157,7 @@ class TestGateB2R4:
         evaluation.sample({})
         assert evaluation.score({})["status"] == "COMPLETE"
         monkeypatch.setattr(evaluation, "_yo_observe_key", lambda *args: UNSUPPORTED_obs("TEST"))
-        self._error_unchanged(tmp_path, monkeypatch, "YO_OBSERVER_UNSUPPORTED")
+        self._error_unchanged(tmp_path, monkeypatch, "YO_OBSERVATION_UNSUPPORTED")
 
     def test_T12_real_A_B_A(self, tmp_path, monkeypatch):
         from audiobook.stress_yo_observer import RESTORED_obs, restoration_fp
@@ -1888,3 +1891,24 @@ class TestR9FinalPublicationFence:
         # Second identical call is idempotent (no-op path).
         assert evaluation.score({}) == new_result
         assert score_path().read_bytes() == new_bytes
+
+
+# ---------------------------------------------------------------------------
+# Gate C-B B-series synthetic acceptance tests
+# ---------------------------------------------------------------------------
+
+class TestGateCBScore:
+    """B15: merge_yo narrow-scope gate tests."""
+
+    def test_B15_merge_yo_bypasses_full_preflight(self, tmp_path, monkeypatch):
+        """B15: merge_yo does not call _yo_preflight; observation scoped to submitted candidates only."""
+        setup_book(tmp_path, monkeypatch)
+        preflight_called = []
+        monkeypatch.setattr(evaluation, "_yo_preflight", lambda ctx, cfg: preflight_called.append(1))
+        incoming = tmp_path / "yo.tsv"
+        incoming.write_text("", encoding="utf-8")
+        try:
+            evaluation.merge_yo({}, incoming)
+        except AnnotationError:
+            pass
+        assert not preflight_called, "merge_yo must not call _yo_preflight"

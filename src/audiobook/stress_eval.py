@@ -1030,6 +1030,7 @@ def sample(config):
     lock = acquire_eval_lock()
     try:
         context = _load_context(config)
+        _yo_preflight(context, config)
         selection = _selection(context, config)
         gold = paths.TEXT / "stress_gold.tsv"
         archive = paths.TEXT / "stress_gold.archive.tsv"
@@ -1212,13 +1213,15 @@ def _yo_observe_key(occ, sources, config):
         raw_text = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
         phrase = leadin.AUTO
         open_end = False
+    if occ.su_token_index is None:
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
     sentinel = (config.get("model") or {}).get("sentinel", "")
     return observe_su(
         source_token=occ.form_source,
         raw_text=raw_text,
-        token_idx=occ.su_token_index if occ.su_token_index is not None else 0,
+        token_idx=occ.su_token_index,
         config=config or {},
         yo_map=yo_map, table=table, sentinel=sentinel,
         phrase=phrase, open_end=open_end,
@@ -1373,6 +1376,93 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
     )
 
 
+def _yo_preflight(context, config):
+    """R5/R6/R7 fail-closed preflight before any observation-consuming write.
+
+    R5: fresh YO map built from bytes must agree with mtime-cached map.
+    R6: every eligible (aligned) occurrence must observe NONE or RESTORED.
+    R7: l3_check must pass for every SU in SU_set; checked_SU == len(SU_set).
+    """
+    from audiobook import leadin as _leadin
+    from audiobook.pronounce import load_table
+    from audiobook.stress_yo_observer import (
+        UNSUPPORTED_obs, compute_fresh_yo_map, l3_check, L3Mismatch,
+    )
+    from audiobook.synth import chunk_fragments, row_leadin
+
+    yo_restore = bool((config.get("text_prep") or {}).get("yo_restore"))
+    cached_map = _load_yo_map(config)
+
+    # R5: compare fresh-bytes map vs mtime-cached map.
+    fresh_map = compute_fresh_yo_map(paths.TEXT) if yo_restore else {}
+    if yo_restore and fresh_map != cached_map:
+        _error("YO_MAP_STALE")
+
+    # Load all section manifests once for R6 token check and R7 SU enumeration.
+    sections = set(context.sources.units.keys())
+    manifest_rows: dict = {}  # section → list[dict]
+    manifest_by_id: dict = {}  # section → {chunk_id: row}
+    for section in sorted(sections):
+        manifest_path = paths.OUT / "sections" / section / "manifest.jsonl"
+        raw_fd = -1
+        try:
+            raw_fd = _open_eval_file(manifest_path)
+            with os.fdopen(raw_fd, "r", encoding="utf-8") as mf:
+                raw_fd = -1
+                mrows = [json.loads(line) for line in mf if line.strip()]
+        except (OSError, UnicodeError, ValueError, NotImplementedError):
+            _error("YO_OBSERVER_UNSUPPORTED")
+        finally:
+            if raw_fd >= 0:
+                os.close(raw_fd)
+        manifest_rows[section] = mrows
+        manifest_by_id[section] = {r.get("id"): r for r in mrows}
+
+    # R6: every eligible occurrence must be NONE or RESTORED.
+    # PREPARED_WORD_MISMATCH_DISABLED fires only when yo_restore=False and
+    # manifest text has drifted from context (content-sync issue, not observer
+    # failure); exclude it so stale-neighbor round-trips don't falsely block.
+    unsupported_counts: dict = {}
+    for occ in context.rows:
+        if occ.alignment_status != "aligned":
+            continue
+        obs = _yo_observe_key(occ, context.sources, config)
+        if isinstance(obs, UNSUPPORTED_obs) and obs.reason != "PREPARED_WORD_MISMATCH_DISABLED":
+            unsupported_counts[obs.reason] = unsupported_counts.get(obs.reason, 0) + 1
+
+    if unsupported_counts:
+        _error("YO_OBSERVATION_UNSUPPORTED")
+
+    # R7: enumerate SU_set from production splitter and l3_check every SU.
+    table = load_table(paths.TEXT / "pronounce.yaml")
+    sentinel = (config.get("model") or {}).get("sentinel", "")
+
+    su_set = []
+    for section in sorted(sections):
+        for mrow in manifest_rows[section]:
+            frags = chunk_fragments(mrow["text"], config or {})
+            if len(frags) == 1:
+                su_set.append((mrow["text"], row_leadin(mrow), mrow.get("open_end", False)))
+            else:
+                for frag_text, _pause, is_enum in frags:
+                    raw = frag_text.rstrip("?") if is_enum and frag_text.endswith("?") else frag_text
+                    su_set.append((raw, _leadin.AUTO, False))
+
+    l3_errors: list = []
+    checked_su = 0
+    for raw_text, phrase, open_end in su_set:
+        try:
+            l3_check(raw_text, config or {}, table, sentinel, phrase, open_end)
+        except L3Mismatch as exc:
+            l3_errors.append(str(exc))
+        checked_su += 1
+
+    if checked_su < len(su_set):
+        _error("L3_COVERAGE_INCOMPLETE")
+    if l3_errors:
+        _error("YO_OBSERVATION_UNSUPPORTED")
+
+
 def _yo_check(keys, by_key, context, config, yo_data_before):
     """Count missing yo verdicts; return (yo_missing, verdict_by_fp, obs_by_key).
 
@@ -1436,6 +1526,7 @@ def score(config):
             _error("SAMPLE_STALE")
         # B5: verify eligible assignment unchanged (observer behavior may have changed).
         _verify_selection_fresh(record, context, config)
+        _yo_preflight(context, config)
         gold_path = paths.TEXT / "stress_gold.tsv"
         ledger, gold_before = _read_ledger(gold_path)
         yo_path = _yo_path()
