@@ -29,6 +29,14 @@ def snapshot(tmp_path):
     return {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
 
+def _sync_manifest(out_path, section, row_idx, new_text):
+    """Sync manifest row at row_idx to new_text (CB-R1-1 compliance: context must match manifest)."""
+    mp = out_path / "sections" / section / "manifest.jsonl"
+    rows = [json.loads(line) for line in mp.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows[row_idx]["text"] = new_text
+    mp.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+
 def test_stale_neighbor_relabel_archive_active_and_repeat(tmp_path, monkeypatch):
     units = setup_book(tmp_path, monkeypatch)
     evaluation.sample({})
@@ -38,6 +46,7 @@ def test_stale_neighbor_relabel_archive_active_and_repeat(tmp_path, monkeypatch)
     evaluation.merge({}, write_input(tmp_path, [first]))
     assert evaluation.inspect_ledger([first], context_for(units)).active[key] == first
     units[0]["text"] = "Дельта."
+    _sync_manifest(paths.OUT, "01_test", 0, units[0]["text"])
     state = evaluation.inspect_ledger([first], context_for(units))
     assert not state.active and state.stale == (first,)
     evaluation.sample({})
@@ -243,6 +252,7 @@ def test_crash_and_replay_complete_ledger(tmp_path, monkeypatch, stage):
     original = labeled(todo_rows()[1])
     evaluation.merge({}, write_input(tmp_path, [original]))
     units[0]["text"] = "Дельта."
+    _sync_manifest(paths.OUT, "01_test", 0, units[0]["text"])
     evaluation.sample({})
     current = labeled(next(row for row in todo_rows() if row["source_key"] == original["source_key"]), "1")
     incoming = write_input(tmp_path, [current])
@@ -749,6 +759,7 @@ class TestT19ArchiveDoubleRebuildByteIdentical:
         row = labeled(todo_rows()[1])
         evaluation.merge({}, write_input(tmp_path, [row]))
         units[0]["text"] = "Дельта."
+        _sync_manifest(paths.OUT, "01_test", 0, units[0]["text"])
         evaluation.sample({})
         # Rebuild archive twice by running sample again (both rebuilds from same gold)
         archive = paths.TEXT / "stress_gold.archive.tsv"
@@ -1448,6 +1459,7 @@ class TestT20AuditArchiveCompatibility:
         row = labeled(todo_rows()[1])
         evaluation.merge({}, write_input(tmp_path, [row]))
         units[0]["text"] = "Дельта."
+        _sync_manifest(paths.OUT, "01_test", 0, units[0]["text"])
         evaluation.sample({})
         archive = paths.TEXT / "stress_gold.archive.tsv"
         archive_bytes_1 = archive.read_bytes()
@@ -3093,12 +3105,13 @@ def test_N4_su_binding_manifest_missing_n_field(tmp_path, monkeypatch):
 
 
 def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
-    """N5: production enum_pause_ms config causes chunk_fragments to return >1 fragment.
+    """N5: _su_binding rejects fragmented chunk (CA-R5-1 contract); _su_resolve succeeds (CB-R1-3).
 
-    len(frags)!=1 guard rejects with MANIFEST_FRAGMENT_AMBIGUOUS (CA-R5-1).
-    Public: YO_OBSERVATION_UNSUPPORTED (rc=1); pre-existing ledger unchanged.
+    _su_binding: MANIFEST_FRAGMENT_AMBIGUOUS (C-A negative oracle preserved).
+    _yo_observe_key_by_source: NONE_obs via _su_resolve (C-B valid-fragment success).
+    merge_yo: YO_CANDIDATE_STALE when claimed restoration disagrees with NONE observation.
     """
-    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.stress_yo_observer import NONE_obs, UNSUPPORTED_obs
     from audiobook.unitmap import AnnotationError
 
     # "Альфа, бета." splits at the enum comma when enum_pause_ms is set.
@@ -3112,21 +3125,21 @@ def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
     assert resolved is not None
     identity, _, _ = resolved
 
+    # C-A contract: _su_binding still returns MANIFEST_FRAGMENT_AMBIGUOUS for multi-fragment.
     result = evaluation._su_binding("01_test|0|0", identity, si, mrows, config)
     assert isinstance(result, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs, got {result!r}"
     assert result.reason == "MANIFEST_FRAGMENT_AMBIGUOUS", f"unexpected reason: {result.reason!r}"
 
-    # Public path: _yo_observe_key_by_source (reads manifest from disk) also fails.
+    # C-B: _yo_observe_key_by_source resolves via _su_resolve → NONE_obs (yo_restore disabled).
     manifest_path = paths.OUT / "sections" / "01_test" / "manifest.jsonl"
     manifest_path.write_text(
         '{"id": "0001", "n": 1, "text": "Альфа, бета.", "pause_after_ms": 0}\n',
         encoding="utf-8",
     )
     obs = evaluation._yo_observe_key_by_source("01_test|0|0", "Альфа", si, config)
-    assert isinstance(obs, UNSUPPORTED_obs), f"expected UNSUPPORTED_obs via observer, got {obs!r}"
+    assert isinstance(obs, NONE_obs), f"expected NONE_obs via _su_resolve, got {obs!r}"
 
-    # merge_yo public error (rc=1) using key "01_test|0|1" ("бета" has е→ё path as "бёта").
-    # Manifest on disk still has the fragmented chunk.
+    # merge_yo: claimed restoration disagrees with NONE observation → YO_CANDIDATE_STALE.
     resolved_1 = si.resolve("01_test|0|1")
     assert resolved_1 is not None
     identity_1, _, _ = resolved_1
@@ -3139,10 +3152,10 @@ def test_N5_su_binding_fragmented_chunk(tmp_path, monkeypatch):
     yo_path = paths.TEXT / "stress_gold.yo_evidence.tsv"
     yo_path.write_text(evaluation.serialize_yo_evidence([]), encoding="utf-8")  # valid nonempty header
     pre_bytes = yo_path.read_bytes()
-    with pytest.raises(AnnotationError, match="YO_OBSERVATION_UNSUPPORTED"):
+    with pytest.raises(AnnotationError, match="YO_NOT_RESTORED"):
         evaluation.merge_yo(config, _write_yo_input(tmp_path, [row_1], "yo_n5.tsv"))
     assert yo_path.read_bytes() == pre_bytes, \
-        "YO ledger modified despite YO_OBSERVATION_UNSUPPORTED"
+        "YO ledger modified despite YO_NOT_RESTORED"
 
 
 def test_N6_su_binding_manifest_changed_between_observations(tmp_path, monkeypatch):

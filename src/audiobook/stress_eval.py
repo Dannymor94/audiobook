@@ -1250,11 +1250,12 @@ def _is_forward_yo_pair(source_w: str, prep_w: str) -> bool:
 
 
 def _su_binding(source_key, identity, sources, mrows, config):
-    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs.
+    """Return (row_index, chunk_id, ordinal) or UNSUPPORTED_obs.
 
     Uses map_section for codepoint-exact structural alignment.
     Full positional source-atom ↔ manifest-row ↔ prepared-text validation.
     Fail-closed on any mapping error or inconsistency.
+    Multi-fragment chunks return MANIFEST_FRAGMENT_AMBIGUOUS (use _su_resolve for those).
     """
     from audiobook.stress_yo_observer import UNSUPPORTED_obs
     section, uid, k = _split_key(source_key)
@@ -1324,11 +1325,67 @@ def _su_binding(source_key, identity, sources, mrows, config):
         return UNSUPPORTED_obs("PREP_TOKEN_ALIGNMENT_MISMATCH")
     if ordinal >= pos:
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
-    if len(frags) == 1:
-        if frags[0][0] != mrow["text"]:
-            return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
-        return row_index, span.chunk_id, ordinal, mrow["text"], row_leadin(mrow), open_end
-    # Multi-fragment: map ordinal (within full prepared text) to specific fragment + within-fragment ordinal.
+    if len(frags) != 1:
+        return UNSUPPORTED_obs("MANIFEST_FRAGMENT_AMBIGUOUS")
+    if frags[0][0] != mrow["text"]:
+        return UNSUPPORTED_obs("FRAGMENT_CONCAT_MISMATCH")
+    return row_index, span.chunk_id, ordinal
+
+
+def _su_resolve(source_key, identity, sources, mrows, config):
+    """Return (row_index, chunk_id, ordinal, raw_text, phrase, open_end) or UNSUPPORTED_obs.
+
+    Wraps _su_binding for single-fragment chunks; independently resolves multi-fragment chunks.
+    """
+    from audiobook.stress_yo_observer import UNSUPPORTED_obs
+    from audiobook.synth import chunk_fragments, row_leadin
+    from audiobook.voicecfg import prepare_text
+    binding = _su_binding(source_key, identity, sources, mrows, config)
+    if not isinstance(binding, UNSUPPORTED_obs):
+        row_index, chunk_id, ordinal = binding
+        mrow = mrows[row_index]
+        return row_index, chunk_id, ordinal, mrow["text"], row_leadin(mrow), mrow.get("open_end", False)
+    if binding.reason != "MANIFEST_FRAGMENT_AMBIGUOUS":
+        return binding
+    # Multi-fragment: redo atom walk to find ordinal, then map to specific fragment.
+    from audiobook.unitmap import map_section
+    section, uid, k = _split_key(source_key)
+    units = sources.units.get(section, [])
+    if not units:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    try:
+        smap = map_section(units, mrows, section=section)
+    except Exception:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    target_ai, target_match_start, ki = None, None, 0
+    for ai, atom in enumerate(smap.stream):
+        if atom.unit_id != uid:
+            continue
+        for m in _WORD.finditer(atom.text):
+            if ki == k:
+                if m.group() != identity["form_source"]:
+                    return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
+                target_ai, target_match_start = ai, m.start()
+                break
+            ki += 1
+        if target_ai is not None:
+            break
+    if target_ai is None:
+        return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
+    span_idx = next((si for si, s in enumerate(smap.spans) if s.atom_start <= target_ai < s.atom_end), None)
+    if span_idx is None:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    span = smap.spans[span_idx]
+    row_index = next((i for i, r in enumerate(mrows) if r.get("id") == span.chunk_id), None)
+    if row_index is None:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
+    mrow = mrows[row_index]
+    ordinal = sum(len(_WORD.findall(smap.stream[ai].text)) for ai in range(span.atom_start, target_ai))
+    ordinal += sum(1 for m in _WORD.finditer(smap.stream[target_ai].text) if m.start() < target_match_start)
+    try:
+        frags = chunk_fragments(mrow["text"], config or {})
+    except Exception:
+        return UNSUPPORTED_obs("MANIFEST_MAPPING_FAILED")
     from audiobook import leadin as _leadin_mod
     cum = 0
     for frag_text, _pause, is_enum in frags:
@@ -1373,7 +1430,7 @@ def _yo_observe_key_by_source(source_key, form_source, sources, config):
         mrows = [json.loads(line) for line in manifest_text.splitlines() if line.strip()]
     except (ValueError, UnicodeError):
         return UNSUPPORTED_obs("MANIFEST_UNAVAILABLE")
-    binding = _su_binding(source_key, identity, sources, mrows, config)
+    binding = _su_resolve(source_key, identity, sources, mrows, config)
     if isinstance(binding, UNSUPPORTED_obs):
         return binding
     row_index, chunk_id, ordinal, raw_text, phrase_out, open_end_out = binding
