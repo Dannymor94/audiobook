@@ -33,7 +33,7 @@ def read_gz_map(path: Path) -> dict:
 
 
 def words_in(text: str) -> list[str]:
-    return [unicodedata.normalize("NFC", w).lower() for w in WORD.findall(text)]
+    return [unicodedata.normalize("NFC", w).lower() for w in WORD.findall(text.replace("\u0301", ""))]
 
 
 def category(word: str, accents: dict, homographs: dict, yo_words: dict) -> str:
