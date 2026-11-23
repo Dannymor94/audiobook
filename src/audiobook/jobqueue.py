@@ -155,7 +155,8 @@ def config_at_add() -> str:
 
 # --------------------------------------------------------------------- storage
 
-def add_job(args: list[str], root: Path | None = None) -> dict:
+def add_job(args: list[str], root: Path | None = None, *,
+            depends_on: str | None = None) -> dict:
     root = root or queue_root()
     args = list(args)
     if args and args[0] == "--":
@@ -166,8 +167,10 @@ def add_job(args: list[str], root: Path | None = None) -> dict:
         raise ValueError(reason)
     pending, _, _ = _dirs(root)
     job_id = f"{time.time_ns():020d}-{uuid.uuid4().hex[:4]}"
-    job = {"id": job_id, "created": _now(), "args": args, "config": config,
-           "status": "pending", "exit_code": None}
+    job: dict = {"id": job_id, "created": _now(), "args": args, "config": config,
+                 "status": "pending", "exit_code": None}
+    if depends_on is not None:
+        job["depends_on"] = depends_on
     _write_json(pending / f"{job_id}.json", job)
     return job
 
@@ -547,12 +550,28 @@ def _drain(root: Path | None, runner: Runner | None, poll: float,
                     "процесс жив) — новые задачи не запускаю; queue run после его завершения")
             return _DrainResult(1, 0, failed, drained=False)
 
+        _STOP_STATUSES = {"failed", "interrupted", "cancelled"}
         skip: set[str] = set()
         while True:
             job = _next_pending(pending, skip)
             if job is None:
                 break
             path = pending / f"{job['id']}.json"
+
+            dep_id = job.get("depends_on")
+            if dep_id:
+                dep_path = done / f"{dep_id}.json"
+                if dep_path.exists():
+                    dep_status = _read_json(dep_path).get("status")
+                    if dep_status in _STOP_STATUSES:
+                        job.update(status="cancelled", finished=_now(),
+                                   reason=f"depends_on {dep_id} → {dep_status}")
+                        _finish(job, path, done)
+                        failed += 1
+                        say(f"{job['id']}: отменён (зависит от {dep_id}, "
+                            f"статус {dep_status})")
+                        continue
+
             job.update(status="running", started=_now())
             _write_json(path, job)
             say(f"{job['id']}: {' '.join(job['args'])}")
@@ -618,14 +637,25 @@ def redo_jobs(section: str, chunk_ids: list[str], candidates: int = 3) -> list[l
     return [["redo", section, cid, "--candidates", str(candidates)] for cid in chunk_ids]
 
 
-def add_many(jobs: list[list[str]], root: Path | None = None) -> list[dict]:
-    """All or nothing: every job is validated before the first one is queued."""
+def add_many(jobs: list[list[str]], root: Path | None = None, *,
+             chain: bool = False) -> list[dict]:
+    """All or nothing: every job is validated before the first one is queued.
+
+    With ``chain=True``, each job depends on the previous one: a failed or
+    cancelled stage prevents all later stages from starting (fail-stop pipeline).
+    """
     config = config_at_add()
     for args in jobs:
         reason = validate_args(args, config)
         if reason:
             raise ValueError(f"{' '.join(args)}: {reason}")
-    return [add_job(args, root) for args in jobs]
+    added: list[dict] = []
+    prev_id: str | None = None
+    for args in jobs:
+        job = add_job(args, root, depends_on=prev_id if chain else None)
+        added.append(job)
+        prev_id = job["id"]
+    return added
 
 
 def _print_added(jobs: list[dict]) -> None:
@@ -644,7 +674,7 @@ def cli_shortcut(a) -> int:
     else:
         jobs = redo_jobs(a.section, a.chunk_ids, a.candidates)
     try:
-        _print_added(add_many(jobs))
+        _print_added(add_many(jobs, chain=(a.queue_cmd == "section")))
     except ValueError as e:
         print(f"отклонено: {e}", file=sys.stderr)
         return 2
