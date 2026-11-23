@@ -959,11 +959,13 @@ def _apply(plan, *, before_publish=None):
             plan.temporary.unlink(missing_ok=True)
 
 
-def _apply_and_commit(plan, *, before_publish=None):
+def _apply_and_commit(plan, *, before_publish=None, before_commit=None):
     """Stage + commit in one step (used by all callers except sample())."""
     staged = _apply(plan, before_publish=before_publish)
     if staged:
         try:
+            if before_commit is not None:
+                before_commit()
             os.replace(plan.temporary, plan.path)
             _sync_directory(plan.path.parent)
         except OSError:
@@ -984,7 +986,66 @@ def _obs_to_witness(obs, f1_rule=None, f1_flag="none"):
     return ("UNSUPPORTED", f1_rule, f1_flag, OCV)  # fail-closed: UNSUPPORTED_obs + unknown types
 
 
-def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, norm_digest_before=None):
+def _yo_input_snapshot(context, config):
+    """Pin framed actual input bytes, source bindings and config internally.
+
+    Public fingerprints/schemas stay unchanged. Use no-follow reads, and pin
+    absent optional files as well as their presence and content.
+    """
+    sections = sorted({occ.section for occ in context.rows} | set(context.sources.units))
+    for section in sections:
+        if section not in context.sources.units:
+            occ = next(occ for occ in context.rows if occ.section == section)
+            if context.sources.resolve(occ.source_key) is None:
+                _error("YO_OBSERVER_UNSUPPORTED")
+    inputs = set(paths.TEXT.glob("*.norm.txt"))
+    inputs.add(paths.TEXT / "pronounce.yaml")
+    for section in sections:
+        inputs.add(paths.TEXT / "blocks" / f"{section}.blocks.json")
+        inputs.add(paths.OUT / "sections" / section / "manifest.jsonl")
+    pinned = []
+    for path in sorted(inputs):
+        try:
+            raw = _open_eval_file(path)
+        except FileNotFoundError:
+            pinned.append((str(path), None))
+            continue
+        except (OSError, NotImplementedError):
+            _error("YO_OBSERVER_UNSUPPORTED")
+        try:
+            with os.fdopen(raw, "rb") as stream:
+                digest = hashlib.sha256(stream.read()).digest()
+        except OSError:
+            _error("YO_OBSERVER_UNSUPPORTED")
+        pinned.append((str(path), digest))
+    return _canonical(config), _canonical(context.sources.units), tuple(pinned)
+
+
+def _yo_verify_inputs(context, config, snapshot):
+    try:
+        current = _yo_input_snapshot(context, config)
+    except AnnotationError:
+        _error("YO_INPUTS_CHANGED")
+    if current[1:] != snapshot[1:]:
+        _error("YO_INPUTS_CHANGED")
+    if current[0] != snapshot[0]:
+        _error("SAMPLE_STALE")
+
+
+def _yo_operation_fence(context, config, snapshot, witnesses):
+    """Reauthenticate all inputs, all eligible observations and every SU's L3.
+
+    Read bytes on both sides of preflight to reject drift during verification.
+    This does not provide multi-file rollback after a successful replacement.
+    """
+    _yo_verify_inputs(context, config, snapshot)
+    current = _yo_preflight(context, config)
+    _yo_verify_inputs(context, config, snapshot)
+    if current != witnesses:
+        _error("SAMPLE_STALE")
+
+
+def _score_publication_fence(context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, norm_digest_before=None, operation=None):
     """B4/R9: re-validate observation inputs and per-key witness at true publication boundary.
 
     Fires inside _apply for both no-op (existing==result) and atomic rename paths.
@@ -992,6 +1053,8 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
     observation witness; also re-checks gold/YO authority bytes as belt-and-suspenders.
     norm_digest_before: preflight snapshot; if bytes drifted during this operation → YO_INPUTS_CHANGED.
     """
+    if operation is not None:
+        _yo_verify_inputs(context, config, operation[0])
     _assert_current(context, config)
     _verify_sample(record, sample_path)
     _verify_selection_fresh(record, context, config)
@@ -1020,6 +1083,8 @@ def _score_publication_fence(context, config, record, obs_witness, by_key, gold_
             _error("YO_OBSERVER_UNSUPPORTED")
         if fresh_witness != expected:
             _error("SAMPLE_STALE")
+    if operation is not None:
+        _yo_operation_fence(context, config, *operation)
     if _optional_bytes(paths.TEXT / "stress_gold.tsv") != gold_before:
         _error("GOLD_OUTPUT_CHANGED")
     if _optional_bytes(_yo_path()) != yo_data_before:
@@ -1050,7 +1115,9 @@ def sample(config):
     lock = acquire_eval_lock()
     try:
         context = _load_context(config)
-        _yo_preflight(context, config)
+        input_snapshot = _yo_input_snapshot(context, config)
+        witnesses = _yo_preflight(context, config)
+        _yo_verify_inputs(context, config, input_snapshot)
         selection = _selection(context, config)
         gold = paths.TEXT / "stress_gold.tsv"
         archive = paths.TEXT / "stress_gold.archive.tsv"
@@ -1070,35 +1137,31 @@ def sample(config):
             plans.append(_plan(gold, serialize_gold([]), None))
         # Archive is derived and independently replaceable; never an input to merge.
         plans.append(_plan(archive, serialize_gold(state.stale), _optional_bytes(archive)))
+        _yo_verify_inputs(context, config, input_snapshot)
         _assert_current(context, config)
         if _optional_bytes(gold) != gold_before:
             _error("GOLD_OUTPUT_CHANGED")
-        from audiobook.yo import book_map as _bm_sample
-        from audiobook.stress_yo_observer import compute_fresh_yo_map as _cfym_sample, compute_norm_digest as _cnorm_s
-        _snap = _bm_sample()
-        _norm_snap = _cnorm_s(paths.TEXT)
         def _yo_sample_fence():
-            if _cnorm_s(paths.TEXT) != _norm_snap:
-                _error("YO_INPUTS_CHANGED")
-            if _cfym_sample(paths.TEXT) != _snap:
-                _error("YO_MAP_STALE")
+            _yo_verify_inputs(context, config, input_snapshot)
+            _assert_current(context, config)
+            _yo_operation_fence(context, config, input_snapshot, witnesses)
         _to_commit: list = []
         try:
             for plan in plans:
                 if _apply(plan, before_publish=_yo_sample_fence):
                     _to_commit.append(plan)
-        except AnnotationError:
-            for _p in _to_commit:
-                _p.temporary.unlink(missing_ok=True)
-            raise
-        for plan in _to_commit:
-            try:
+            # All staging must succeed before the first final replacement.
+            _yo_sample_fence()
+            for plan in _to_commit:
+                _yo_sample_fence()
+                if _optional_bytes(plan.path) != plan.expected:
+                    _error("GOLD_OUTPUT_CHANGED")
                 os.replace(plan.temporary, plan.path)
                 _sync_directory(plan.path.parent)
-            except OSError:
-                plan.temporary.unlink(missing_ok=True)
-                _error("GOLD_WRITE_FAILED")
-            finally:
+        except OSError:
+            _error("GOLD_WRITE_FAILED")
+        finally:
+            for plan in _to_commit:
                 plan.temporary.unlink(missing_ok=True)
         return {"sample_fp": selection.record["sample_fp"], "strata": selection.record["strata"],
                 "selected": len(selection.record["keys"]), "todo": len(requested),
@@ -1265,7 +1328,10 @@ def _yo_observe_key(occ, sources, config):
     # _su_resolve_detail treats the chunk as a single fragment and returns chunk-level ordinal.
     _b5_config = {k: v for k, v in (config or {}).items() if k != "pauses_ms"} if occ.su_fragment is None else (config or {})
     _detail = _su_resolve_detail(occ.source_key, identity, sources, rows, _b5_config)
-    if not isinstance(_detail, UNSUPPORTED_obs) and _detail[2] != occ.su_token_index:
+    if isinstance(_detail, UNSUPPORTED_obs):
+        return _detail
+    if (_detail[1], _detail[2], _detail[3], _detail[4], _detail[5]) != (
+            occ.su_chunk_id, occ.su_token_index, raw_text, phrase, open_end):
         return UNSUPPORTED_obs("ORDINAL_UNRESOLVED")
     yo_map = _load_yo_map(config)
     table = load_table(paths.TEXT / "pronounce.yaml")
@@ -1520,10 +1586,12 @@ def _yo_preflight(context, config):
 
     # R6: every eligible occurrence must be NONE or RESTORED. Any UNSUPPORTED blocks.
     unsupported_counts: dict = {}
+    witnesses = []
     for occ in context.rows:
         if occ.alignment_status != "aligned":
             continue
         obs = _yo_observe_key(occ, context.sources, config)
+        witnesses.append((occ.source_key, _obs_to_witness(obs, occ.f1_rule, occ.f1_flag)))
         if isinstance(obs, UNSUPPORTED_obs):
             unsupported_counts[obs.reason] = unsupported_counts.get(obs.reason, 0) + 1
 
@@ -1581,6 +1649,7 @@ def _yo_preflight(context, config):
 
     if l3_errors:
         _error("YO_OBSERVATION_UNSUPPORTED")
+    return tuple(witnesses), tuple(su_set)
 
 
 def _yo_check(keys, by_key, context, config, yo_data_before):
@@ -1634,6 +1703,7 @@ def score(config):
     lock = acquire_eval_lock()
     try:
         context = _load_context(config)
+        input_snapshot = _yo_input_snapshot(context, config)
         selection, sample_path = _load_saved_selection(context, config)
         record = selection.record
         # B4: reject sample/2 whose observation inputs no longer match current state.
@@ -1647,7 +1717,8 @@ def score(config):
             _error("SAMPLE_STALE")
         # B5: verify eligible assignment unchanged (observer behavior may have changed).
         _verify_selection_fresh(record, context, config)
-        _yo_preflight(context, config)
+        witnesses = _yo_preflight(context, config)
+        _yo_verify_inputs(context, config, input_snapshot)
         gold_path = paths.TEXT / "stress_gold.tsv"
         ledger, gold_before = _read_ledger(gold_path)
         yo_path = _yo_path()
@@ -1714,14 +1785,18 @@ def score(config):
                 "by_stratum": {name: bounds(rates) for name, rates in metrics["by_stratum"].items()}}))
         target = paths.OUT / "stress" / "eval" / "score" / ("s2-" + record["sample_fp"][:16] + ".json")
         plan = _plan(target, _canonical(result).decode("utf-8") + "\n", _optional_bytes(target))
+        _yo_verify_inputs(context, config, input_snapshot)
         _assert_current(context, config)
         _verify_sample(record, sample_path)
         if _optional_bytes(gold_path) != gold_before:
             _error("GOLD_OUTPUT_CHANGED")
         if _optional_bytes(yo_path) != yo_data_before:  # T41: dual ledger freshness
             _error("YO_OUTPUT_CHANGED")
-        _apply_and_commit(plan, before_publish=lambda: _score_publication_fence(
-            context, config, record, obs_witness, by_key, gold_before, yo_data_before, sample_path, _norm_digest_now))
+        def fence():
+            _score_publication_fence(
+                context, config, record, obs_witness, by_key, gold_before, yo_data_before,
+                sample_path, _norm_digest_now, (input_snapshot, witnesses))
+        _apply_and_commit(plan, before_publish=fence, before_commit=fence)
         return result
     finally:
         release_eval_lock(lock)

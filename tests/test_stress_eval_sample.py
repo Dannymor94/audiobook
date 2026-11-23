@@ -1015,3 +1015,96 @@ class TestGateCBR4Sample:
                                        [{'id': '0001', 'n': 1, 'text': 'Бета.', 'pause_after_ms': 900}], {})
         assert result == UNSUPPORTED_obs('PREP_TOKEN_MISMATCH')
         assert cb_snapshot(tmp_path) == before
+
+
+class TestGateCBR5Sample:
+    def test_B5_unsupported_structural_proof_fails_closed(self, tmp_path, monkeypatch):
+        from audiobook.stress_yo_observer import UNSUPPORTED_obs
+        setup_book(tmp_path, monkeypatch)
+        monkeypatch.setattr(evaluation, '_su_resolve_detail',
+                            lambda *args: UNSUPPORTED_obs('MANIFEST_MAPPING_FAILED'))
+        cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.sample({}))
+
+    @pytest.mark.parametrize('noop,boundary', [(False, 0), (False, 1), (False, 2), (False, 3),
+                                               (True, 0), (True, 1), (True, 2)])
+    def test_B13_manifest_drift_each_stage(self, tmp_path, monkeypatch, noop, boundary):
+        setup_book(tmp_path, monkeypatch)
+        if noop:
+            evaluation.sample({})
+        manifest = paths.OUT / 'sections' / '01_test' / 'manifest.jsonl'
+        manifest_before = manifest.read_bytes()
+        assert_current = evaluation._assert_current
+        def current(ctx, cfg):
+            # Real inventory reloads also authenticate manifests: input drift
+            # must be diagnosed before attempting to reload a stale generation.
+            if manifest.read_bytes() != manifest_before:
+                evaluation._error('INVENTORY_CHANGED')
+            return assert_current(ctx, cfg)
+        monkeypatch.setattr(evaluation, '_assert_current', current)
+        original = evaluation._apply
+        visited = []
+        def apply(plan, *, before_publish=None):
+            index = len(visited)
+            visited.append(plan.path)
+            def fence():
+                if index == boundary:
+                    cb_mutate_same_mtime(manifest, manifest.read_text(encoding='utf-8') + '\n')
+                before_publish()
+            return original(plan, before_publish=fence)
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.sample({}), exclude=(manifest,))
+        assert len(visited) == boundary + 1
+
+    def test_B13_manifest_drift_after_all_staging(self, tmp_path, monkeypatch):
+        setup_book(tmp_path, monkeypatch)
+        manifest = paths.OUT / 'sections' / '01_test' / 'manifest.jsonl'
+        original = evaluation._apply
+        visited = []
+        def apply(plan, *, before_publish=None):
+            result = original(plan, before_publish=before_publish)
+            visited.append(plan.path)
+            if len(visited) == 4:
+                cb_mutate_same_mtime(manifest, manifest.read_text(encoding='utf-8') + '\n')
+            return result
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.sample({}), exclude=(manifest,))
+
+    def test_B13_norm_pinned_before_selection(self, tmp_path, monkeypatch):
+        setup_book(tmp_path, monkeypatch)
+        norm = paths.TEXT / 'fixture.norm.txt'
+        norm.write_text('просто текст', encoding='utf-8')
+        original = evaluation._selection
+        def selection(*args):
+            result = original(*args)
+            cb_mutate_same_mtime(norm, 'другой текст')
+            return result
+        monkeypatch.setattr(evaluation, '_selection', selection)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.sample({}), exclude=(norm,))
+
+    @pytest.mark.parametrize('fault', ['l3', 'unselected'])
+    def test_B13_full_preflight_rechecked_at_boundary(self, tmp_path, monkeypatch, fault):
+        from audiobook import stress_yo_observer as observer
+        setup_book(tmp_path, monkeypatch)
+        original = evaluation._apply
+        observe = evaluation._yo_observe_key
+        def apply(plan, *, before_publish=None):
+            def fence():
+                if fault == 'l3':
+                    def broken(*args, **kwargs):
+                        raise observer.L3Mismatch('COMPOSED_FINAL_MISMATCH')
+                    monkeypatch.setattr(observer, 'l3_check', broken)
+                else:
+                    monkeypatch.setattr(evaluation, '_yo_observe_key', lambda occ, *args:
+                        observer.UNSUPPORTED_obs('ORDINAL_UNRESOLVED') if occ.source_key == '01_test|2|0'
+                        else observe(occ, *args))
+                before_publish()
+            return original(plan, before_publish=fence)
+        # Limit selection so the unsupported key is outside selected witnesses.
+        select = evaluation._selection
+        def selection(*args):
+            result = select(*args)
+            result.record['keys'].remove('01_test|2|0')
+            return result
+        monkeypatch.setattr(evaluation, '_selection', selection)
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.sample({}))

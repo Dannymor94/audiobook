@@ -2202,3 +2202,48 @@ class TestGateCBR4Score:
         assert observed == UNSUPPORTED_obs('FRAGMENT_CONCAT_MISMATCH')
         assert cb_snapshot(tmp_path) == before
         cb_reject(tmp_path, 'YO_OBSERVATION_UNSUPPORTED', lambda: evaluation.merge_yo(cfg, incoming))
+
+
+class TestGateCBR5Score:
+    @pytest.mark.parametrize('noop', [False, True])
+    @pytest.mark.parametrize('fault', ['manifest', 'pronounce', 'l3'])
+    def test_B13_full_dependencies_at_write_and_noop(self, tmp_path, monkeypatch, noop, fault):
+        from audiobook import stress_yo_observer as observer
+        units = ready(tmp_path, monkeypatch, units=[{'type': 'text', 'text': 'Бета.'},
+                                                       {'type': 'text', 'text': 'Дом.'}])
+        complete(tmp_path)
+        if noop:
+            evaluation.score({})
+        manifest = paths.OUT / 'sections' / '01_test' / 'manifest.jsonl'
+        pronounce = paths.TEXT / 'pronounce.yaml'
+        original = evaluation._apply
+        def apply(plan, *, before_publish=None):
+            def fence():
+                if fault == 'manifest':
+                    cb_mutate_same_mtime(manifest, manifest.read_text(encoding='utf-8') + '\n')
+                elif fault == 'pronounce':
+                    pronounce.write_text('{}\n', encoding='utf-8')
+                else:
+                    l3 = observer.l3_check
+                    def broken(raw, *args, **kwargs):
+                        if raw == 'Дом.':
+                            raise observer.L3Mismatch('COMPOSED_FINAL_MISMATCH')
+                        return l3(raw, *args, **kwargs)
+                    monkeypatch.setattr(observer, 'l3_check', broken)
+                before_publish()
+            return original(plan, before_publish=fence)
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        code = 'YO_OBSERVATION_UNSUPPORTED' if fault == 'l3' else 'YO_INPUTS_CHANGED'
+        cb_reject(tmp_path, code, lambda: evaluation.score({}), exclude=(manifest, pronounce))
+
+    def test_B13_manifest_drift_between_stage_and_commit(self, tmp_path, monkeypatch):
+        ready(tmp_path, monkeypatch)
+        complete(tmp_path)
+        manifest = paths.OUT / 'sections' / '01_test' / 'manifest.jsonl'
+        original = evaluation._apply
+        def apply(plan, *, before_publish=None):
+            result = original(plan, before_publish=before_publish)
+            cb_mutate_same_mtime(manifest, manifest.read_text(encoding='utf-8') + '\n')
+            return result
+        monkeypatch.setattr(evaluation, '_apply', apply)
+        cb_reject(tmp_path, 'YO_INPUTS_CHANGED', lambda: evaluation.score({}), exclude=(manifest,))

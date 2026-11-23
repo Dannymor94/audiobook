@@ -516,15 +516,15 @@ def test_r8_t07_normal_in_root_positive_control(tmp_path, monkeypatch):
     ev.release_eval_lock(h)
 
     # Manifest: real file (no symlinks) → supported NONE_obs (no yo-map, no ё in text).
-    section_dir = out_dir / "sections" / "ch01"
+    section_dir = out_dir / "sections" / "01_test"
     section_dir.mkdir(parents=True)
     (section_dir / "manifest.jsonl").write_text(
         '{"id": "0001", "n": 1, "text": "тест.", "pause_after_ms": 900}\n',
         encoding="utf-8",
     )
 
-    occ = _make_occ("ch01")
-    sources = _make_sources()
+    occ = _make_occ("01_test")
+    sources = ev.SourceIndex({"01_test": [{"type": "text", "text": "тест."}]})
     result = ev._yo_observe_key(occ, sources, {})
     # Must produce a SUPPORTED observation (NONE_obs: source text has no ё, no yo-map active).
     assert isinstance(result, NONE_obs), (
