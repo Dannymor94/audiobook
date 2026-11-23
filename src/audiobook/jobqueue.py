@@ -155,7 +155,8 @@ def config_at_add() -> str:
 
 # --------------------------------------------------------------------- storage
 
-def add_job(args: list[str], root: Path | None = None) -> dict:
+def add_job(args: list[str], root: Path | None = None, *,
+            depends_on: str | None = None) -> dict:
     root = root or queue_root()
     args = list(args)
     if args and args[0] == "--":
@@ -166,8 +167,10 @@ def add_job(args: list[str], root: Path | None = None) -> dict:
         raise ValueError(reason)
     pending, _, _ = _dirs(root)
     job_id = f"{time.time_ns():020d}-{uuid.uuid4().hex[:4]}"
-    job = {"id": job_id, "created": _now(), "args": args, "config": config,
-           "status": "pending", "exit_code": None}
+    job: dict = {"id": job_id, "created": _now(), "args": args, "config": config,
+                 "status": "pending", "exit_code": None}
+    if depends_on is not None:
+        job["depends_on"] = depends_on
     _write_json(pending / f"{job_id}.json", job)
     return job
 
@@ -553,6 +556,36 @@ def _drain(root: Path | None, runner: Runner | None, poll: float,
             if job is None:
                 break
             path = pending / f"{job['id']}.json"
+
+            # Fail-closed: a chained job may start ONLY if its predecessor
+            # has a durable done record with exit_code=0.  Any other state
+            # (missing, corrupt, wrong status, non-zero exit) → cancel.
+            dep_id = job.get("depends_on")
+            if dep_id:
+                cancel_reason: str | None = None
+                dep_path = done / f"{dep_id}.json"
+                if not dep_path.exists():
+                    cancel_reason = f"depends_on {dep_id} → no durable record"
+                else:
+                    try:
+                        dep = _read_json(dep_path)
+                        dep_st = dep.get("status")
+                        dep_ex = dep.get("exit_code")
+                        if dep_st != "done" or dep_ex != 0:
+                            cancel_reason = (
+                                f"depends_on {dep_id} → "
+                                f"status={dep_st} exit_code={dep_ex}"
+                            )
+                    except (OSError, ValueError):
+                        cancel_reason = f"depends_on {dep_id} → corrupt record"
+                if cancel_reason:
+                    job.update(status="cancelled", finished=_now(),
+                               reason=cancel_reason)
+                    _finish(job, path, done)
+                    failed += 1
+                    say(f"{job['id']}: отменён ({cancel_reason})")
+                    continue
+
             job.update(status="running", started=_now())
             _write_json(path, job)
             say(f"{job['id']}: {' '.join(job['args'])}")
@@ -601,7 +634,13 @@ def section_exists(section: str) -> bool:
 def section_jobs(section: str, workers: int = 2, first: int | None = None) -> list[list[str]]:
     """Whole render of ONE section: chunk → synth → qc → assemble → master → suspects
     → sync (text↔time map) → listen-plan of the chapter, sent to Telegram if set up
-    (the last two for a full section only)."""
+    (the last two for a full section only).
+
+    NOTE: the final listen-plan step passes ``--notify`` (Telegram delivery). This
+    shortcut is NOT suitable for a private production render where notifications must
+    be suppressed. Build the job list manually or pass ``first=N`` to omit sync and
+    listen-plan entirely.
+    """
     f = ["--first", str(first)] if first else []
     sec = ["--section", section]
     return [["chunk", *sec],
@@ -618,14 +657,26 @@ def redo_jobs(section: str, chunk_ids: list[str], candidates: int = 3) -> list[l
     return [["redo", section, cid, "--candidates", str(candidates)] for cid in chunk_ids]
 
 
-def add_many(jobs: list[list[str]], root: Path | None = None) -> list[dict]:
-    """All or nothing: every job is validated before the first one is queued."""
+def add_many(jobs: list[list[str]], root: Path | None = None, *,
+             chain: bool = False) -> list[dict]:
+    """All or nothing: every job is validated before the first one is queued.
+
+    With ``chain=True``, each job gets ``depends_on`` pointing to the previous
+    one, forming a fail-closed pipeline: a job may start only if its predecessor
+    finished with status=done and exit_code=0.
+    """
     config = config_at_add()
     for args in jobs:
         reason = validate_args(args, config)
         if reason:
             raise ValueError(f"{' '.join(args)}: {reason}")
-    return [add_job(args, root) for args in jobs]
+    added: list[dict] = []
+    prev_id: str | None = None
+    for args in jobs:
+        job = add_job(args, root, depends_on=prev_id if chain else None)
+        added.append(job)
+        prev_id = job["id"]
+    return added
 
 
 def _print_added(jobs: list[dict]) -> None:
@@ -644,7 +695,7 @@ def cli_shortcut(a) -> int:
     else:
         jobs = redo_jobs(a.section, a.chunk_ids, a.candidates)
     try:
-        _print_added(add_many(jobs))
+        _print_added(add_many(jobs, chain=(a.queue_cmd == "section")))
     except ValueError as e:
         print(f"отклонено: {e}", file=sys.stderr)
         return 2
