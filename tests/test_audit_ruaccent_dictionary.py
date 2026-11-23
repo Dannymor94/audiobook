@@ -30,7 +30,7 @@ def test_word_count_and_multisyllabic_split():
     counts = Counter(mod.words_in("МУ́ЗЫКА и МУЗЫКА, замок — замок, всё."))
     # Standalone U+0301 is not a word character; letters remain intact.
     result, private = mod.audit(counts, {"музыка": "м+узыка"}, {"замок": ["з+амок", "зам+ок"]}, {})
-    assert result["total_word_tokens"] == 7
+    assert result["total_word_tokens"] == 6
     assert result["tokens_by_category"]["dictionary_exact"] == 2
     assert result["tokens_by_category"]["homograph"] == 2
     assert result["multisyllabic_tokens"] == 4
