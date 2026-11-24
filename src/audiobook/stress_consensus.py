@@ -44,9 +44,12 @@ def parse_marked(token: str) -> tuple[str, int | None]:
     if plus:
         return token, None
     word = "".join(chars)
+    yo = [i for i, c in enumerate(word) if c.lower() == "ё"]
     if not marked:
-        marked = [i for i, c in enumerate(word) if c.lower() == "ё"]
-    return word, marked[0] if len(marked) == 1 else None
+        marked = yo
+    if len(marked) != 1 or (yo and yo != marked):
+        return word, None
+    return word, marked[0]
 
 
 def align(text: str, output: str) -> list[tuple[str, int | None]] | None:
@@ -67,6 +70,9 @@ def align(text: str, output: str) -> list[tuple[str, int | None]] | None:
             return None
         token, stress = parse_marked(y.group())
         if fold(x.group()) != fold(token):
+            return None
+        if any(c.lower() == "ё" and token[i].lower() != "ё"
+               for i, c in enumerate(x.group())):
             return None
         result.append((token, stress))
         a, b = x.end(), y.end()
@@ -101,6 +107,49 @@ def compare(text: str, ruaccent: str, silero: str) -> list[dict]:
                        "silero_word": y[0] if y else None, "silero_stress": sy,
                        "status": status})
     return result
+
+
+def candidate_input(text: str, findings: list[dict]) -> str:
+    """Private trial text only: mark exact agreed occurrences with U+0301.
+
+    Retain punctuation, casing, all other letters and unresolved occurrences.
+    This is NOT a production TTS adapter or a claim that consensus is correct.
+    """
+    expected = [(i, m) for i, m in enumerate(WORD.finditer(text), 1)
+                if sum(c.lower() in VOWELS for c in m.group()) >= 2]
+    if len(findings) != len(expected):
+        raise ValueError("INCOMPLETE_OCCURRENCE_ACCOUNTING")
+    parts = []
+    prev = 0
+    for (i, m), f in zip(expected, findings):
+        word = m.group()
+        if (f["ordinal"], f["start"], f["end"], f["word"]) != (i, m.start(), m.end(), word):
+            raise ValueError("OCCURRENCE_MISMATCH")
+        parts.append(text[prev:m.start()])
+        if f["status"] == "agree":
+            stress = f["ruaccent_stress"]
+            annotated = f["ruaccent_word"]
+            if (type(stress) is not int or not 0 <= stress < len(word)
+                    or word[stress].lower() not in VOWELS
+                    or not isinstance(annotated, str)
+                    or fold(annotated) != fold(word)
+                    or f["silero_stress"] != stress
+                    or f["silero_word"].lower() != annotated.lower()):
+                raise ValueError("INVALID_AGREEMENT")
+            chars = list(word)
+            for j, c in enumerate(annotated):
+                if c.lower() == "ё" and chars[j].lower() == "е":
+                    chars[j] = "Ё" if chars[j].isupper() else "ё"
+            if any(c.lower() == "ё" and j != stress for j, c in enumerate(chars)):
+                raise ValueError("CONFLICTING_YO_STRESS")
+            # ё itself carries stress; do not add a second mark.
+            if chars[stress].lower() != "ё":
+                chars[stress] += "\u0301"
+            word = "".join(chars)
+        parts.append(word)
+        prev = m.end()
+    parts.append(text[prev:])
+    return "".join(parts)
 
 
 def audit(rows: list[dict], primary, secondary) -> tuple[list[dict], dict]:
