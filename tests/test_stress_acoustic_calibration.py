@@ -51,3 +51,32 @@ def test_uncertain_is_not_correct_or_missed_silently():
     assert s["correct_false_flags"] == 1
     assert s["outcomes"]["wrong_stress:uncertain"] == 1
     assert not s["release_ready"]
+
+
+def test_unique_context_recovers_only_target_when_chunk_differs():
+    from audiobook.stress_acoustic_calibration import contextual_window
+    heard = [
+        {"w": "лишнее", "s": 0.0, "e": 0.2, "p": 0.9},
+        {"w": "мы", "s": 0.2, "e": 0.4, "p": 0.9},
+        {"w": "видим", "s": 0.4, "e": 0.7, "p": 0.9},
+        {"w": "молоко", "s": 0.7, "e": 1.1, "p": 0.9},
+        {"w": "сегодня", "s": 1.1, "e": 1.5, "p": 0.9},
+    ]
+    text = "Вчера мы видим молоко сегодня"
+    assert word_windows(text, heard, 2.0) is None
+    assert contextual_window(text, heard, 2.0, 4) == (0.7, 1.1)
+    assert contextual_window(text + " молоко", heard, 2.0, 4) is None
+    assert contextual_window(text, heard + [
+        {"w": "молоко", "s": 1.5, "e": 1.8, "p": 0.9}], 2.0, 4) is None
+    assert contextual_window(text, [dict(w, p=0.1) for w in heard], 2.0, 4) is None
+    assert contextual_window("Вчера мы видим-молоко сегодня", heard, 2.0, 4) is None
+    assert contextual_window(text, heard, 2.0, 1) is None
+    assert contextual_window(text, heard, 1.0, 4) is None
+
+
+def test_uncertain_known_defect_is_counted_as_not_detected():
+    from audiobook.stress_acoustic_calibration import summarize
+    out = summarize([{"gold": "wrong_stress", "signal": "uncertain"}])
+    assert out["stress_errors_uncertain"] == 1
+    assert out["stress_errors_not_detected"] == 1
+    assert out["stress_errors_flagged"] == 0
