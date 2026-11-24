@@ -26,7 +26,7 @@ DEFAULT_MIN_FREE_GB = 16.0
 # (a superset of __main__._HEAVY, checked by a test). Entries are regex parts:
 # `golden render` synthesises, `golden init|compare` do not.
 HEAVY_SUBCOMMANDS = (
-    "synth", "qc", "chunk", "accept", "probe", "bench", "calibrate", "pick-ref", "credits", "passage",
+    "synth", "qc", "chunk", "accept", "accept-original", "probe", "bench", "calibrate", "pick-ref", "credits", "passage",
     "ref-compare", "ref-scout", "pron-test", "redo", "headings", "phoneme-check",
     r"golden\s+render",
 )
