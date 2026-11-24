@@ -310,3 +310,39 @@ def test_reviewed_stage_preserves_live_audio_and_binds_receipt(config, monkeypat
     with pytest.raises(FileExistsError):
         reviewed_stage.stage_section(section, "good", config, {}, rules,
                                      {"0001": receipt}, chapter_title_carrier=False)
+
+
+def test_accept_original_exact_wav_and_verified_seed(config, monkeypatch, tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from audiobook import paths, redo, reviewed_stage
+
+    section = "01_fixture"
+    units = [{"type": "paragraph", "text": "Пример."},
+             {"type": "paragraph", "text": "Далее."}]
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.setattr(chunker, "load_units", lambda *_: units)
+    monkeypatch.setattr(pronounce, "load_table", lambda: {})
+    live = tmp_path / "sections" / section
+    (live / "chunks").mkdir(parents=True)
+    old = baseline(units, config)
+    old[0].update(status="manual", seed=125, cer=0.131)
+    manifest = live / "manifest.jsonl"
+    chunker._write_manifest(manifest, old)
+    wav = live / "chunks" / "0001.wav"
+    sf.write(wav, np.full(2400, 0.02, dtype=np.float32), 24000, subtype="FLOAT")
+    data = wav.read_bytes()
+    before = manifest.read_bytes()
+    digest = reviewed_stage.file_digest(wav)
+    with pytest.raises(ValueError, match="HASH_MISMATCH"):
+        redo.run_accept_original(config, section, "0001", "0" * 40, digest, 123)
+    with pytest.raises(ValueError, match="WAV_MISMATCH"):
+        redo.run_accept_original(config, section, "0001", old[0]["hash"], "0" * 64, 123)
+    assert manifest.read_bytes() == before
+    assert redo.run_accept_original(config, section, "0001", old[0]["hash"], digest, 123) == 0
+    rows = chunker._read_manifest(manifest)
+    assert rows[0]["status"] == "done" and rows[0]["locked"]
+    assert rows[0]["seed"] == rows[0]["seed_override"] == 123
+    assert rows[0]["hash"] == old[0]["hash"] and rows[0]["cer"] == 0.131
+    assert rows[0]["duration_ms"] == 100 and rows[1] == old[1]
+    assert wav.read_bytes() == data
