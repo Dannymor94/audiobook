@@ -228,3 +228,20 @@ def test_chapter_title_carrier_rejects_enum_mode(config):
     units = [{"type": "heading", "level": 1, "text": "Глава первая. Пример"}]
     with pytest.raises(ValueError, match="enum_pause_ms"):
         baseline(units, config)
+
+
+def test_exact_phrase_final_comma_candidate(config):
+    units = [{"type": "paragraph", "text": "Положить на полку и уйти."},
+             {"type": "paragraph", "text": "Осмотреть полку."}]
+    old = baseline(units, config)
+    rules = {"на полку": "на полку,"}
+    plan = voice_plan.plan_section(units, old, config, {}, rules=rules)
+    assert plan["counts"] == {"needs_synth": 1, "review_only": 1}
+    assert not plan["blocked"]
+    candidate = baseline(units, config, rules)
+    assert candidate[0]["text"] == old[0]["text"]
+    assert voice_plan.prepared_input(candidate[0], config, rules) == "Положить на полку, и уйти."
+    for invalid in ({"полку": "полку,"}, {"на полку": "на полку,,"},
+                    {"на полку": "на, полку"}, {"на полку": "на пОлку,"}):
+        with pytest.raises(ValueError):
+            voice_plan.validate_rules(invalid)
