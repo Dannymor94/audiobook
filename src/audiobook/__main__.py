@@ -56,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     vp.add_argument("--sentence-ms", type=int)
     vp.add_argument("--paragraph-ms", type=int)
     vp.add_argument("--heading-ms", type=int, help="пауза после заголовка уровня 1")
+    vp.add_argument("--chapter-title-carrier", action="store_true",
+                    help="пробный контекст номера главы для названия")
     vp.add_argument("--tag", default="plan")
     dc = sub.add_parser("decisions", help="страница решений на слух (build) и применение decisions.json (apply)")
     dcs = dc.add_subparsers(dest="decisions_cmd", required=True)
@@ -263,7 +265,7 @@ def _dispatch(a) -> int:
     if a.cmd == "voice-plan":
         from .voice_plan import run as voice_plan
         return voice_plan(load_config(), a.section, a.rules, a.sentence_ms,
-                          a.paragraph_ms, a.heading_ms, a.tag)
+                          a.paragraph_ms, a.heading_ms, a.tag, a.chapter_title_carrier)
     if a.cmd == "decisions":
         from . import decisions
         if a.decisions_cmd == "build":
