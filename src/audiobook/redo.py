@@ -160,7 +160,10 @@ def run_accept(config: dict, section: str, chunk_id: str, variant: int) -> int:
     data, sr = sf.read(str(dst_wav))
     duration_ms = round(len(data) / sr * 1000)
 
+    row["seed"] = actual_seed
     row["seed_override"] = actual_seed
+    for field in ("seed_provenance", "last_reported_seed", "approved_wav_sha256", "reused_from"):
+        row.pop(field, None)
     row["locked"] = True
     row["status"] = "done"
     row["duration_ms"] = duration_ms
@@ -171,11 +174,13 @@ def run_accept(config: dict, section: str, chunk_id: str, variant: int) -> int:
 
 
 def run_accept_original(config: dict, section: str, chunk_id: str,
-                        expected_hash: str, wav_sha256: str, actual_seed: int) -> int:
+                        expected_hash: str, wav_sha256: str, actual_seed: int | None,
+                        *, unknown_seed: bool = False) -> int:
     """Lock an owner-reviewed existing manual WAV without replacing its bytes.
 
     The caller supplies the verified generation seed from local provenance,
-    not merely the last attempted QC seed. Run only in an isolated work copy
+    not merely the last attempted QC seed. Explicit unknown_seed preserves an
+    owner-approved legacy WAV without claiming reproducibility. Run only in an isolated work copy
     under the CLI heavy lock.
     """
     import numpy as np
@@ -188,7 +193,8 @@ def run_accept_original(config: dict, section: str, chunk_id: str,
             or not re.fullmatch(r"[0-9]{4,}", chunk_id)
             or not re.fullmatch(r"[0-9a-f]{40}", expected_hash)
             or not re.fullmatch(r"[0-9a-f]{64}", wav_sha256)
-            or type(actual_seed) is not int or not 0 <= actual_seed < 2**63):
+            or (unknown_seed and actual_seed is not None)
+            or (not unknown_seed and (type(actual_seed) is not int or not 0 <= actual_seed < 2**63))):
         raise ValueError("INVALID_ACCEPT_ORIGINAL_ARGUMENTS")
     config = chunker.section_config(config, section)
     sec_dir = _sec_dir(section)
@@ -208,6 +214,13 @@ def run_accept_original(config: dict, section: str, chunk_id: str,
     data, sr = sf.read(str(wav), dtype="float32", always_2d=True)
     if sr != 24000 or data.shape[1] != 1 or not len(data) or not np.isfinite(data).all():
         raise ValueError("ACCEPT_ORIGINAL_INVALID_WAV")
+    if unknown_seed:
+        row["last_reported_seed"] = row.get("seed")
+        row["seed_provenance"] = "unknown"
+    else:
+        row["seed_provenance"] = "verified"
+    row["approved_wav_sha256"] = wav_sha256
+    row.pop("reused_from", None)
     row.update(status="done", locked=True, seed=actual_seed,
                seed_override=actual_seed, duration_ms=round(len(data) * 1000 / sr))
     _write_manifest(manifest_path, rows)
