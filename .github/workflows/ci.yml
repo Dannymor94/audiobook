@@ -19,3 +19,7 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run python -m audiobook doctor --no-models
       - run: uv run pytest -m "not slow" -q
+      - name: Pinned Silero Stress integration (public fixture only)
+        run: |
+          uv pip install --no-deps --require-hashes --only-binary :all: -r requirements/stress-audit.txt
+          uv run --no-sync python scripts/smoke_stress_audit.py
