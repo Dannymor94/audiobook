@@ -52,33 +52,61 @@ def parse_marked(token: str) -> tuple[str, int | None]:
     return word, marked[0]
 
 
-def align(text: str, output: str) -> list[tuple[str, int | None]] | None:
-    """Compare every occurrence and preserve intervening characters exactly.
+_HSPACE = " \t\u00a0\u202f"
+_GAP_PUNCT = '.,!?;:«»„“”"()[]'
 
-    Case differences and е→ё are allowed only for annotation comparison.
-    Reject reordered/deleted words, punctuation edits, broken marks, and
-    structural mismatches. Never use altered output as source text.
+
+def _format_gap(a: str, b: str, *, edge: bool) -> bool:
+    """Only horizontal spacing; retain punctuation and lexical boundaries.
+
+    Never accept changed digits, Latin text, hyphens, signs or newlines.
     """
+    if any(c not in _HSPACE + _GAP_PUNCT for c in a + b):
+        return False
+    stripped_a = "".join(c for c in a if c not in _HSPACE)
+    stripped_b = "".join(c for c in b if c not in _HSPACE)
+    if stripped_a != stripped_b:
+        return False
+    return bool(stripped_a) or edge or bool(a and b)
+
+
+def align_detailed(text: str, output: str, *, strict: bool = False):
+    """Return exact ordered annotation mapping and non-text reason category."""
     source = list(WORD.finditer(text))
     marked = list(MARKED.finditer(output))
     if len(source) != len(marked):
-        return None
+        return None, "word_count"
     a = b = 0
     result = []
-    for x, y in zip(source, marked):
-        if text[a:x.start()] != output[b:y.start()]:
-            return None
+    reformatted = False
+    for i, (x, y) in enumerate(zip(source, marked)):
+        left, right = text[a:x.start()], output[b:y.start()]
+        if left != right:
+            if strict or not _format_gap(left, right, edge=i == 0):
+                return None, "separator_changed"
+            reformatted = True
         token, stress = parse_marked(y.group())
         if fold(x.group()) != fold(token):
-            return None
-        if any(c.lower() == "ё" and token[i].lower() != "ё"
-               for i, c in enumerate(x.group())):
-            return None
+            return None, "word_changed"
+        if any(c.lower() == "ё" and token[j].lower() != "ё"
+               for j, c in enumerate(x.group())):
+            return None, "source_yo_lost"
         result.append((token, stress))
         a, b = x.end(), y.end()
     if text[a:] != output[b:]:
-        return None
-    return result
+        if strict or not _format_gap(text[a:], output[b:], edge=True):
+            return None, "separator_changed"
+        reformatted = True
+    return result, "format_only" if reformatted else "exact"
+
+
+def align(text: str, output: str) -> list[tuple[str, int | None]] | None:
+    """Allow only proven harmless horizontal spacing differences.
+
+    Reject word reorder/deletion, punctuation or lexical changes. Source
+    offsets remain authoritative; predictor output is never used as source.
+    """
+    return align_detailed(text, output)[0]
 
 
 def compare(text: str, ruaccent: str, silero: str) -> list[dict]:
@@ -154,18 +182,41 @@ def candidate_input(text: str, findings: list[dict]) -> str:
     return "".join(parts)
 
 
-def audit(rows: list[dict], primary, secondary) -> tuple[list[dict], dict]:
-    """Call both already-local predictors; retain EVERY multisyllabic occurrence."""
+def audit(rows: list[dict], primary, secondary, *, row_diagnostics: list[dict] | None = None) -> tuple[list[dict], dict]:
+    """Call both predictors once; retain all occurrences and private replay evidence."""
     records = []
+    reasons = Counter()
+    baseline_errors = 0
+    recovered = 0
     for row in rows:
         text = row["text"]
-        findings = compare(text, primary(text), secondary(text))
+        a, b = primary(text), secondary(text)
+        findings = compare(text, a, b)
+        strict_a, _ = align_detailed(text, a, strict=True)
+        strict_b, _ = align_detailed(text, b, strict=True)
+        aligned_a, why_a = align_detailed(text, a)
+        aligned_b, why_b = align_detailed(text, b)
+        n = len(findings)
+        if strict_a is None or strict_b is None:
+            baseline_errors += n
+            if aligned_a is not None and aligned_b is not None:
+                recovered += n
+        reasons["ruaccent:" + why_a] += 1
+        reasons["silero:" + why_b] += 1
+        if row_diagnostics is not None:
+            row_diagnostics.append(dict(id=row["id"], hash=row["hash"],
+                                        ruaccent_output=a, silero_output=b,
+                                        ruaccent_alignment=why_a, silero_alignment=why_b,
+                                        multisyllabic_occurrences=n))
         records.extend({"id": row["id"], "hash": row["hash"], **r} for r in findings)
     counts = Counter(r["status"] for r in records)
     total = len(records)
     return records, {"occurrences": total, "statuses": dict(sorted(counts.items())),
                      "agreement_fraction": counts["agree"] / total if total else None,
-                     "not_agreed": total - counts["agree"], "acoustic_checked": 0}
+                     "not_agreed": total - counts["agree"], "acoustic_checked": 0,
+                     "alignment_reasons_by_row": dict(sorted(reasons.items())),
+                     "strict_baseline_alignment_error_occurrences": baseline_errors,
+                     "format_recovered_occurrences": recovered}
 
 
 def book_rows(text_dir: Path) -> tuple[list[dict], dict[Path, str]]:
@@ -218,7 +269,8 @@ def main() -> int:
     if not rows or len({r["id"] for r in rows}) != len(rows):
         raise ValueError("INVALID_SOURCE")
     secondary = load_accentor()
-    records, summary = audit(rows, lambda t: accent_lines([t])[0], secondary)
+    row_diagnostics: list[dict] = []
+    records, summary = audit(rows, lambda t: accent_lines([t])[0], secondary, row_diagnostics=row_diagnostics)
     summary.update(source_kind=source_kind, source_files=len(hashes),
                    source_sha256={p.name: h for p, h in hashes.items()},
                    ruaccent_version=version("ruaccent"), silero_version=version("silero-stress"),
@@ -233,6 +285,9 @@ def main() -> int:
     with (a.out / "occurrences.jsonl").open("x", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    with (a.out / "alignment_rows_PRIVATE.jsonl").open("x", encoding="utf-8") as f:
+        for row in row_diagnostics:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
     by_id: dict[str, list[dict]] = {}
     for record in records:
         by_id.setdefault(record["id"], []).append(record)
