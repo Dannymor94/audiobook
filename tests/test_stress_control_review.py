@@ -79,3 +79,41 @@ def test_modified_wav_and_unfinished_run_rejected(tmp_path):
     p.write_text("\n".join(p.read_text().splitlines()[:-1]))
     with pytest.raises(ValueError, match="INCOMPLETE_OR_REORDERED_TAKES"):
         read_run(tmp_path)
+
+
+def test_voicy_comparison_reuses_only_stock_plain(tmp_path):
+    from audiobook.stress_control_review import read_voicy_comparison
+    from audiobook.stress_voicy import ADAPTER_PIN, ADAPTER_SHA256, BASE_PIN
+
+    stock = tmp_path / "stock"
+    stock.mkdir()
+    fixture_run(stock)
+    old, _, digest = read_run(stock)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    plan = [r for r in trial_plan(77) if r["condition"] == "acute"]
+    takes = []
+    for r in plan:
+        data = ("adapted-" + r["id"]).encode()
+        (candidate / (r["id"] + ".wav")).write_bytes(data)
+        takes.append(dict(id=r["id"], status="generated",
+                          sha256=hashlib.sha256(data).hexdigest(),
+                          seconds=3.0, elapsed_seconds=24.0, rtf=8.0))
+    (candidate / "plan_PRIVATE.json").write_text(json.dumps(plan))
+    (candidate / "takes_PRIVATE.jsonl").write_text("\n".join(map(json.dumps, takes)))
+    (candidate / "summary.json").write_text(json.dumps(dict(
+        planned=8, generated=8, failed=0, release_ready=False)))
+    p = candidate / "provenance_PRIVATE.json"
+    provenance = json.loads((stock / p.name).read_text())
+    provenance.update(baseline_run_digest=digest, variant="voicy_v3",
+                      adapter_revision=ADAPTER_PIN, adapter_sha256=ADAPTER_SHA256,
+                      base_revision=BASE_PIN, matrices=196, checkpoint_written=False)
+    p.write_text(json.dumps(provenance))
+    records, audio, _ = read_voicy_comparison(stock, candidate)
+    assert len(records) == len(audio) == 16
+    assert {r["id"] for r in records if r["condition"] == "plain"} == {
+        r["id"] for r in old if r["condition"] == "plain"}
+    assert all(audio[r["id"]].startswith(b"adapted-") for r in plan)
+    p.write_text(json.dumps(dict(provenance, baseline_run_digest="wrong")))
+    with pytest.raises(ValueError, match="COMPARISON_PROVENANCE_MISMATCH"):
+        read_voicy_comparison(stock, candidate)

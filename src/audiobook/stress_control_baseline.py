@@ -76,7 +76,11 @@ def main() -> int:
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--threads", type=int, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--voicy-adapter", type=Path)
+    p.add_argument("--baseline-run", type=Path)
     a = p.parse_args()
+    if (a.voicy_adapter is None) != (a.baseline_run is None):
+        raise ValueError("VOICY_REQUIRES_BASELINE_RUN")
     if not math.isfinite(a.temperature) or a.temperature <= 0 or not 0 <= a.seed < 2**32 or a.threads < 1:
         raise ValueError("INVALID_TRIAL_SETTINGS")
     if a.out.exists():
@@ -100,19 +104,7 @@ def main() -> int:
     from time import monotonic
     from qwen_tts import Qwen3TTSModel
 
-    torch.set_num_threads(a.threads)
-    model = Qwen3TTSModel.from_pretrained(str(snapshot), dtype=torch.float32,
-                                         local_files_only=True, trust_remote_code=False)
-    model.model.to("cpu")
-    prompt = model.create_voice_clone_prompt(
-        ref_audio=str(a.ref_wav), ref_text=ref_text,
-        x_vector_only_mode=a.xvector_only,
-    )
-    if sha256(a.ref_wav) != ref_digest:
-        raise ValueError("REFERENCE_CHANGED")
     plan = trial_plan(a.seed)
-    a.out.mkdir(parents=True, exist_ok=False, mode=0o700)
-    (a.out / "plan_PRIVATE.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
     provenance = dict(snapshot_sha256=model_hashes, reference_sha256=ref_digest,
                       reference_text_sha256=hashlib.sha256(ref_bytes).hexdigest() if ref_bytes is not None else None,
                       clone_mode="xvector" if a.xvector_only else "icl",
@@ -121,6 +113,38 @@ def main() -> int:
                       torch=str(torch.__version__), qwen_tts=version("qwen-tts"),
                       transformers=version("transformers"),
                       limitation="Isolated direct mark probe; not production preprocessing parity.")
+    if a.voicy_adapter is not None:
+        from audiobook.stress_control_review import read_run
+        from audiobook.stress_voicy import BASE_PIN, read_adapter
+        if snapshot.name != BASE_PIN:
+            raise ValueError("BASE_REVISION_MISMATCH")
+        read_adapter(a.voicy_adapter)
+        baseline, _, baseline_digest = read_run(a.baseline_run)
+        prior = json.loads((a.baseline_run / "provenance_PRIVATE.json").read_text(encoding="utf-8"))
+        if (any(r["status"] != "generated" for r in baseline)
+                or [r["id"] for r in baseline] != [r["id"] for r in plan]
+                or any(any(r.get(k) != v for k, v in expected.items())
+                       for r, expected in zip(baseline, plan))
+                or any(prior.get(k) != v for k, v in provenance.items())):
+            raise ValueError("BASELINE_PROVENANCE_MISMATCH")
+        plan = [r for r in plan if r["condition"] == "acute"]
+        provenance.update(variant="voicy_v3", baseline_run_digest=baseline_digest,
+                          limitation="Voicy marked arm only; compare with preserved stock runs, not production parity.")
+    torch.set_num_threads(a.threads)
+    model = Qwen3TTSModel.from_pretrained(str(snapshot), dtype=torch.float32,
+                                         local_files_only=True, trust_remote_code=False)
+    model.model.to("cpu")
+    if a.voicy_adapter is not None:
+        from audiobook.stress_voicy import apply_voicy
+        provenance.update(apply_voicy(model.model, snapshot, a.voicy_adapter))
+    prompt = model.create_voice_clone_prompt(
+        ref_audio=str(a.ref_wav), ref_text=ref_text,
+        x_vector_only_mode=a.xvector_only,
+    )
+    if sha256(a.ref_wav) != ref_digest:
+        raise ValueError("REFERENCE_CHANGED")
+    a.out.mkdir(parents=True, exist_ok=False, mode=0o700)
+    (a.out / "plan_PRIVATE.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
     (a.out / "provenance_PRIVATE.json").write_text(json.dumps(provenance, indent=2), encoding="utf-8")
     outcomes = []
     with (a.out / "takes_PRIVATE.jsonl").open("x", encoding="utf-8") as stream:
