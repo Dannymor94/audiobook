@@ -160,6 +160,7 @@ def run_accept(config: dict, section: str, chunk_id: str, variant: int) -> int:
     data, sr = sf.read(str(dst_wav))
     duration_ms = round(len(data) / sr * 1000)
 
+    row["seed"] = actual_seed
     row["seed_override"] = actual_seed
     row["locked"] = True
     row["status"] = "done"

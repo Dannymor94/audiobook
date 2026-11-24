@@ -220,6 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "synth":
             s.add_argument("--workers", type=int, default=1,
                            help="параллельных воркеров синтеза (Ryzen 0.6B: 4, 1.7B: 2)")
+        if name == "qc":
+            s.add_argument("--check-only", nargs="+", metavar="CHUNK",
+                           help="измерить выбранные WAV без синтеза и ресинхронизации")
         if name in ("synth", "assemble", "master"):
             s.add_argument("--first", type=int, default=None,
                            help="только первые N чанков секции (превью → preview_firstN)")
@@ -394,8 +397,10 @@ def _dispatch(a) -> int:
         from .synth import run as synth
         return synth(load_config(), a.section, a.workers, a.first)
     if a.cmd == "qc":
-        from .qc import run as qc
-        return qc(load_config(), a.section)
+        from . import qc
+        if a.check_only is not None:
+            return qc.check_selected(load_config(), a.section, a.check_only)
+        return qc.run(load_config(), a.section)
     if a.cmd == "assemble":
         from .assemble import run as assemble
         return assemble(load_config(), a.section, a.first)
