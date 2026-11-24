@@ -16,13 +16,17 @@ from audiobook.stress_control_baseline import ACUTE, trial_plan, sha256
 FIELDS = ("clip", "sentence", "target", "lexical", "heard_vowel", "naturalness")
 
 
-def read_run(path: Path) -> tuple[list[dict], dict[str, bytes], str]:
+def read_run(path: Path, *, expected_plan: list[dict] | None = None) -> tuple[list[dict], dict[str, bytes], str]:
     files = [path / n for n in ("plan_PRIVATE.json", "takes_PRIVATE.jsonl",
                                 "summary.json", "provenance_PRIVATE.json")]
     raw = [p.read_bytes() for p in files]
     plan, summary, provenance = (json.loads(raw[i]) for i in (0, 2, 3))
-    seeds = {r["seed"] for r in plan if r["case"] == "fuel"}
-    if len(seeds) != 1 or plan != trial_plan(next(iter(seeds))):
+    if expected_plan is None:
+        seeds = {r["seed"] for r in plan if r["case"] == "fuel"}
+        if len(seeds) != 1:
+            raise ValueError("INVALID_TRIAL_PLAN")
+        expected_plan = trial_plan(next(iter(seeds)))
+    if plan != expected_plan:
         raise ValueError("INVALID_TRIAL_PLAN")
     takes = [json.loads(line) for line in raw[1].decode("utf-8").splitlines() if line.strip()]
     if [r["id"] for r in takes] != [r["id"] for r in plan]:
@@ -57,6 +61,32 @@ def read_run(path: Path) -> tuple[list[dict], dict[str, bytes], str]:
         h.update(len(data).to_bytes(8, "big"))
         h.update(data)
     return records, audio, h.hexdigest()
+
+
+def read_voicy_comparison(stock: Path, candidate: Path) -> tuple[list[dict], dict[str, bytes], str]:
+    from audiobook.stress_voicy import ADAPTER_PIN, ADAPTER_SHA256, BASE_PIN
+
+    old, stock_audio, stock_digest = read_run(stock)
+    seed = next(r["seed"] for r in old if r["case"] == "fuel")
+    expected = [r for r in trial_plan(seed) if r["condition"] == "acute"]
+    new, candidate_audio, candidate_digest = read_run(candidate, expected_plan=expected)
+    base = json.loads((stock / "provenance_PRIVATE.json").read_text(encoding="utf-8"))
+    adapted = json.loads((candidate / "provenance_PRIVATE.json").read_text(encoding="utf-8"))
+    if (adapted.get("baseline_run_digest") != stock_digest
+            or adapted.get("variant") != "voicy_v3"
+            or adapted.get("adapter_revision") != ADAPTER_PIN
+            or adapted.get("adapter_sha256") != ADAPTER_SHA256
+            or adapted.get("base_revision") != BASE_PIN
+            or adapted.get("matrices") != 196
+            or adapted.get("checkpoint_written") is not False
+            or any(adapted.get(k) != v for k, v in base.items() if k != "limitation")):
+        raise ValueError("COMPARISON_PROVENANCE_MISMATCH")
+    plain = [r for r in old if r["condition"] == "plain"]
+    records = plain + new
+    ids = {r["id"] for r in plain}
+    audio = {**{k: v for k, v in stock_audio.items() if k in ids}, **candidate_audio}
+    digest = hashlib.sha256((stock_digest + candidate_digest).encode("ascii")).hexdigest()
+    return records, audio, digest
 
 
 def make_key(records: list[dict], seed: int) -> list[dict]:
@@ -136,13 +166,15 @@ def main() -> int:
         q = subs.add_parser(mode)
         q.add_argument("--run", type=Path, required=True)
         q.add_argument("--review", type=Path, required=True)
+        q.add_argument("--voicy-run", type=Path, help="Compare stock plain with the Voicy marked arm")
         if mode == "prepare":
             q.add_argument("--shuffle-seed", type=int, required=True)
         else:
             q.add_argument("--ratings", type=Path, required=True)
             q.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
-    records, audio, digest = read_run(a.run)
+    records, audio, digest = (read_voicy_comparison(a.run, a.voicy_run)
+                              if a.voicy_run is not None else read_run(a.run))
     if a.mode == "prepare":
         key = make_key(records, a.shuffle_seed)
         a.review.mkdir(parents=True, exist_ok=False, mode=0o700)
@@ -169,6 +201,8 @@ def main() -> int:
             if tuple(reader.fieldnames or ()) != FIELDS:
                 raise ValueError("RATING_SCHEMA")
             summary = evaluate(records, key, list(reader))
+        if a.voicy_run is not None:
+            summary["comparison"] = {"plain": "stock Qwen", "acute": "Voicy v3"}
         with a.out.open("x", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
         print(json.dumps(summary, ensure_ascii=False))
