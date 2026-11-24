@@ -211,7 +211,7 @@ def main() -> int:
             trial_ready += int(complete)
             f.write(json.dumps({"id": row["id"], "hash": row["hash"],
                                 "marked_trial_text": marked,
-                                "complete_consensus": complete}, ensure_ascii=False) + "\\n")
+                                "complete_consensus": complete}, ensure_ascii=False) + "\n")
     summary["complete_consensus_rows"] = trial_ready
     (a.out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
