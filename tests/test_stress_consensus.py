@@ -49,3 +49,14 @@ def test_reject_conflicting_yo_or_dropped_occurrence():
         candidate_input("Молоко", [])
     with pytest.raises(ValueError, match="PREMARKED_OR_NONPLAIN_SOURCE"):
         candidate_input("Молоко\u0301", [])
+
+
+def test_book_inventory_uses_normalized_lines_only(tmp_path):
+    from audiobook.stress_consensus import book_rows
+    (tmp_path / "01_fixture.norm.txt").write_text("Замок.\n\nБереза.\n", encoding="utf-8")
+    (tmp_path / "02_fixture.norm.txt").write_text("Молоко.\n", encoding="utf-8")
+    (tmp_path / "01_fixture.acc.txt").write_text("Ложная разметка.", encoding="utf-8")
+    rows, hashes = book_rows(tmp_path)
+    assert [r["id"] for r in rows] == ["01_fixture.norm:1", "01_fixture.norm:3", "02_fixture.norm:1"]
+    assert [r["text"] for r in rows] == ["Замок.", "Береза.", "Молоко."]
+    assert len(hashes) == 2
