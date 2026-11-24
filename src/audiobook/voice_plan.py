@@ -25,7 +25,7 @@ def digest(value) -> str:
 
 
 def validate_rules(rules: dict) -> dict[str, str]:
-    """Restrict new candidates to exact spelling, stress case and е→ё.
+    """Restrict candidates to stress case, е→ё and exact phrase-final comma.
 
     Existing legacy dictionary entries are not rewritten or restricted. These
     rules are explicit candidates, not proof of human approval or TTS accuracy.
@@ -34,6 +34,11 @@ def validate_rules(rules: dict) -> dict[str, str]:
     if not isinstance(rules, dict):
         raise ValueError("rules: expected a JSON object")
     for key, value in rules.items():
+        # A narrowly scoped rhythm cue: an unchanged multiword Cyrillic
+        # phrase followed by exactly one comma. Not general punctuation edits.
+        if (isinstance(key, str) and isinstance(value, str)
+                and " " in key and _WORD.fullmatch(key) and value == key + ","):
+            continue
         if (not isinstance(key, str) or not isinstance(value, str)
                 or not _WORD.fullmatch(key) or not _WORD.fullmatch(value)
                 or len(key) != len(value) or key == value):
