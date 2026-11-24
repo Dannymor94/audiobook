@@ -168,9 +168,33 @@ def audit(rows: list[dict], primary, secondary) -> tuple[list[dict], dict]:
                      "not_agreed": total - counts["agree"], "acoustic_checked": 0}
 
 
+def book_rows(text_dir: Path) -> tuple[list[dict], dict[Path, str]]:
+    """Read canonical normalized sections, not stale accented files.
+
+    IDs/hashes identify source lines here, NOT production chunks.
+    """
+    paths = sorted(text_dir.glob("[0-9][0-9]_*.norm.txt"))
+    if not paths:
+        raise ValueError("NO_NORMALIZED_SECTIONS")
+    rows = []
+    hashes = {}
+    for path in paths:
+        data = path.read_bytes()
+        hashes[path] = hashlib.sha256(data).hexdigest()
+        for line_no, line in enumerate(data.decode("utf-8").splitlines(), 1):
+            if line.strip():
+                rows.append({"id": f"{path.stem}:{line_no}", "text": line,
+                             "hash": hashlib.sha256(line.encode("utf-8")).hexdigest()})
+    if not rows:
+        raise ValueError("EMPTY_BOOK")
+    return rows, hashes
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--manifest", type=Path, required=True)
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--manifest", type=Path)
+    source.add_argument("--book-text-dir", type=Path)
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
     # Both packages/models must have been separately installed, vetted and pinned.
@@ -181,17 +205,30 @@ def main() -> int:
     from silero_stress import load_accentor
     from importlib.metadata import version
 
-    data = a.manifest.read_bytes()
-    rows = [json.loads(line) for line in data.decode("utf-8").splitlines() if line.strip()]
+    if version("silero-stress") != "1.4":
+        raise ValueError("UNEXPECTED_SILERO_VERSION")
+    if a.manifest is not None:
+        data = a.manifest.read_bytes()
+        rows = [json.loads(line) for line in data.decode("utf-8").splitlines() if line.strip()]
+        hashes = {a.manifest: hashlib.sha256(data).hexdigest()}
+        source_kind = "chunk_manifest"
+    else:
+        rows, hashes = book_rows(a.book_text_dir)
+        source_kind = "normalized_book_lines"
     if not rows or len({r["id"] for r in rows}) != len(rows):
-        raise ValueError("INVALID_MANIFEST")
+        raise ValueError("INVALID_SOURCE")
     secondary = load_accentor()
     records, summary = audit(rows, lambda t: accent_lines([t])[0], secondary)
-    summary.update(manifest_sha256=hashlib.sha256(data).hexdigest(),
+    summary.update(source_kind=source_kind, source_files=len(hashes),
+                   source_sha256={p.name: h for p, h in hashes.items()},
                    ruaccent_version=version("ruaccent"), silero_version=version("silero-stress"),
-                   limitation="Agreement is not ground truth or acoustic correctness; chunk context only.")
-    if a.manifest.read_bytes() != data:
-        raise ValueError("MANIFEST_CHANGED")
+                   limitation="Agreement is not ground truth or acoustic correctness; local chunk/line context only.")
+    if a.manifest is not None:
+        summary["manifest_sha256"] = hashes[a.manifest]
+    if any(hashlib.sha256(p.read_bytes()).hexdigest() != h for p, h in hashes.items()):
+        raise ValueError("SOURCE_CHANGED")
+    if a.book_text_dir is not None and set(a.book_text_dir.glob("[0-9][0-9]_*.norm.txt")) != set(hashes):
+        raise ValueError("SOURCE_FILES_CHANGED")
     a.out.mkdir(parents=True, exist_ok=False, mode=0o700)
     with (a.out / "occurrences.jsonl").open("x", encoding="utf-8") as f:
         for r in records:
