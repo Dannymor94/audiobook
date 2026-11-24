@@ -130,3 +130,36 @@ def test_cli_parser_requires_section_and_has_no_apply():
         parser.parse_args(["voice-plan"])
     with pytest.raises(SystemExit):
         parser.parse_args(["voice-plan", "--section", "01_fixture", "--apply"])
+
+
+def test_cli_report_stays_local_and_source_manifest_unchanged(config, monkeypatch, tmp_path):
+    import json
+    from audiobook import paths
+
+    text = tmp_path / "text"
+    blocks = text / "blocks"
+    blocks.mkdir(parents=True)
+    out = tmp_path / "out"
+    section = "01_fixture"
+    units = [{"type": "paragraph", "text": "Положить на полку."}]
+    (text / (section + ".norm.txt")).write_text(units[0]["text"] + "\n", encoding="utf-8")
+    (blocks / (section + ".blocks.json")).write_text(
+        json.dumps({"blocks": units}, ensure_ascii=False), encoding="utf-8")
+    manifest = out / "sections" / section / "manifest.jsonl"
+    manifest.parent.mkdir(parents=True)
+    initial = json.dumps(baseline(units, config)[0], ensure_ascii=False) + "\n"
+    manifest.write_text(initial, encoding="utf-8")
+    monkeypatch.setattr(paths, "TEXT", text)
+    monkeypatch.setattr(paths, "OUT", out)
+    monkeypatch.setattr(pronounce, "load_table", lambda: {})
+    rules = tmp_path / "rules.json"
+    rules.write_text(json.dumps({"на полку": "на пОлку"}, ensure_ascii=False), encoding="utf-8")
+    assert voice_plan.run(config, section, str(rules), tag="trial") == 0
+    result = out / "voice_plan" / section / "trial.json"
+    report = json.loads(result.read_text(encoding="utf-8"))
+    assert report["counts"] == {"needs_synth": 1}
+    assert manifest.read_text(encoding="utf-8") == initial
+    rules.write_text("null", encoding="utf-8")
+    with pytest.raises(SystemExit, match="BLOCKED"):
+        voice_plan.run(config, section, str(rules), tag="invalid")
+    assert not (result.parent / "invalid.json").exists()
