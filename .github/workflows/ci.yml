@@ -23,3 +23,7 @@ jobs:
         run: |
           uv pip install --no-deps --require-hashes --only-binary :all: -r requirements/stress-audit.txt
           uv run --no-sync python scripts/smoke_stress_audit.py
+      - name: Pinned Wiktionary lexicon integration (public fixture only)
+        run: |
+          curl --fail --location --retry 2 --max-time 120 https://raw.githubusercontent.com/eugenysilin/russian-ukrainian-stress-data/main/data/ru-stress-dict.gz -o "$RUNNER_TEMP/ru-stress-dict.gz"
+          uv run --no-sync python -c 'import os; from pathlib import Path; from audiobook.stress_lexicon import load_candidates, WIKTIONARY_SHA256; result = load_candidates((Path(os.environ["RUNNER_TEMP"]) / "ru-stress-dict.gz").read_bytes(), {"молоко", "собака"}, WIKTIONARY_SHA256); assert result == {"молоко": 5, "собака": 3}, result'
