@@ -1,17 +1,17 @@
 import pytest
 
-from audiobook.stress_voicy import BASE_PIN, TARGET_PATTERN, TARGETS, apply_pairs, validate_config
+from audiobook.stress_voicy import BASE_PIN, BASE_REPO, TARGET_PATTERN, TARGETS, apply_pairs, read_adapter, validate_config
 
 torch = pytest.importorskip("torch")
 
 
 def test_exact_config_and_target_inventory():
     cfg = dict(r=16, alpha=32, applied_to="talker.model", target_modules=TARGET_PATTERN,
-               base="/public-cache/snapshots/" + BASE_PIN)
+               base=BASE_REPO, base_revision=BASE_PIN)
     validate_config(cfg)
     assert len(TARGETS) == len(set(TARGETS)) == 196
     for k, value in (("r", 8), ("alpha", 16), ("applied_to", "other"),
-                     ("target_modules", ".*"), ("base", "/wrong")):
+                     ("target_modules", ".*"), ("base", "/wrong"), ("base_revision", "wrong")):
         with pytest.raises(ValueError, match="UNEXPECTED_VOICY_CONFIG"):
             validate_config({**cfg, k: value})
 
@@ -45,3 +45,15 @@ def test_incomplete_or_wrong_shape_rejected_before_mutation():
         with pytest.raises(ValueError, match="ADAPTER_"):
             apply_pairs(invalid, params, (stem,))
         assert torch.equal(w, torch.ones_like(w))
+
+
+def test_published_config_missing_revision_rejected():
+    cfg = dict(r=16, alpha=32, applied_to="talker.model", target_modules=TARGET_PATTERN,
+               base=BASE_REPO)
+    with pytest.raises(ValueError, match="UNEXPECTED_VOICY_CONFIG"):
+        validate_config(cfg)
+
+
+def test_missing_adapter_rejected_before_model_load(tmp_path):
+    with pytest.raises(ValueError, match="ADAPTER_FILES_MISSING"):
+        read_adapter(tmp_path)
