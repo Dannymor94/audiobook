@@ -115,6 +115,8 @@ def candidate_input(text: str, findings: list[dict]) -> str:
     Retain punctuation, casing, all other letters and unresolved occurrences.
     This is NOT a production TTS adapter or a claim that consensus is correct.
     """
+    if "\u0301" in text or "+" in text:
+        raise ValueError("PREMARKED_OR_NONPLAIN_SOURCE")
     expected = [(i, m) for i, m in enumerate(WORD.finditer(text), 1)
                 if sum(c.lower() in VOWELS for c in m.group()) >= 2]
     if len(findings) != len(expected):
@@ -194,6 +196,23 @@ def main() -> int:
     with (a.out / "occurrences.jsonl").open("x", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    by_id: dict[str, list[dict]] = {}
+    for record in records:
+        by_id.setdefault(record["id"], []).append(record)
+    trial_ready = 0
+    with (a.out / "trial_inputs.jsonl").open("x", encoding="utf-8") as f:
+        for row in rows:
+            findings = by_id.get(row["id"], [])
+            try:
+                marked = candidate_input(row["text"], findings)
+            except ValueError:
+                marked = None
+            complete = marked is not None and all(x["status"] == "agree" for x in findings)
+            trial_ready += int(complete)
+            f.write(json.dumps({"id": row["id"], "hash": row["hash"],
+                                "marked_trial_text": marked,
+                                "complete_consensus": complete}, ensure_ascii=False) + "\\n")
+    summary["complete_consensus_rows"] = trial_ready
     (a.out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
     return 0
