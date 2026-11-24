@@ -31,3 +31,21 @@ def test_accounting_all_multisyllabic_occurrences():
     assert summary["not_agreed"] == 1
     assert summary["agreement_fraction"] == 0.5
     assert summary["acoustic_checked"] == 0
+
+
+def test_marked_trial_input_preserves_source_and_occurrence_order():
+    from audiobook.stress_consensus import candidate_input
+    text = "Замок, замок! Береза."
+    findings = compare(text, "З+амок, зам+ок! Бер+ёза.", "За\u0301мок, за\u0301мок! Бер+ёза.")
+    assert candidate_input(text, findings) == "За\u0301мок, замок! Берёза."
+
+
+def test_reject_conflicting_yo_or_dropped_occurrence():
+    import pytest
+    from audiobook.stress_consensus import candidate_input
+    assert parse_marked("б+ерёза")[1] is None
+    assert align("берёза", "бер+еза") is None
+    with pytest.raises(ValueError, match="INCOMPLETE_OCCURRENCE_ACCOUNTING"):
+        candidate_input("Молоко", [])
+    with pytest.raises(ValueError, match="PREMARKED_OR_NONPLAIN_SOURCE"):
+        candidate_input("Молоко\u0301", [])
