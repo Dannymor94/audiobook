@@ -601,7 +601,8 @@ def chunk_hash(text: str, model: str, seed: int, temperature: float,
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
-def build_manifest(units: list[dict], config: dict) -> list[dict]:
+def build_manifest(units: list[dict], config: dict, *,
+                   pronounce_table: dict[str, str] | None = None) -> list[dict]:
     model = voicecfg.model_id(config)  # 0.6B → bare name (old hashes kept)
     seed = config["model"]["seed"]
     temperature = config["model"]["temperature"]
@@ -609,7 +610,8 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     lat = latents_hash(config)
     from audiobook import leadin
     from audiobook.pronounce import load_table, respell
-    table = load_table()
+    # Explicit table snapshots are for read-only candidate planning; default is unchanged.
+    table = load_table() if pronounce_table is None else pronounce_table
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
