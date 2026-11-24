@@ -525,11 +525,21 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     p_sec = int(pauses.get("chapter", PAUSE_SECTION))
     by_end = {str(k): int(v) for k, v in (pauses.get("by_end") or {}).items()}
     chunks: list[dict] = []
+    role_carrier = (((config or {}).get("render") or {}).get("leadin") or {}).get(
+        "chapter_title_carrier", False)
+    if type(role_carrier) is not bool:
+        raise ValueError("chapter_title_carrier must be boolean")
     for u in units:
         t = u["type"]
         if t == "heading":
             pause = level_pause.get(u["level"], _HEADING_PAUSE.get(u["level"], 600))
-            chunks.extend({**h, "kind": "heading"} for h in _heading_chunks(u["text"], pause, pauses))
+            parts = [{**h, "kind": "heading"} for h in _heading_chunks(u["text"], pause, pauses)]
+            if role_carrier:
+                number, _label, _title = split_heading(u["text"])
+                # Same source heading only: require an actual separate chapter-number chunk.
+                if number and len(parts) > 1 and parts[0]["text"] == number:
+                    parts[-1]["chapter_title_carrier"] = number
+            chunks.extend(parts)
         elif t == "stack":
             pause = p_stack if not u["last_in_stack"] else p_par
             chunks.append({"text": u["text"], "pause_after_ms": pause, "kind": "stack"})
@@ -582,7 +592,8 @@ def chunk_open_end(text: str, next_text: str | None = None) -> bool:
 
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
                language: str, lat_hash: str, synth_text: str | None = None,
-               leadin: str | None = None, enum_pause_ms: int = 0) -> str:
+               leadin: str | None = None, enum_pause_ms: int = 0,
+               chapter_title_input: str | None = None) -> str:
     payload = f"{text}\x00{model}\x00{seed}\x00{temperature}\x00{language}\x00{lat_hash}"
     # The pronounce respelling only enters the hash when it actually changes the
     # text, so chunks the dictionary does not touch keep their pre-dictionary
@@ -598,6 +609,10 @@ def chunk_hash(text: str, model: str, seed: int, temperature: float,
     # so changing enum_pause_ms re-queues exactly the affected chunks.
     if enum_pause_ms:
         payload += f"\x00enum_pause={enum_pause_ms}"
+    # Opt-in chapter-title conditioning binds the entire padded model input,
+    # including carrier-only/cross-boundary dictionary edits. Legacy hashes stay intact.
+    if chapter_title_input is not None:
+        payload += "\\x00chapter_title_input=" + chapter_title_input
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
@@ -641,6 +656,14 @@ def build_manifest(units: list[dict], config: dict, *,
         # labels, never borrowing from one. Default mode → fixed carrier (fires).
         phrase = leadin.phrase_for(prepared, config, prev_prepared,
                                    kind in ("text", "stack") and prev_kind in ("text", "stack"))
+        chapter_title_input = None
+        if "chapter_title_carrier" in c:
+            if enum_pause_ms:
+                raise ValueError("chapter_title_carrier requires enum_pause_ms=0")
+            phrase = c["chapter_title_carrier"]
+            chapter_title_input = json.dumps(
+                [respell(leadin.pad(prepared, phrase), table), config["model"].get("sentinel", "")],
+                ensure_ascii=False, separators=(",", ":"))
         prev_prepared, prev_kind = prepared, kind
         # Enum-pause enters hash only when this chunk actually has splits.
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
@@ -651,7 +674,7 @@ def build_manifest(units: list[dict], config: dict, *,
             "n": n,
             "text": c["text"],
             "hash": chunk_hash(c["text"], model, seed, temperature, language, lat,
-                               synth_text, phrase, c_enum_ms),
+                               synth_text, phrase, c_enum_ms, chapter_title_input),
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "leadin": phrase,       # carrier/context read before the text and cut off (in hash)
