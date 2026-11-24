@@ -49,6 +49,7 @@ def leaders(out: Path, exclude: str | None = None) -> dict[str, tuple[str, dict]
             continue
         for r in _read(m):
             if (r.get("status") in DONE and not r.get("reused_from")
+                    and r.get("seed_provenance") != "unknown"
                     and (m.parent / "chunks" / f"{r['id']}.wav").exists()):
                 found.setdefault(r["hash"], (sec, r))
     return found
@@ -90,6 +91,7 @@ def before_render(sec_dir: Path, rows: list[dict], out: Path | None = None,
     lead = leaders(out, exclude=sec_dir.name)
     here = {r["hash"]: r for r in rows
             if r.get("status") in DONE and not r.get("reused_from")
+            and r.get("seed_provenance") != "unknown"
             and (chunks / f"{r['id']}.wav").exists()}
     copied = parked = 0
     first_pending: set[str] = set()
@@ -123,6 +125,7 @@ def after_render(sec_dir: Path, rows: list[dict]) -> int:
     chunks = sec_dir / "chunks"
     done = {r["hash"]: r for r in rows
             if r.get("status") in DONE and not r.get("reused_from")
+            and r.get("seed_provenance") != "unknown"
             and (chunks / f"{r['id']}.wav").exists()}
     filled = 0
     for r in rows:
@@ -159,7 +162,8 @@ def resync(sec_dir: Path, rows: list[dict], out: Path | None = None) -> int:
             by_id = cache[ls]
         lead = by_id.get(lid)
         src = out / "sections" / ls / "chunks" / f"{lid}.wav"
-        if lead is None or lead.get("hash") != r["hash"] or not src.exists():
+        if (lead is None or lead.get("hash") != r["hash"] or not src.exists()
+                or lead.get("seed_provenance") == "unknown"):
             r.pop("reused_from", None)          # leader gone/changed: stand alone
             continue
         wrote = _copy_wav(src, chunks / f"{r['id']}.wav")

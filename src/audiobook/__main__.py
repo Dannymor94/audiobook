@@ -50,6 +50,15 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    vp = sub.add_parser("voice-plan", help="приватный план произношения и интонаций без синтеза")
+    vp.add_argument("--section", required=True)
+    vp.add_argument("--rules", help="локальный JSON: точная фраза → кандидат произношения")
+    vp.add_argument("--sentence-ms", type=int)
+    vp.add_argument("--paragraph-ms", type=int)
+    vp.add_argument("--heading-ms", type=int, help="пауза после заголовка уровня 1")
+    vp.add_argument("--chapter-title-carrier", action="store_true",
+                    help="пробный контекст номера главы для названия")
+    vp.add_argument("--tag", default="plan")
     dc = sub.add_parser("decisions", help="страница решений на слух (build) и применение decisions.json (apply)")
     dcs = dc.add_subparsers(dest="decisions_cmd", required=True)
     dcs.add_parser("build", help="out/decisions/index.html + media/ (копии звука)")
@@ -196,6 +205,16 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("section")
     ac.add_argument("chunk_id")
     ac.add_argument("variant", type=int, help="номер варианта (1-based)")
+    ao = sub.add_parser("accept-original", help="принять существующий WAV после прослушивания")
+    ao.add_argument("section")
+    ao.add_argument("chunk_id")
+    ao.add_argument("--hash", required=True)
+    ao.add_argument("--wav-sha256", required=True)
+    seed_arg = ao.add_mutually_exclusive_group(required=True)
+    seed_arg.add_argument("--actual-seed", type=int)
+    seed_arg.add_argument("--unknown-seed", action="store_true",
+                          help="сохранить принятый WAV без выдуманного seed")
+
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
@@ -227,10 +246,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # Commands that write the book's cache/manifests: never with a trial config.
-_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "redo", "assemble", "master",
+_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "accept-original", "redo", "assemble", "master",
                      "headings", "credits", "export"}
 # Commands that load a model or rewrite a section: one at a time (heavy.lock).
-_HEAVY = {"chunk", "synth", "qc", "accept", "redo", "pron-test", "ref-compare",
+_HEAVY = {"chunk", "synth", "qc", "accept", "accept-original", "redo", "pron-test", "ref-compare",
           "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate",
           "credits", "passage"}
 
@@ -253,6 +272,10 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "voice-plan":
+        from .voice_plan import run as voice_plan
+        return voice_plan(load_config(), a.section, a.rules, a.sentence_ms,
+                          a.paragraph_ms, a.heading_ms, a.tag, a.chapter_title_carrier)
     if a.cmd == "decisions":
         from . import decisions
         if a.decisions_cmd == "build":
@@ -363,6 +386,10 @@ def _dispatch(a) -> int:
         if a.labels_cmd == "import":
             return labels.run_import(a.file, a.section)
         return labels.run_show(a.section)
+    if a.cmd == "accept-original":
+        from .redo import run_accept_original
+        return run_accept_original(load_config(), a.section, a.chunk_id,
+                                   a.hash, a.wav_sha256, a.actual_seed, unknown_seed=a.unknown_seed)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)

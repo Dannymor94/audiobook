@@ -525,11 +525,21 @@ def build_chunks(units: list[dict], config: dict | None = None) -> list[dict]:
     p_sec = int(pauses.get("chapter", PAUSE_SECTION))
     by_end = {str(k): int(v) for k, v in (pauses.get("by_end") or {}).items()}
     chunks: list[dict] = []
+    role_carrier = (((config or {}).get("render") or {}).get("leadin") or {}).get(
+        "chapter_title_carrier", False)
+    if type(role_carrier) is not bool:
+        raise ValueError("chapter_title_carrier must be boolean")
     for u in units:
         t = u["type"]
         if t == "heading":
             pause = level_pause.get(u["level"], _HEADING_PAUSE.get(u["level"], 600))
-            chunks.extend({**h, "kind": "heading"} for h in _heading_chunks(u["text"], pause, pauses))
+            parts = [{**h, "kind": "heading"} for h in _heading_chunks(u["text"], pause, pauses)]
+            if role_carrier:
+                number, _label, _title = split_heading(u["text"])
+                # Same source heading only: require an actual separate chapter-number chunk.
+                if number and len(parts) > 1 and parts[0]["text"] == number:
+                    parts[-1]["chapter_title_carrier"] = number
+            chunks.extend(parts)
         elif t == "stack":
             pause = p_stack if not u["last_in_stack"] else p_par
             chunks.append({"text": u["text"], "pause_after_ms": pause, "kind": "stack"})
@@ -582,7 +592,9 @@ def chunk_open_end(text: str, next_text: str | None = None) -> bool:
 
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
                language: str, lat_hash: str, synth_text: str | None = None,
-               leadin: str | None = None, enum_pause_ms: int = 0) -> str:
+               leadin: str | None = None, enum_pause_ms: int = 0,
+               chapter_title_input: str | None = None,
+               carrier_recovery_input: str | None = None) -> str:
     payload = f"{text}\x00{model}\x00{seed}\x00{temperature}\x00{language}\x00{lat_hash}"
     # The pronounce respelling only enters the hash when it actually changes the
     # text, so chunks the dictionary does not touch keep their pre-dictionary
@@ -598,10 +610,17 @@ def chunk_hash(text: str, model: str, seed: int, temperature: float,
     # so changing enum_pause_ms re-queues exactly the affected chunks.
     if enum_pause_ms:
         payload += f"\x00enum_pause={enum_pause_ms}"
+    # Opt-in chapter-title conditioning binds the entire padded model input,
+    # including carrier-only/cross-boundary dictionary edits. Legacy hashes stay intact.
+    if chapter_title_input is not None:
+        payload += "\\x00chapter_title_input=" + chapter_title_input
+    if carrier_recovery_input is not None:
+        payload += "\\x00carrier_recovery_input=" + carrier_recovery_input
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
-def build_manifest(units: list[dict], config: dict) -> list[dict]:
+def build_manifest(units: list[dict], config: dict, *,
+                   pronounce_table: dict[str, str] | None = None) -> list[dict]:
     model = voicecfg.model_id(config)  # 0.6B → bare name (old hashes kept)
     seed = config["model"]["seed"]
     temperature = config["model"]["temperature"]
@@ -609,10 +628,18 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
     lat = latents_hash(config)
     from audiobook import leadin
     from audiobook.pronounce import load_table, respell
-    table = load_table()
+    # Explicit table snapshots are for read-only candidate planning; default is unchanged.
+    table = load_table() if pronounce_table is None else pronounce_table
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
+    recovery = ((config.get("render") or {}).get("leadin") or {}).get("recovery_by_hash", {})
+    if not isinstance(recovery, dict) or any(
+        not isinstance(k, str) or not re.fullmatch(r"[0-9a-f]{40}", k)
+        or v not in ("none", "fixed") for k, v in recovery.items()
+    ):
+        raise ValueError("INVALID_CARRIER_RECOVERY")
+    used_recovery: set[str] = set()
     chunks = list(build_chunks(units, config))
     manifest: list[dict] = []
     prev_prepared, prev_kind = None, None
@@ -639,17 +666,45 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
         # labels, never borrowing from one. Default mode → fixed carrier (fires).
         phrase = leadin.phrase_for(prepared, config, prev_prepared,
                                    kind in ("text", "stack") and prev_kind in ("text", "stack"))
+        chapter_title_input = None
+        if "chapter_title_carrier" in c:
+            if enum_pause_ms:
+                raise ValueError("chapter_title_carrier requires enum_pause_ms=0")
+            phrase = c["chapter_title_carrier"]
+            chapter_title_input = json.dumps(
+                [respell(leadin.pad(prepared, phrase), table), config["model"].get("sentinel", "")],
+                ensure_ascii=False, separators=(",", ":"))
         prev_prepared, prev_kind = prepared, kind
         # Enum-pause enters hash only when this chunk actually has splits.
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
         )) else 0
+        base_hash = chunk_hash(c["text"], model, seed, temperature, language, lat,
+                               synth_text, phrase, c_enum_ms, chapter_title_input)
+        effective_hash = base_hash
+        if base_hash in recovery:
+            if (base_hash in used_recovery or not phrase or chapter_title_input is not None
+                    or enum_pause_ms or kind not in ("text", "stack")):
+                raise ValueError("INVALID_CARRIER_RECOVERY_TARGET")
+            used_recovery.add(base_hash)
+            if recovery[base_hash] == "none":
+                phrase = None
+            else:
+                fixed = leadin.carrier(config)
+                if not fixed or fixed[0] == phrase:
+                    raise ValueError("INVALID_FIXED_RECOVERY_CARRIER")
+                phrase = fixed[0]
+            recovery_input = json.dumps(
+                [respell(leadin.pad(prepared, phrase) if phrase else prepared, table),
+                 config["model"].get("sentinel", "")], ensure_ascii=False, separators=(",", ":"))
+            effective_hash = chunk_hash(c["text"], model, seed, temperature, language, lat,
+                                        synth_text, phrase, c_enum_ms,
+                                        carrier_recovery_input=recovery_input)
         manifest.append({
             "id": f"{n:04d}",
             "n": n,
             "text": c["text"],
-            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat,
-                               synth_text, phrase, c_enum_ms),
+            "hash": effective_hash,
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "leadin": phrase,       # carrier/context read before the text and cut off (in hash)
@@ -670,7 +725,8 @@ def build_manifest(units: list[dict], config: dict) -> list[dict]:
 # with the wav when a re-chunk keeps the chunk (same hash).
 _CARRY = ("status", "locked", "seed_override", "duration_ms", "seed", "cer",
           "transcript", "flag_words", "ms_per_char", "suspect",
-          "min_p", "mean_p", "takes", "take_base", "peak", "reused_from")
+          "min_p", "mean_p", "takes", "take_base", "peak", "reused_from",
+          "seed_provenance", "last_reported_seed", "approved_wav_sha256")
 
 
 def align(old: list[dict], new: list[dict]) -> tuple[list[dict], list[str], list[str]]:
