@@ -156,7 +156,8 @@ def prepared_input(row: dict, config: dict, table: dict) -> str:
 
 def plan_section(units: list[dict], old: list[dict], config: dict, table: dict,
                  rules: dict | None = None, sentence: int | None = None,
-                 paragraph: int | None = None, heading: int | None = None) -> dict:
+                 paragraph: int | None = None, heading: int | None = None,
+                 chapter_title_carrier: bool = False) -> dict:
     """Plan a section against a current, exactly validated manifest snapshot."""
     candidates = validate_rules({} if rules is None else rules)
     if (config.get("pauses_ms") or {}).get("enum_pause_ms"):
@@ -168,6 +169,8 @@ def plan_section(units: list[dict], old: list[dict], config: dict, table: dict,
         raise ValueError("STALE_MANIFEST: rebuild evidence, not production")
     anchors = source_anchors(units, baseline, config)
     candidate_config = pause_config(config, sentence, paragraph, heading)
+    if chapter_title_carrier:
+        candidate_config.setdefault("render", {}).setdefault("leadin", {})["chapter_title_carrier"] = True
     candidate_table = {**table, **candidates}
     future = chunker.build_manifest(units, candidate_config, pronounce_table=candidate_table)
     if len(future) != len(baseline):
@@ -178,8 +181,11 @@ def plan_section(units: list[dict], old: list[dict], config: dict, table: dict,
     rule_hits: Counter = Counter()
     pattern = pronounce.build_pattern(candidate_table)
     for live, a, b, anchor in zip(old, baseline, future, anchors):
-        if (a["id"], a["text"], a["leadin"], a["open_end"]) != (
-                b["id"], b["text"], b["leadin"], b["open_end"]):
+        if (a["id"], a["text"], a["open_end"]) != (
+                b["id"], b["text"], b["open_end"]):
+            raise ValueError("UNEXPECTED_SEGMENTATION_CHANGE")
+        if a["leadin"] != b["leadin"] and not (chapter_title_carrier and
+                anchor["role"] in ("chapter_title", "chapter_heading_combined")):
             raise ValueError("UNEXPECTED_SEGMENTATION_CHANGE")
         before = prepared_input(a, config, table)
         after = prepared_input(b, candidate_config, candidate_table)
@@ -239,7 +245,7 @@ def _unique_object(pairs):
 
 def run(config: dict, section: str, rules_file: str | None = None,
         sentence: int | None = None, paragraph: int | None = None,
-        heading: int | None = None, tag: str = "plan") -> int:
+        heading: int | None = None, tag: str = "plan", chapter_title_carrier: bool = False) -> int:
     if not re.fullmatch(r"[0-9]{2}_[A-Za-z0-9_-]+", section) or not re.fullmatch(r"[A-Za-z0-9_-]+", tag):
         raise SystemExit("voice-plan: недопустимое имя секции или тега")
     try:
@@ -250,7 +256,7 @@ def run(config: dict, section: str, rules_file: str | None = None,
         old = chunker._read_manifest(paths.OUT / "sections" / section / "manifest.jsonl")
         config = chunker.section_config(config, section)
         result = plan_section(units, old, config, pronounce.load_table(),
-                              rules, sentence, paragraph, heading)
+                              rules, sentence, paragraph, heading, chapter_title_carrier)
     except (ValueError, OSError, KeyError, TypeError, IndexError) as exc:
         # Only allow fixed diagnostic codes, never private source/error strings.
         codes = {"SOURCE_SPAN_MISMATCH", "SOURCE_CHUNK_MISMATCH",
