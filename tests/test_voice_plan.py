@@ -245,3 +245,68 @@ def test_exact_phrase_final_comma_candidate(config):
                     {"на полку": "на, полку"}, {"на полку": "на пОлку,"}):
         with pytest.raises(ValueError):
             voice_plan.validate_rules(invalid)
+
+
+def test_live_generation_seed_is_not_config_seed(config):
+    units = [{"type": "paragraph", "text": "Пример."}]
+    old = baseline(units, config)
+    old[0].update(status="done", seed=314159, seed_override=314159)
+    plan = voice_plan.plan_section(units, old, config, {})
+    assert plan["counts"] == {"review_only": 1}
+    old[0]["hash"] = "stale"
+    with pytest.raises(ValueError, match="STALE_MANIFEST"):
+        voice_plan.plan_section(units, old, config, {})
+
+
+def test_reviewed_stage_preserves_live_audio_and_binds_receipt(config, monkeypatch, tmp_path):
+    import json
+    import numpy as np
+    import soundfile as sf
+    from audiobook import paths, reviewed_stage
+
+    units = [{"type": "paragraph", "text": "Положить на полку и уйти."},
+             {"type": "paragraph", "text": "Далее."}]
+    section = "01_fixture"
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.setattr(chunker, "load_units", lambda *_: units)
+    monkeypatch.setattr(reviewed_stage, "generation_identity", lambda _: {"model": "fixture"})
+    monkeypatch.setattr(reviewed_stage, "input_identity", lambda row, cfg, table: {
+        "input_sha256": voice_plan.digest(voice_plan.prepared_input(row, cfg, table)),
+        "leadin": row["leadin"]})
+    live = tmp_path / "sections" / section
+    (live / "chunks").mkdir(parents=True)
+    old = baseline(units, config)
+    for i, row in enumerate(old):
+        row.update(status="done", seed=123 + i, duration_ms=100)
+        sf.write(live / "chunks" / (row["id"] + ".wav"),
+                 np.full(2400, 0.01 * (i + 1), dtype=np.float32), 24000, subtype="FLOAT")
+    chunker._write_manifest(live / "manifest.jsonl", old)
+    before = {p: p.read_bytes() for p in live.rglob("*") if p.is_file()}
+    rules = {"на полку": "на полку,"}
+    target = baseline(units, config, rules)[0]
+    sample = tmp_path / "reviewed.wav"
+    sf.write(sample, np.full(4800, 0.03, dtype=np.float32), 24000, subtype="FLOAT")
+    receipt = {"wav": str(sample), "seed": 123, "wav_sha256": reviewed_stage.file_digest(sample),
+               "input": reviewed_stage.input_identity(target, config, rules),
+               "generation": {"model": "fixture"}}
+    with pytest.raises(ValueError, match="TRIAL_INPUT_OR_GENERATION_MISMATCH"):
+        reviewed_stage.stage_section(section, "bad", config, {}, rules,
+                                     {"0001": {**receipt, "input": {}}}, chapter_title_carrier=False)
+    with pytest.raises(ValueError, match="TRIAL_WAV_DIGEST_MISMATCH"):
+        reviewed_stage.stage_section(section, "bad", config, {}, rules,
+                                     {"0001": {**receipt, "wav_sha256": "bad"}}, chapter_title_carrier=False)
+    assert not (tmp_path / "reviewed_stage" / "bad").exists()
+    stage = reviewed_stage.stage_section(section, "good", config, {}, rules,
+                                         {"0001": receipt}, chapter_title_carrier=False)
+    rows = chunker._read_manifest(stage / "manifest.jsonl")
+    assert rows[0]["hash"] == target["hash"] and rows[0]["locked"]
+    assert rows[0]["seed"] == rows[0]["seed_override"] == 123
+    assert rows[0]["duration_ms"] == 200 and rows[0]["status"] == "done"
+    assert rows[1] == old[1]
+    assert (stage / "chunks" / "0001.wav").read_bytes() == sample.read_bytes()
+    assert (stage / "chunks" / "0002.wav").read_bytes() == before[live / "chunks" / "0002.wav"]
+    assert json.loads((stage / "READY.json").read_text())["adopted_ids"] == ["0001"]
+    assert all(p.read_bytes() == data for p, data in before.items())
+    with pytest.raises(FileExistsError):
+        reviewed_stage.stage_section(section, "good", config, {}, rules,
+                                     {"0001": receipt}, chapter_title_carrier=False)
