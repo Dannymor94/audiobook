@@ -346,3 +346,63 @@ def test_accept_original_exact_wav_and_verified_seed(config, monkeypatch, tmp_pa
     assert rows[0]["hash"] == old[0]["hash"] and rows[0]["cer"] == 0.131
     assert rows[0]["duration_ms"] == 100 and rows[1] == old[1]
     assert wav.read_bytes() == data
+
+
+def test_carrier_recovery_exact_hash_and_unchanged_neighbors(config):
+    config["render"] = {"leadin": {"context": {"mode": "previous", "max_chars": 60},
+                                  "phrase": "Нейтральная фраза.", "max_chars": 10}}
+    units = [{"type": "paragraph", "text": "Первый контекст."},
+             {"type": "paragraph", "text": "Второй фрагмент."},
+             {"type": "paragraph", "text": "Третий фрагмент."}]
+    old = baseline(units, config)
+    assert old[1]["leadin"] == "Первый контекст."
+    for mode, expected in (("none", None), ("fixed", "Нейтральная фраза.")):
+        cfg = deepcopy(config)
+        cfg["render"]["leadin"]["recovery_by_hash"] = {old[1]["hash"]: mode}
+        new = baseline(units, cfg)
+        assert new[0] == old[0] and new[2] == old[2]
+        assert new[1]["leadin"] == expected and new[1]["hash"] != old[1]["hash"]
+        assert all(new[1][k] == old[1][k] for k in ("id", "text", "pause_after_ms", "open_end"))
+        assert voice_plan.plan_section(units, new, cfg, {})["counts"] == {"review_only": 3}
+    cfg["render"]["leadin"]["recovery_by_hash"] = {old[1]["hash"]: "bad"}
+    with pytest.raises(ValueError, match="INVALID_CARRIER_RECOVERY"):
+        baseline(units, cfg)
+
+
+def test_unknown_seed_accept_original_and_assembly(config, monkeypatch, tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from audiobook import assemble, paths, redo, reviewed_stage, reuse
+
+    section = "01_fixture"
+    units = [{"type": "paragraph", "text": "Пример."}]
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.setattr(chunker, "load_units", lambda *_: units)
+    monkeypatch.setattr(pronounce, "load_table", lambda: {})
+    live = tmp_path / "sections" / section
+    (live / "chunks").mkdir(parents=True)
+    rows = baseline(units, config)
+    rows[0].update(status="manual", seed=125)
+    manifest = live / "manifest.jsonl"
+    chunker._write_manifest(manifest, rows)
+    wav = live / "chunks" / "0001.wav"
+    sf.write(wav, np.full(2400, 0.02, dtype=np.float32), 24000, subtype="FLOAT")
+    data = wav.read_bytes()
+    digest = reviewed_stage.file_digest(wav)
+    with pytest.raises(ValueError, match="INVALID_ACCEPT_ORIGINAL_ARGUMENTS"):
+        redo.run_accept_original(config, section, "0001", rows[0]["hash"], digest, None)
+    assert redo.run_accept_original(config, section, "0001", rows[0]["hash"], digest,
+                                    None, unknown_seed=True) == 0
+    accepted = chunker._read_manifest(manifest)[0]
+    assert accepted["status"] == "done" and accepted["locked"]
+    assert accepted["seed"] is None and accepted["seed_override"] is None
+    assert accepted["seed_provenance"] == "unknown" and accepted["last_reported_seed"] == 125
+    assert accepted["approved_wav_sha256"] == digest and wav.read_bytes() == data
+    assert not reuse.leaders(tmp_path)
+    aligned, _, _ = chunker.align([accepted], baseline(units, config))
+    assert aligned[0]["seed_provenance"] == "unknown"
+    assert aligned[0]["approved_wav_sha256"] == digest
+    assemble.join_chunks([accepted], live / "chunks", config)
+    sf.write(wav, np.full(2400, 0.03, dtype=np.float32), 24000, subtype="FLOAT")
+    with pytest.raises(ValueError, match="UNVERIFIED_APPROVED_WAV"):
+        assemble.join_chunks([accepted], live / "chunks", config)
