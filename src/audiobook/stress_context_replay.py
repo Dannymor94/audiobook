@@ -117,7 +117,11 @@ def replay(rows: list[dict], findings: list[dict], diagnostics: list[dict],
                 flags.append("nonstandalone")
             if not flags:
                 continue
-            x, y = (m.get(f["ordinal"]) for m in maps)
+            if f["status"] == "alignment_error":
+                x, y = (m.get(f["ordinal"]) for m in maps)
+            else:
+                x = (f["ruaccent_word"], f["ruaccent_stress"], "full")
+                y = (f["silero_word"], f["silero_stress"], "full")
             recovery = "not_applicable"
             if f["status"] == "alignment_error":
                 if x is None or y is None:
