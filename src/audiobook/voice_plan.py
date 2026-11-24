@@ -16,7 +16,9 @@ from audiobook import chunker, leadin, paths, pronounce, voicecfg
 
 _WORD = re.compile(r"[А-Яа-яЁё]+(?: [А-Яа-яЁё]+)*")
 _VOWELS = frozenset("АЕЁИОУЫЭЮЯ")
-_FIELDS = ("id", "n", "text", "hash", "seed", "leadin", "open_end", "cont", "pause_after_ms")
+# A rendered row's seed is the actual generation seed, not config.model.seed.
+# The latter is already bound by the chunk hash; never compare them as metadata.
+_FIELDS = ("id", "n", "text", "hash", "leadin", "open_end", "cont", "pause_after_ms")
 
 
 def digest(value) -> str:
