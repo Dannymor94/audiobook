@@ -163,3 +163,68 @@ def test_cli_report_stays_local_and_source_manifest_unchanged(config, monkeypatc
     with pytest.raises(SystemExit, match="BLOCKED"):
         voice_plan.run(config, section, str(rules), tag="invalid")
     assert not (result.parent / "invalid.json").exists()
+
+
+def test_chapter_title_carrier_scoped_and_default_parity(config):
+    config["render"] = {"leadin": {"phrase": "Нейтральный контекст.", "max_chars": 55}}
+    units = [
+        {"type": "heading", "level": 1, "text": "Глава первая. Пример"},
+        {"type": "paragraph", "text": "Текст."},
+        {"type": "heading", "level": 2, "text": "Подзаголовок"},
+        {"type": "heading", "level": 1, "text": "Глава вторая. Метка: Название"},
+        {"type": "paragraph", "text": "Конец."},
+    ]
+    original = baseline(units, config)
+    off = deepcopy(config)
+    off["render"]["leadin"]["chapter_title_carrier"] = False
+    assert baseline(units, off) == original
+
+    enabled = deepcopy(config)
+    enabled["render"]["leadin"]["chapter_title_carrier"] = True
+    updated = baseline(units, enabled)
+    assert [r["text"] for r in updated] == [r["text"] for r in original]
+    assert [r["pause_after_ms"] for r in updated] == [r["pause_after_ms"] for r in original]
+    changed = [i for i, (a, b) in enumerate(zip(original, updated)) if a["hash"] != b["hash"]]
+    assert changed == [1, 6]
+    assert updated[1]["leadin"] == "Глава первая."
+    assert updated[6]["leadin"] == "Глава вторая."
+    assert voice_plan.prepared_input(updated[1], enabled, {}) == "Глава первая. Пример"
+    plan = voice_plan.plan_section(units, original, config, {}, chapter_title_carrier=True)
+    assert plan["counts"] == {"needs_synth": 2, "review_only": 6}
+    assert not plan["blocked"]
+    assert config["render"]["leadin"].get("chapter_title_carrier") is None
+
+
+def test_chapter_title_carrier_hash_binds_padded_dictionary(config):
+    config["render"] = {"leadin": {"chapter_title_carrier": True}}
+    units = [{"type": "heading", "level": 1, "text": "Глава первая. Пример"}]
+    old = baseline(units, config)
+    rules = {"первая": "пЕрвая"}
+    new = baseline(units, config, rules)
+    assert old[1]["text"] == new[1]["text"]
+    assert old[1]["leadin"] == new[1]["leadin"]
+    assert old[1]["hash"] != new[1]["hash"]
+    assert voice_plan.prepared_input(old[1], config, {}) != voice_plan.prepared_input(new[1], config, rules)
+    plan = voice_plan.plan_section(units, old, config, {}, rules=rules)
+    assert not plan["blocked"]
+
+
+def test_chapter_title_carrier_requires_actual_split(config):
+    config["render"] = {"leadin": {"chapter_title_carrier": True}}
+    config["pauses_ms"].pop("heading_number")
+    config["pauses_ms"].pop("heading_colon")
+    units = [{"type": "heading", "level": 1, "text": "Глава первая. Пример"},
+             {"type": "heading", "level": 2, "text": "Подзаголовок"}]
+    old = baseline(units, config)
+    assert all(r["leadin"] is None for r in old)
+    config["render"]["leadin"]["chapter_title_carrier"] = "false"
+    with pytest.raises(ValueError, match="boolean"):
+        baseline(units, config)
+
+
+def test_chapter_title_carrier_rejects_enum_mode(config):
+    config["render"] = {"leadin": {"chapter_title_carrier": True}}
+    config["pauses_ms"]["enum_pause_ms"] = 100
+    units = [{"type": "heading", "level": 1, "text": "Глава первая. Пример"}]
+    with pytest.raises(ValueError, match="enum_pause_ms"):
+        baseline(units, config)
