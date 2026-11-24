@@ -23,7 +23,20 @@ public metadata; do not improvise mapping or bypass checks.
 
 Gamebox only, isolated checkout, green CI, persistent root storage, detached
 execution and log/PID/exit status. No /tmp output, no competing jobs, no
-downloads, no production edits. Check RAM, disk, snapshot and reference.
+production edits. Check RAM, disk, snapshot and reference. Provision the
+already verified adapter.json and adapter.safetensors via existing trusted
+local transfer from Mac to a new persistent gamebox directory. If those files
+are no longer available, download only these two public files from the exact
+pinned revision in a separate network-enabled provisioning step before any
+private processing; verify config Git blob against the earlier preflight and
+weights SHA256, then disconnect external network. Never execute upstream code.
+The published adapter config must have base=Qwen/Qwen3-TTS-12Hz-1.7B-Base
+and base_revision=fd4b254389122332181a7c3db7f27e918eec64e3 (not a local path).
+Before loading the large model, run the lightweight check:
+
+uv run --no-sync python -c 'from pathlib import Path; import sys; from audiobook.stress_voicy import read_adapter; read_adapter(Path(sys.argv[1])); print("ADAPTER_PREFLIGHT_PASS")' "$ADAPTER_DIR"
+
+If mismatch remains, report exact public config metadata and stop; no bypass.
 Use same reference WAV/text, ICL, CPU FP32, 8 threads, temp 1.0, seed 42,
 same library versions, max_new_tokens=256 as actual S4a run.
 Reuse completed durable S4a baseline. Example:
