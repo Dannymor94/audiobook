@@ -115,9 +115,10 @@ def main() -> int:
                       limitation="Isolated direct mark probe; not production preprocessing parity.")
     if a.voicy_adapter is not None:
         from audiobook.stress_control_review import read_run
-        from audiobook.stress_voicy import BASE_PIN
+        from audiobook.stress_voicy import BASE_PIN, read_adapter
         if snapshot.name != BASE_PIN:
             raise ValueError("BASE_REVISION_MISMATCH")
+        read_adapter(a.voicy_adapter)
         baseline, _, baseline_digest = read_run(a.baseline_run)
         prior = json.loads((a.baseline_run / "provenance_PRIVATE.json").read_text(encoding="utf-8"))
         if (any(r["status"] != "generated" for r in baseline)
