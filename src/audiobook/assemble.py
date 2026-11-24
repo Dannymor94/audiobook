@@ -98,7 +98,14 @@ def join_chunks(rows: list[dict], chunks_dir: Path,
     stats: list[dict] = []
     pos = 0  # samples so far in the section
     for i, row in enumerate(rows):
-        raw, sr = sf.read(str(chunks_dir / f"{row['id']}.wav"), dtype="float32")
+        wav_path = chunks_dir / f"{row['id']}.wav"
+        if row.get("seed_provenance") == "unknown":
+            from audiobook.reviewed_stage import file_digest
+            if (not row.get("locked") or row.get("seed") is not None
+                    or row.get("seed_override") is not None
+                    or file_digest(wav_path) != row.get("approved_wav_sha256")):
+                raise ValueError("UNVERIFIED_APPROVED_WAV")
+        raw, sr = sf.read(str(wav_path), dtype="float32")
         assert sr == _SR, f"unexpected sr {sr} in {row['id']}"
         a, b = _trim_bounds(raw)
         trimmed = raw[a:b]
