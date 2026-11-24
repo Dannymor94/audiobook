@@ -205,6 +205,13 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("section")
     ac.add_argument("chunk_id")
     ac.add_argument("variant", type=int, help="номер варианта (1-based)")
+    ao = sub.add_parser("accept-original", help="принять существующий WAV после прослушивания")
+    ao.add_argument("section")
+    ao.add_argument("chunk_id")
+    ao.add_argument("--hash", required=True)
+    ao.add_argument("--wav-sha256", required=True)
+    ao.add_argument("--actual-seed", required=True, type=int)
+
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
         s.add_argument("--chapter", type=int, default=None)
@@ -236,10 +243,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # Commands that write the book's cache/manifests: never with a trial config.
-_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "redo", "assemble", "master",
+_MAIN_CONFIG_ONLY = {"chunk", "synth", "qc", "accept", "accept-original", "redo", "assemble", "master",
                      "headings", "credits", "export"}
 # Commands that load a model or rewrite a section: one at a time (heavy.lock).
-_HEAVY = {"chunk", "synth", "qc", "accept", "redo", "pron-test", "ref-compare",
+_HEAVY = {"chunk", "synth", "qc", "accept", "accept-original", "redo", "pron-test", "ref-compare",
           "ref-scout", "phoneme-check", "headings", "bench", "pick-ref", "calibrate",
           "credits", "passage"}
 
@@ -376,6 +383,10 @@ def _dispatch(a) -> int:
         if a.labels_cmd == "import":
             return labels.run_import(a.file, a.section)
         return labels.run_show(a.section)
+    if a.cmd == "accept-original":
+        from .redo import run_accept_original
+        return run_accept_original(load_config(), a.section, a.chunk_id,
+                                   a.hash, a.wav_sha256, a.actual_seed)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
