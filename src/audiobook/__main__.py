@@ -50,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     im = sub.add_parser("impact", help="сколько отрендеренного перерендерит текущая правка настроек")
     im.add_argument("--section", default=None)
     im.add_argument("--verbose", action="store_true", help="показать затронутые чанки")
+    vp = sub.add_parser("voice-plan", help="приватный план произношения и интонаций без синтеза")
+    vp.add_argument("--section", required=True)
+    vp.add_argument("--rules", help="локальный JSON: точная фраза → кандидат произношения")
+    vp.add_argument("--sentence-ms", type=int)
+    vp.add_argument("--paragraph-ms", type=int)
+    vp.add_argument("--heading-ms", type=int, help="пауза после заголовка уровня 1")
+    vp.add_argument("--tag", default="plan")
     dc = sub.add_parser("decisions", help="страница решений на слух (build) и применение decisions.json (apply)")
     dcs = dc.add_subparsers(dest="decisions_cmd", required=True)
     dcs.add_parser("build", help="out/decisions/index.html + media/ (копии звука)")
@@ -253,6 +260,10 @@ def _dispatch(a) -> int:
     if a.cmd == "impact":
         from .impact import run as impact
         return impact(load_config(), a.section, a.verbose)
+    if a.cmd == "voice-plan":
+        from .voice_plan import run as voice_plan
+        return voice_plan(load_config(), a.section, a.rules, a.sentence_ms,
+                          a.paragraph_ms, a.heading_ms, a.tag)
     if a.cmd == "decisions":
         from . import decisions
         if a.decisions_cmd == "build":
