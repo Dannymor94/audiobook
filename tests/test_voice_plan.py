@@ -346,3 +346,86 @@ def test_accept_original_exact_wav_and_verified_seed(config, monkeypatch, tmp_pa
     assert rows[0]["hash"] == old[0]["hash"] and rows[0]["cer"] == 0.131
     assert rows[0]["duration_ms"] == 100 and rows[1] == old[1]
     assert wav.read_bytes() == data
+
+
+def test_scoped_qc_does_not_render_or_touch_other_rows(config, monkeypatch, tmp_path):
+    from audiobook import paths, qc, probe, worker
+
+    section = "01_fixture"
+    units = [{"type": "paragraph", "text": "Пример."},
+             {"type": "paragraph", "text": "Далее."}]
+    config["qc"] = {"cer_threshold": 0.05}
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.setattr(chunker, "load_units", lambda *_: units)
+    monkeypatch.setattr(pronounce, "load_table", lambda: {})
+    monkeypatch.setattr(probe, "load_watch", lambda: [])
+    monkeypatch.setattr(qc, "load_whisper", lambda: object())
+    monkeypatch.setattr(qc, "_release", lambda _: None)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("scoped measurement must not synthesize")
+    monkeypatch.setattr(worker, "TimeoutSynth", forbidden)
+    seen = []
+    def measure(_wm, wav, _text, _watch, _conf):
+        seen.append(wav.name)
+        return {"cer": 0.2}
+    monkeypatch.setattr(qc, "_measure", measure)
+    sec = tmp_path / "sections" / section
+    (sec / "chunks").mkdir(parents=True)
+    old = baseline(units, config)
+    old[0].update(status="done", seed=123, duration_ms=100)
+    old[1].update(status="done", seed=456, locked=True)
+    manifest = sec / "manifest.jsonl"
+    chunker._write_manifest(manifest, old)
+    for row in old:
+        (sec / "chunks" / (row["id"] + ".wav")).write_bytes(b"fixture")
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError, match="UNKNOWN_CHUNK"):
+        qc.check_selected(config, section, ["9999"])
+    assert manifest.read_bytes() == before and not seen
+    assert qc.check_selected(config, section, ["0001"]) == 2
+    rows = chunker._read_manifest(manifest)
+    assert seen == ["0001.wav"]
+    assert rows[0]["status"] == "manual" and rows[0]["seed"] == 123
+    assert rows[1] == old[1]
+    assert all(p.read_bytes() == b"fixture" for p in (sec / "chunks").glob("*.wav"))
+    assert qc.check_selected(config, section, ["0002"]) == 0
+    assert chunker._read_manifest(manifest)[1]["locked"]
+
+
+def test_failed_qc_retries_do_not_change_wav_seed(config, monkeypatch, tmp_path):
+    from audiobook import paths, qc, probe, synth, worker
+
+    section = "01_fixture"
+    units = [{"type": "paragraph", "text": "Пример."}]
+    config["qc"] = {"cer_threshold": 0.05, "max_retries": 2}
+    monkeypatch.setattr(paths, "OUT", tmp_path)
+    monkeypatch.setattr(chunker, "load_units", lambda *_: units)
+    monkeypatch.setattr(pronounce, "load_table", lambda: {})
+    monkeypatch.setattr(probe, "load_watch", lambda: [])
+    monkeypatch.setattr(qc, "load_whisper", lambda: object())
+    monkeypatch.setattr(qc, "_release", lambda _: None)
+    monkeypatch.setattr(qc, "_measure", lambda *a: {"cer": 0.2, "flag_words": []})
+    monkeypatch.setattr(synth, "worker_config", lambda *a: {})
+    monkeypatch.setattr(synth, "ensure_manifest_current", lambda *a: None)
+    attempted = []
+    class FakeEngine:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def synth(self, _text, seed, **kw):
+            attempted.append(seed)
+            return None
+    monkeypatch.setattr(worker, "TimeoutSynth", FakeEngine)
+    sec = tmp_path / "sections" / section
+    (sec / "chunks").mkdir(parents=True)
+    rows = baseline(units, config)
+    rows[0].update(status="done", seed=123, duration_ms=100)
+    manifest = sec / "manifest.jsonl"
+    chunker._write_manifest(manifest, rows)
+    wav = sec / "chunks" / "0001.wav"
+    wav.write_bytes(b"old audio")
+    qc.run(config, section)
+    result = chunker._read_manifest(manifest)[0]
+    assert attempted == [124, 125]
+    assert result["seed"] == 123 and result["status"] == "manual"
+    assert wav.read_bytes() == b"old audio"
