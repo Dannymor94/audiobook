@@ -243,8 +243,8 @@ def run(config: dict, section: str, rules_file: str | None = None,
     if not re.fullmatch(r"[0-9]{2}_[A-Za-z0-9_-]+", section) or not re.fullmatch(r"[A-Za-z0-9_-]+", tag):
         raise SystemExit("voice-plan: недопустимое имя секции или тега")
     try:
-        rules = (json.loads(Path(rules_file).read_text(encoding="utf-8"),
-                            object_pairs_hook=_unique_object) if rules_file else {})
+        rules = (validate_rules(json.loads(Path(rules_file).read_text(encoding="utf-8"),
+                                           object_pairs_hook=_unique_object)) if rules_file else {})
         nn, slug = section.split("_", 1)
         units = chunker.load_units(nn, slug)
         old = chunker._read_manifest(paths.OUT / "sections" / section / "manifest.jsonl")
@@ -252,8 +252,14 @@ def run(config: dict, section: str, rules_file: str | None = None,
         result = plan_section(units, old, config, pronounce.load_table(),
                               rules, sentence, paragraph, heading)
     except (ValueError, OSError, KeyError, TypeError, IndexError) as exc:
-        # Do not echo a JSON/manifest error containing private corpus text.
-        raise SystemExit(f"voice-plan: BLOCKED ({type(exc).__name__}); проверьте входные данные локально") from None
+        # Only allow fixed diagnostic codes, never private source/error strings.
+        codes = {"SOURCE_SPAN_MISMATCH", "SOURCE_CHUNK_MISMATCH",
+                 "SOURCE_UNIT_NOT_EXHAUSTED", "SOURCE_SECTION_NOT_EXHAUSTED",
+                 "STALE_MANIFEST: rebuild evidence, not production",
+                 "ENUM_SYNTH_UNSUPPORTED: per-fragment synth input requires review",
+                 "UNEXPECTED_SEGMENTATION_CHANGE"}
+        reason = str(exc) if str(exc) in codes else type(exc).__name__
+        raise SystemExit(f"voice-plan: BLOCKED ({reason}); проверьте входные данные локально") from None
     result["section"] = section
     dest = paths.OUT / "voice_plan" / section
     dest.mkdir(parents=True, exist_ok=True, mode=0o700)
