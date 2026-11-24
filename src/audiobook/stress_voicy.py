@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 
+BASE_REPO = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 BASE_PIN = "fd4b254389122332181a7c3db7f27e918eec64e3"
 ADAPTER_PIN = "e644ae00257fdd4db0e51b11057370dff6be8bc2"
 ADAPTER_SHA256 = "702338d0e81ef8d04715ebd19ebe5eaf43b83446c04ee37f1a9108a9235f2b99"
@@ -24,8 +25,8 @@ def validate_config(cfg: dict) -> None:
             or type(cfg.get("alpha")) is not int or cfg["alpha"] != 32
             or cfg.get("applied_to") != "talker.model"
             or cfg.get("target_modules") != TARGET_PATTERN
-            or not isinstance(cfg.get("base"), str)
-            or Path(cfg["base"]).name != BASE_PIN):
+            or cfg.get("base") != BASE_REPO
+            or cfg.get("base_revision") != BASE_PIN):
         raise ValueError("UNEXPECTED_VOICY_CONFIG")
 
 
@@ -62,17 +63,25 @@ def apply_pairs(tensors: dict, params: dict, targets: tuple[str, ...]) -> None:
             w.copy_(merged)
 
 
+def read_adapter(adapter_dir: Path) -> tuple[bytes, bytes]:
+    """Fail before loading the large TTS model; actual merge rechecks bytes."""
+    if not all((adapter_dir / name).is_file() for name in ("adapter.json", "adapter.safetensors")):
+        raise ValueError("ADAPTER_FILES_MISSING")
+    cfg_bytes = (adapter_dir / "adapter.json").read_bytes()
+    validate_config(json.loads(cfg_bytes))
+    data = (adapter_dir / "adapter.safetensors").read_bytes()
+    if len(data) != 34908456 or hashlib.sha256(data).hexdigest() != ADAPTER_SHA256:
+        raise ValueError("ADAPTER_DIGEST_MISMATCH")
+    return cfg_bytes, data
+
+
 def apply_voicy(model, snapshot: Path, adapter_dir: Path) -> dict:
     from safetensors import safe_open
     from safetensors.torch import load
 
     if snapshot.name != BASE_PIN:
         raise ValueError("BASE_REVISION_MISMATCH")
-    cfg_bytes = (adapter_dir / "adapter.json").read_bytes()
-    validate_config(json.loads(cfg_bytes))
-    data = (adapter_dir / "adapter.safetensors").read_bytes()
-    if len(data) != 34908456 or hashlib.sha256(data).hexdigest() != ADAPTER_SHA256:
-        raise ValueError("ADAPTER_DIGEST_MISMATCH")
+    cfg_bytes, data = read_adapter(adapter_dir)
     tensors = load(data)
     if sum(t.numel() for t in tensors.values()) != 17432576:
         raise ValueError("ADAPTER_PARAMETER_COUNT_MISMATCH")
