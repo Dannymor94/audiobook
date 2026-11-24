@@ -593,7 +593,8 @@ def chunk_open_end(text: str, next_text: str | None = None) -> bool:
 def chunk_hash(text: str, model: str, seed: int, temperature: float,
                language: str, lat_hash: str, synth_text: str | None = None,
                leadin: str | None = None, enum_pause_ms: int = 0,
-               chapter_title_input: str | None = None) -> str:
+               chapter_title_input: str | None = None,
+               carrier_recovery_input: str | None = None) -> str:
     payload = f"{text}\x00{model}\x00{seed}\x00{temperature}\x00{language}\x00{lat_hash}"
     # The pronounce respelling only enters the hash when it actually changes the
     # text, so chunks the dictionary does not touch keep their pre-dictionary
@@ -613,6 +614,8 @@ def chunk_hash(text: str, model: str, seed: int, temperature: float,
     # including carrier-only/cross-boundary dictionary edits. Legacy hashes stay intact.
     if chapter_title_input is not None:
         payload += "\\x00chapter_title_input=" + chapter_title_input
+    if carrier_recovery_input is not None:
+        payload += "\\x00carrier_recovery_input=" + carrier_recovery_input
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
@@ -630,6 +633,13 @@ def build_manifest(units: list[dict], config: dict, *,
 
     enum_pause_ms = config.get("pauses_ms", {}).get("enum_pause_ms", 0)
 
+    recovery = ((config.get("render") or {}).get("leadin") or {}).get("recovery_by_hash", {})
+    if not isinstance(recovery, dict) or any(
+        not isinstance(k, str) or not re.fullmatch(r"[0-9a-f]{40}", k)
+        or v not in ("none", "fixed") for k, v in recovery.items()
+    ):
+        raise ValueError("INVALID_CARRIER_RECOVERY")
+    used_recovery: set[str] = set()
     chunks = list(build_chunks(units, config))
     manifest: list[dict] = []
     prev_prepared, prev_kind = None, None
@@ -669,12 +679,32 @@ def build_manifest(units: list[dict], config: dict, *,
         c_enum_ms = enum_pause_ms if (enum_pause_ms and any(
             len(enum_splits(s)) > 1 for s in _split_sentences(c["text"])
         )) else 0
+        base_hash = chunk_hash(c["text"], model, seed, temperature, language, lat,
+                               synth_text, phrase, c_enum_ms, chapter_title_input)
+        effective_hash = base_hash
+        if base_hash in recovery:
+            if (base_hash in used_recovery or not phrase or chapter_title_input is not None
+                    or enum_pause_ms or kind not in ("text", "stack")):
+                raise ValueError("INVALID_CARRIER_RECOVERY_TARGET")
+            used_recovery.add(base_hash)
+            if recovery[base_hash] == "none":
+                phrase = None
+            else:
+                fixed = leadin.carrier(config)
+                if not fixed or fixed[0] == phrase:
+                    raise ValueError("INVALID_FIXED_RECOVERY_CARRIER")
+                phrase = fixed[0]
+            recovery_input = json.dumps(
+                [respell(leadin.pad(prepared, phrase) if phrase else prepared, table),
+                 config["model"].get("sentinel", "")], ensure_ascii=False, separators=(",", ":"))
+            effective_hash = chunk_hash(c["text"], model, seed, temperature, language, lat,
+                                        synth_text, phrase, c_enum_ms,
+                                        carrier_recovery_input=recovery_input)
         manifest.append({
             "id": f"{n:04d}",
             "n": n,
             "text": c["text"],
-            "hash": chunk_hash(c["text"], model, seed, temperature, language, lat,
-                               synth_text, phrase, c_enum_ms, chapter_title_input),
+            "hash": effective_hash,
             "seed": seed,
             "pause_after_ms": c["pause_after_ms"],
             "leadin": phrase,       # carrier/context read before the text and cut off (in hash)
@@ -695,7 +725,8 @@ def build_manifest(units: list[dict], config: dict, *,
 # with the wav when a re-chunk keeps the chunk (same hash).
 _CARRY = ("status", "locked", "seed_override", "duration_ms", "seed", "cer",
           "transcript", "flag_words", "ms_per_char", "suspect",
-          "min_p", "mean_p", "takes", "take_base", "peak", "reused_from")
+          "min_p", "mean_p", "takes", "take_base", "peak", "reused_from",
+          "seed_provenance", "last_reported_seed", "approved_wav_sha256")
 
 
 def align(old: list[dict], new: list[dict]) -> tuple[list[dict], list[str], list[str]]:
