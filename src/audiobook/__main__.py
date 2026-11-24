@@ -210,7 +210,10 @@ def build_parser() -> argparse.ArgumentParser:
     ao.add_argument("chunk_id")
     ao.add_argument("--hash", required=True)
     ao.add_argument("--wav-sha256", required=True)
-    ao.add_argument("--actual-seed", required=True, type=int)
+    seed_arg = ao.add_mutually_exclusive_group(required=True)
+    seed_arg.add_argument("--actual-seed", type=int)
+    seed_arg.add_argument("--unknown-seed", action="store_true",
+                          help="сохранить принятый WAV без выдуманного seed")
 
     for name in ("synth", "qc", "assemble", "master"):
         s = sub.add_parser(name)
@@ -386,7 +389,7 @@ def _dispatch(a) -> int:
     if a.cmd == "accept-original":
         from .redo import run_accept_original
         return run_accept_original(load_config(), a.section, a.chunk_id,
-                                   a.hash, a.wav_sha256, a.actual_seed)
+                                   a.hash, a.wav_sha256, a.actual_seed, unknown_seed=a.unknown_seed)
     if a.cmd == "accept":
         from .redo import run_accept
         return run_accept(load_config(), a.section, a.chunk_id, a.variant)
