@@ -352,6 +352,9 @@ def run(config: dict, section: str | None = None) -> int:
     timeout_s = rcfg.get("chunk_timeout_s", 120)
 
     recovered = 0
+    # A failed attempt leaves the previous WAV intact. Track attempted seeds
+    # separately; row.seed must always describe the current audio.
+    attempted_seeds: dict[str, int] = {}
     for _tri in range(1, max_retries + 1):
         # followers (reuse) are never re-synthesised on their own: they mirror the leader
         fails = [r for r in rows if r.get("status") == "qc_fail" and not r.get("reused_from")]
@@ -360,8 +363,11 @@ def run(config: dict, section: str | None = None) -> int:
         # Re-synth pass (Qwen only).
         with TimeoutSynth(wcfg, timeout_s) as eng:
             for r in fails:
-                base = r.get("seed") or seed_for_chunk(r["hash"])
-                new_seed = base + 1
+                base = r.get("seed")
+                if base is None:
+                    base = seed_for_chunk(r["hash"])
+                new_seed = attempted_seeds.get(r["id"], base) + 1
+                attempted_seeds[r["id"]] = new_seed
                 # Same pad→respell→sentinel as render, so a re-synth of a short
                 # chunk keeps its lead-in (and gets the carrier trimmed off).
                 synth_text, phrase = prepare_synth_text(r["text"], config, table, sentinel,
@@ -369,7 +375,6 @@ def run(config: dict, section: str | None = None) -> int:
                 wav = eng.synth(synth_text, new_seed, **({"leadin": phrase} if phrase else {}))
                 if wav is None:  # capped/timeout — leave qc_fail, becomes manual
                     log.warning("qc re-synth failed (cap/timeout) chunk %s", r["id"])
-                    r["seed"] = new_seed  # next round tries the next seed, not this one again
                     continue
                 wav_path = chunks_dir / f"{r['id']}.wav"
                 tmp = wav_path.parent / (wav_path.name + ".part")
@@ -517,3 +522,48 @@ def _takes_phase(rows, config, sec_dir, chunks_dir, manifest_path, wcfg, timeout
 def _write_manifest_rows(path, rows) -> None:
     from audiobook.synth import _write_manifest
     _write_manifest(path, rows)
+
+
+def check_selected(config: dict, section: str | None, ids: list[str]) -> int:
+    """Measure only explicitly selected existing WAVs; never synthesize or resync.
+
+    Useful after targeted repairs or on a completed prefix. Unselected rows
+    and every WAV stay unchanged. Locked audio is never demoted by ASR.
+    """
+    from audiobook import chunker, pronounce, voice_plan
+    from audiobook.probe import load_watch
+    from audiobook.synth import _read_manifest, _write_manifest
+
+    if not section or not re.fullmatch(r"[0-9]{2}_[A-Za-z0-9_-]+", section):
+        raise ValueError("INVALID_SECTION")
+    if not ids or len(set(ids)) != len(ids):
+        raise ValueError("INVALID_CHUNK_SELECTION")
+    sec_dir = paths.OUT / "sections" / section
+    manifest = sec_dir / "manifest.jsonl"
+    rows = _read_manifest(manifest)
+    config = chunker.section_config(config, section)
+    nn, slug = section.split("_", 1)
+    voice_plan.plan_section(chunker.load_units(nn, slug), rows, config, pronounce.load_table())
+    selected = [r for r in rows if r["id"] in ids]
+    if len(selected) != len(ids):
+        raise ValueError("UNKNOWN_CHUNK")
+    chunks = sec_dir / "chunks"
+    for r in selected:
+        if (r.get("status") not in ("done", "manual", "qc_fail")
+                or not (chunks / f"{r['id']}.wav").is_file()):
+            raise ValueError("SELECTED_AUDIO_NOT_READY")
+    threshold = float(config["qc"]["cer_threshold"])
+    watch = {_norm_word(w) for w in load_watch()}
+    min_conf = float(config["qc"].get("word_conf", 0.6))
+    wm = load_whisper()
+    try:
+        for r in selected:
+            r.update(_measure(wm, chunks / f"{r['id']}.wav", r["text"], watch, min_conf))
+            r["ms_per_char"] = _ms_per_char(r)
+            r["status"] = "done" if qc_status(r, threshold) == "done" else "manual"
+    finally:
+        _release(wm)
+    _write_manifest(manifest, rows)
+    failed = sum(r["status"] != "done" for r in selected)
+    print(f"qc check-only: selected={len(selected)} manual={failed} synthesized=0")
+    return 2 if failed else 0
