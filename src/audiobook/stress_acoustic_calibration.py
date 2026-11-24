@@ -46,6 +46,57 @@ def word_windows(text: str, heard: list[dict], duration: float) -> dict[int, tup
     return windows
 
 
+def contextual_window(text: str, heard: list[dict], duration: float,
+                      ordinal: int) -> tuple[float, float] | None:
+    """Bounded diagnostic fallback: unique exact target and both neighbors.
+
+    Never select a first match or guess timestamps. A mismatch elsewhere
+    in the chunk does not invalidate an intact local three-word sequence.
+    This is ASR evidence, not forced alignment or proof of pronunciation.
+    """
+    if not math.isfinite(duration) or duration <= 0:
+        return None
+    matches = list(WORD.finditer(text))
+    if not 1 < ordinal < len(matches):
+        return None
+    triple = matches[ordinal - 2:ordinal + 1]
+    # The three terms must be complete, adjacent standalone Cyrillic words.
+    for m in triple:
+        for i in (m.start() - 1, m.end()):
+            if 0 <= i < len(text) and (text[i].isalnum() or text[i] in "-‐‑+\u0301"):
+                return None
+    for a, b in zip(triple, triple[1:]):
+        if not text[a.end():b.start()] or any(
+                not c.isspace() and c not in '.,!?;:…«»“”"()[]'
+                for c in text[a.end():b.start()]):
+            return None
+    src = [fold(m.group()) for m in matches]
+    target = src[ordinal - 1]
+    pattern = src[ordinal - 2:ordinal + 1]
+    if src.count(target) != 1:
+        return None
+    words = []
+    previous = 0.0
+    for item in heard:
+        raw = item["w"].strip().strip('.,!?;:…«»“”"()[]')
+        words.append(fold(raw) if WORD.fullmatch(raw) else None)
+        a, b, p = (item[k] for k in ("s", "e", "p"))
+        if any(type(v) not in (float, int) or not math.isfinite(v) for v in (a, b, p)):
+            return None
+        if not (previous <= a < b <= duration and 0 <= p <= 1):
+            return None
+        previous = b
+    if words.count(target) != 1:
+        return None
+    hits = [i for i in range(len(words) - 2) if words[i:i + 3] == pattern]
+    if len(hits) != 1:
+        return None
+    i = hits[0]
+    if any(w["p"] < 0.5 for w in heard[i:i + 3]):
+        return None
+    return heard[i + 1]["s"], heard[i + 1]["e"]
+
+
 def expected_form(word: str, index: int) -> str:
     if (type(index) is not int or not 0 <= index < len(word)
             or word[index].lower() not in VOWELS or WORD.fullmatch(word) is None):
@@ -89,6 +140,8 @@ def summarize(results: list[dict]) -> dict:
         "known_correct": correct,
         "stress_errors_flagged": counts["wrong_stress", "stress_suspect"],
         "stress_errors_missed": counts["wrong_stress", "not_flagged"],
+        "stress_errors_uncertain": counts["wrong_stress", "uncertain"],
+        "stress_errors_not_detected": errors - counts["wrong_stress", "stress_suspect"],
         "correct_false_flags": counts["correct", "stress_suspect"],
         "outcomes": {a + ":" + b: n for (a, b), n in sorted(counts.items())},
         "release_ready": False,
@@ -134,6 +187,7 @@ def main() -> int:
     # additionally disable networking for the run.
     pm, wm = PhonemeModel(), load_whisper()
     results = []
+    asr_evidence = []
     for row_id, data in audio_bytes.items():
         audio, sr = sf.read(io.BytesIO(data), dtype="float32")
         if audio.ndim != 1 or sr <= 0:
@@ -144,15 +198,21 @@ def main() -> int:
         _text, heard = transcribe_words(wm, path)
         if path.read_bytes() != data:
             raise ValueError("AUDIO_CHANGED")
+        asr_evidence.append(dict(id=row_id, wav_sha256=hashlib.sha256(data).hexdigest(), words=heard))
         windows = word_windows(row_ids[row_id]["text"], heard, len(audio) / sr)
         for (cid, ordinal), c in controls.items():
             if cid != row_id:
                 continue
             r = dict(c, signal="uncertain", detail="lexical_control_not_stress")
-            if windows is None:
-                r.update(detail="lexical_or_timing_mismatch")
-            elif c["gold"] != "lexical_error" and ordinal in windows:
-                start, end = windows[ordinal]
+            window = windows.get(ordinal) if windows is not None else None
+            mode = "full_sequence" if window is not None else None
+            if window is None and windows is None and c["gold"] != "lexical_error":
+                window = contextual_window(row_ids[row_id]["text"], heard, len(audio) / sr, ordinal)
+                if window is not None:
+                    mode = "unique_local_context"
+            if c["gold"] != "lexical_error" and window is not None:
+                start, end = window
+                r["window_mode"] = mode
                 clip = audio[int(start * sr):int(end * sr)]
                 if len(clip) >= sr * 0.1:
                     tokens, frames, rms = pm.phonemes_scored(_to16k(clip, sr))
@@ -165,15 +225,17 @@ def main() -> int:
                 else:
                     r.update(detail="short_window")
             elif c["gold"] != "lexical_error":
-                r.update(detail="low_asr_confidence")
+                r.update(detail="lexical_or_timing_mismatch" if windows is None else "low_asr_confidence")
             results.append(r)
     if a.manifest.read_bytes() != manifest_bytes or a.controls.read_bytes() != controls_bytes or (a.audit_dir / "occurrences.jsonl").read_bytes() != findings_bytes:
         raise ValueError("EVIDENCE_CHANGED")
     summary = summarize(results)
+    summary["window_modes"] = dict(Counter(r.get("window_mode") or "unmapped" for r in results))
     summary.update(manifest_sha256=digest, audit_sha256=hashlib.sha256(findings_bytes).hexdigest(),
                    controls_sha256=hashlib.sha256(controls_bytes).hexdigest())
     a.out.mkdir(parents=True, exist_ok=False, mode=0o700)
     (a.out / "controls_PRIVATE.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    (a.out / "asr_PRIVATE.json").write_text(json.dumps(asr_evidence, ensure_ascii=False, indent=2), encoding="utf-8")
     (a.out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
     return 0
