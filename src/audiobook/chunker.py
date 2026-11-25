@@ -835,6 +835,8 @@ def run(config: dict, section: str | None = None, *, missing_only: bool = False)
         if section and f"{nn}_{slug}" != section:
             continue
         normf = paths.TEXT / f"{nn}_{slug}.norm.txt"
+        if missing_only and not normf.exists():
+            raise SystemExit(f"chunk: missing normalized source for {nn}_{slug}")
         if not normf.exists() or normf.stat().st_size < 50:
             continue  # empty/skipped section
         sec_dir = out_root / f"{nn}_{slug}"
