@@ -92,13 +92,15 @@ def main():
     p.add_argument("--targets", type=Path, required=True,
                    help="Private JSON list: chunk_id, chunk_start, split=development/heldout")
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--canonical-out", type=Path, required=True,
+                   help="Actual production out root for the shared heavy lock")
     p.add_argument("--execute", action="store_true", help="explicit bounded paired TTS")
     args = p.parse_args()
 
     from audiobook import paths, synth, chunker
     from audiobook.__main__ import load_config
     from audiobook.pronounce import load_table
-    from audiobook.jobqueue import heavy_command_lock
+    from audiobook import jobqueue
     from audiobook.reviewed_stage import generation_identity, file_digest
 
     paths.apply_env_defaults()
@@ -108,7 +110,17 @@ def main():
         raise ValueError("HISTORICAL_MAIN_CONFIG_REQUIRED")
     if args.book_text_dir.resolve() != paths.TEXT.resolve():
         raise ValueError("TEXT_ROOT_MISMATCH")
-    with heavy_command_lock("stress-uppercase-pilot"):
+    # Use the actual production queue lock, never the isolated copy lock.
+    canonical_out = args.canonical_out.resolve(strict=True)
+    if canonical_out == paths.OUT.resolve() or not (canonical_out / "queue").is_dir():
+        raise ValueError("ISOLATED_WORKSPACE_AND_CANONICAL_QUEUE_REQUIRED")
+    if args.out.resolve().is_relative_to(canonical_out):
+        raise ValueError("OUTPUT_MUST_BE_PRIVATE")
+    if os.environ.get(jobqueue.LOCK_HELD_ENV):
+        raise ValueError("INHERITED_LOCK_FORBIDDEN")
+    # queue_root is only used for the existing shared lock, not for job writes.
+    from unittest.mock import patch
+    with patch.object(jobqueue, "queue_root", return_value=canonical_out / "queue"), jobqueue.heavy_command_lock("stress-uppercase-pilot"):
         config = chunker.section_config(load_config(), CH1)
         table = load_table()
         synth.ensure_manifest_current(config, CH1)
