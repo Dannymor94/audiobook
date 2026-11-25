@@ -183,8 +183,14 @@ def build(rows: list[dict], findings: list[dict], lexical: list[dict],
                 case_counts["alignment_regressed"] += 1
         maps[r["id"]] = (a, b)
     accents = dictionaries["accents"]
-    homographs = {k.lower().replace("ё", "е") for k in dictionaries["omographs"]}
-    yo_homographs = {k.lower().replace("ё", "е") for k in dictionaries["yo_homographs"]}
+    homographs = {}
+    yo_homographs = {}
+    for kind, target in (("omographs", homographs), ("yo_homographs", yo_homographs)):
+        for k, v in dictionaries[kind].items():
+            target.setdefault(k.lower().replace("ё", "е"), []).append(v)
+    for group in (homographs, yo_homographs):
+        for entries in group.values():
+            entries.sort(key=canonical)
     result = []
     for f in findings:
         span = key(f)
@@ -208,7 +214,8 @@ def build(rows: list[dict], findings: list[dict], lexical: list[dict],
                 or f["silero_word"].lower() != w):
             silero = None
         flags = set()
-        homograph = w.replace("ё", "е") in homographs | yo_homographs
+        folded = w.replace("ё", "е")
+        homograph = folded in homographs or folded in yo_homographs
         if homograph:
             flags.add("homograph")
         if w.replace("ё", "е") in yo_homographs or any(
@@ -274,7 +281,9 @@ def build(rows: list[dict], findings: list[dict], lexical: list[dict],
                            stress_index=stress, status=status, reason=reason,
                            risk_flags=risk_flags, evidence_flags=sorted(flags),
                            candidates=dict(ruaccent=x, title_lower=y, silero=silero,
-                                           ruaccent_dictionary=own, wiktionary=d),
+                                           ruaccent_dictionary=own, wiktionary=d,
+                                           homograph_readings=homographs.get(folded, []),
+                                           yo_readings=yo_homographs.get(folded, [])),
                            acoustic_verified=False))
     result.sort(key=lambda r: (r["id"], r["start"], r["end"]))
     counts = Counter(r["status"] for r in result)
