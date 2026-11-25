@@ -141,3 +141,27 @@ Prior S4a raw acute failed; S4b Voicy technical PASS but quality no promotion.
 Prior S5 detector calibration remains research, not a mandatory dependency.
 Old S3 unresolved-zero and S5 exhaustive acoustic-verification requirements
 are superseded by this plan. Preserve previous commits and reports.
+
+## 2026-11-25 — owner correction: one manifest pass before synthesis
+
+A1/A2 and initial A3 completed. No recurring relink automation needed. Create
+all missing production manifests once, preserving existing ones byte-for-byte,
+then link the frozen stress map against the entire manifest set. Existing
+chunk --missing-only skips existing manifests and refuses missing-manifest
+directories with chunk artifacts. Record before/after hashes for all existing
+manifests and WAVs, especially locked audio. Do not rechunk stale sections
+automatically; synth preflight rejects stale manifests. The known 58 normalized
+vs 56 render section difference is an empty section and short contents heading;
+report any risks in intentionally excluded text explicitly, never invent a
+chunk or guarantee 6510/6510 before measurement.
+
+render_all.sh now defaults to manifest preparation (--prepare-only), with no
+synthesis. Explicit --render is required to enqueue section synth jobs using
+existing manifests. 1.7B maximum two workers, default two; conservative
+MemAvailable admission 27 GiB for two or 15 GiB for one, not a peak-RSS
+guarantee. Use one worker if the two-worker budget is unavailable. No automatic
+shutdown; no implicit rechunk on render; check current hashes and valid locked
+audio before enqueue, verify remaining incomplete chunks afterwards.
+Existing full-render approval boundary remains. A preparation only, no new
+synthesis, B blocked. QC/assemble/master remain subsequent per-section steps,
+not implied by a successful synthesis queue.
