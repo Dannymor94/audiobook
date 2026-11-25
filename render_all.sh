@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Safe two-phase book rendering. No synth unless --render is explicit.
 # ./render_all.sh --prepare-only  # create missing manifests, no TTS
-# ./render_all.sh --render [--workers 1|2]  # use existing manifests and queue
+# ./render_all.sh --render --section NN_slug [--workers 1|2]  # one owner-approved section only
 # Run on gamebox, in persistent tmux/session. No automatic shutdown.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -10,11 +10,13 @@ export PYTHONUTF8=1
 
 WORKERS=2
 MODE=prepare
+SECTION=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --prepare-only) MODE=prepare; shift ;;
     --render) MODE=render; shift ;;
     --workers) [ "$#" -ge 2 ] || exit 2; WORKERS="$2"; shift 2 ;;
+    --section) [ "$#" -ge 2 ] || exit 2; SECTION="$2"; shift 2 ;;
     *) echo "Unsupported argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -23,9 +25,12 @@ case "$WORKERS" in
   *) echo "1.7B: only 1 or 2 workers permitted" >&2; exit 2 ;;
 esac
 if [ "$MODE" = prepare ]; then
+  [ -z "$SECTION" ] || { echo "--section applies only to --render" >&2; exit 2; }
   uv run --no-sync python -m audiobook chunk --missing-only
   exit 0
 fi
+
+[ -n "$SECTION" ] || { echo "--render requires one explicitly approved --section" >&2; exit 2; }
 
 # Conservative admission budget: measured ~11.6 GB per worker plus reserve.
 # Linux MemAvailable includes reclaimable cache; it is not a peak-RSS guarantee.
@@ -39,9 +44,9 @@ if [[ ! "$AVAILABLE_KIB" =~ ^[0-9]+$ ]] || [ "$AVAILABLE_KIB" -lt "$MIN_KIB" ]; 
   exit 2
 fi
 
-# Do not rechunk at render time. Validate all canonical manifests first, then
-# enqueue existing section synth jobs under the same lock as the queue worker.
-uv run --no-sync python - "$WORKERS" <<'PY'
+# Do not rechunk at render time. Validate the explicitly selected section,
+# then enqueue its synth job only. The next section requires a new owner GO.
+uv run --no-sync python - "$WORKERS" "$SECTION" <<'PY'
 import json
 import sys
 from audiobook import paths, jobqueue
@@ -50,6 +55,7 @@ from audiobook.synth import ensure_manifest_current, worker_config
 
 paths.apply_env_defaults()
 workers = int(sys.argv[1])
+selected = sys.argv[2]
 config = load_config()
 worker_config(config, workers)
 with jobqueue.heavy_command_lock("render-all-preflight"):
@@ -68,8 +74,10 @@ with jobqueue.heavy_command_lock("render-all-preflight"):
         sections.append(sec)
     if not sections or len(set(sections)) != len(sections):
         raise SystemExit("Invalid canonical section inventory")
+    if selected not in sections:
+        raise SystemExit(f"Section not in canonical render inventory: {selected}")
     planned = []
-    for sec in sections:
+    for sec in (selected,):
         folder = paths.OUT / "sections" / sec
         mf = folder / "manifest.jsonl"
         if not mf.is_file():
@@ -88,21 +96,17 @@ with jobqueue.heavy_command_lock("render-all-preflight"):
         if needs:
             planned.append(["synth", "--section", sec, "--workers", str(workers)])
     jobqueue.add_many(planned)
-    print(f"Enqueued {len(planned)} section synth jobs; {len(sections)} canonical sections.")
+    print(f"Enqueued {len(planned)} synth jobs for the single selected section.")
 PY
 uv run --no-sync python -m audiobook queue run
 
 # A successful worker exit is not by itself evidence that every chunk is done.
-uv run --no-sync python - <<'PY'
+uv run --no-sync python - "$SECTION" <<'PY'
 import json
+import sys
 from audiobook import paths
 pending = 0
-for jf in sorted((paths.TEXT / "blocks").glob("*.blocks.json")):
-    b = json.loads(jf.read_text(encoding="utf-8"))
-    sec = f"{b['nn']}_{b['slug']}"
-    norm = paths.TEXT / f"{sec}.norm.txt"
-    if norm.stat().st_size < 50:
-        continue
+for sec in (sys.argv[1],):
     folder = paths.OUT / "sections" / sec
     for line in (folder / "manifest.jsonl").read_text(encoding="utf-8").splitlines():
         if not line.strip():
