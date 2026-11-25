@@ -61,3 +61,7 @@ def test_render_script_defaults_to_prepare_and_rejects_four(tmp_path, monkeypatc
     assert subprocess.run(["bash", str(copy), "--render", "--workers", "4"],
                           check=False).returncode == 2
     assert not log.exists()
+
+    assert subprocess.run(["bash", str(copy), "--render"],
+                          check=False).returncode == 2
+    assert not log.exists()
