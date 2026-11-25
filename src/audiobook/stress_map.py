@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from audiobook.stress_consensus import VOWELS, WORD, align_detailed, book_rows, parse_marked
@@ -220,13 +220,15 @@ def build(rows: list[dict], findings: list[dict], lexical: list[dict],
             flags.add("known_model_error_form")
         if a is None:
             flags.add("alignment_review")
-        if original != lower:
+        original_signature = (original[0].lower() if original[0] is not None else None, original[1])
+        lower_signature = (lower[0].lower() if lower[0] is not None else None, lower[1])
+        if original_signature != lower_signature:
             flags.add("case_policy_change")
             case_counts["changed_occurrences"] += 1
             if x != y:
                 case_counts["changed_stress"] += 1
-            if original[0] != lower[0]:
-                case_counts["changed_spelling_or_case"] += 1
+            if original_signature[0] != lower_signature[0]:
+                case_counts["changed_spelling"] += 1
         token = by_span.get(span)
         unsafe = token is None or not token["status"].startswith("dual_")
         if unsafe:
