@@ -91,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pick-ref", help="синтез тестового отрывка для всех кандидатов ref/candidates/")
     sub.add_parser("calibrate", help="гриды скорости и паузы → out/ref_test2, speed_test, pause_test")
     ck = sub.add_parser("chunk", help="чанкинг разделов → out/sections/NN/manifest.jsonl")
+    ck.add_argument("--missing-only", action="store_true", help="создать только отсутствующие манифесты; существующие WAV не трогать")
     ck.add_argument("--section", type=str, default=None,
                     help="только эта секция (без флага — вся книга)")
     sub.add_parser("headings", help="рендер 483 заголовков → out/headings_check_v2/")
@@ -314,7 +315,7 @@ def _dispatch(a) -> int:
         return pick_ref(load_config())
     if a.cmd == "chunk":
         from .chunker import run as chunk
-        return chunk(load_config(), a.section)
+        return chunk(load_config(), a.section, missing_only=a.missing_only)
     if a.cmd == "headings":
         from .headings import run as headings
         return headings(load_config())
