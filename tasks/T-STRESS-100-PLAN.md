@@ -165,3 +165,32 @@ audio before enqueue, verify remaining incomplete chunks afterwards.
 Existing full-render approval boundary remains. A preparation only, no new
 synthesis, B blocked. QC/assemble/master remain subsequent per-section steps,
 not implied by a successful synthesis queue.
+
+## Owner acceptance gate — chapter by chapter (2026-11-25)
+
+Owner authorizes whole-book manifest preparation and chapter 1 ONLY for actual
+synthesis/quality correction. No bulk synthesis, no next chapter until explicit
+owner approval of the preceding chapter. --render now requires one explicit
+--section NN_slug, never enqueues all sections. Prepare-only remains whole-book.
+Resolve actual chapter 1 section from canonical metadata (historical section
+08_glava_1_zver_vnutri_nas_instinkty_eto_ne); do not assume production section 01
+is literary chapter 1. Preserve existing completed/locked WAVs. Inspect existing
+chapter 1 v2 and known owner defects, map exact occurrences and propose targeted
+corrections; do not re-render already accepted material indiscriminately. If
+manifest is stale, stop before synthesis and present scoped plan preserving
+approved audio. Deliver one assembled/mastered chapter 1 listening artifact,
+with a short risk-based supplemental index if useful; owner decides acceptance.
+No automatic advance or full-book render.
+
+Separate already-recorded author audio practices belong in the book assembly
+as external audio assets, not TTS. Maintain a private local manifest with chapter
+number, title, source file/location, SHA256, duration/format, placement and
+approval status. Keep originals immutable, normalize only derived assembly copies
+if needed. Resolve text practice instructions vs actual recordings; no duplication
+or omission without explicit placement decision. Multiple practices may belong
+to one chapter. Owner supplied a partial screenshot listing practices for chapters
+6, 9, 12 (two), 13, 14, 17, 22, 24, 31, and a cut-off entry for 33. Treat it
+as incomplete. Do not post share links, private recordings or manuscript in
+GitHub. Obtain full list locally before those chapters are assembled. No need to
+delay chapter 1 for later practice assets. Separate practices' asset collection
+and planning may proceed independently without heavy synthesis.
