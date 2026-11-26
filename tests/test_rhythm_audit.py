@@ -42,3 +42,18 @@ def test_manifest_readonly(tmp_path):
     assert result["chunk_count"] == 1
     assert p.read_text(encoding="utf-8") == data
     assert set(tmp_path.iterdir()) == before
+
+
+def test_direct_chunk_render_rejects_legacy_enum_before_engine():
+    import pytest
+    from audiobook.synth import _synth_one_chunk
+
+    class NoEngine:
+        def synth(self, *args, **kwargs):
+            pytest.fail("unsupported enum path reached engine")
+
+    with pytest.raises(SystemExit, match="enum_pause_ms"):
+        _synth_one_chunk(
+            {"text": "Первое. Второе.", "hash": "test"},
+            {"pauses_ms": {"enum_pause_ms": 250}}, {}, "", NoEngine(), 0
+        )
