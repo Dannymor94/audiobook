@@ -15,7 +15,8 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8) -> Path:
+def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
+          *, policy: str = "uppercase-occurrence-pilot-v1") -> Path:
     """A new private folder, exact source inventory, separate private blind key."""
     source = source.resolve(strict=True)
     out = out.resolve()
@@ -25,8 +26,16 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8) -> P
         raise ValueError("NEW_REVIEW_AND_SEPARATE_KEY_REQUIRED")
     plan_bytes = (source / "plan_PRIVATE.json").read_bytes()
     plan = json.loads(plan_bytes)
-    if plan.get("policy") != "uppercase-occurrence-pilot-v1":
+    if policy not in {"uppercase-occurrence-pilot-v1", "single-stream-comma-semicolon-v1"} or plan.get("policy") != policy:
         raise ValueError("WRONG_PILOT")
+    rhythm = policy == "single-stream-comma-semicolon-v1"
+    if rhythm:
+        ready = json.loads((source / "READY_PRIVATE.json").read_bytes())
+        if (expected_pairs != 4 or ready["pairs"] != 4
+                or ready["plan_sha256"] != sha(plan_bytes)
+                or ready["receipts_sha256"] != sha((source / "receipts_PRIVATE.jsonl").read_bytes())):
+            raise ValueError("RHYTHM_READY_MISMATCH")
+    prefix = "ALG03" if rhythm else "ALG02"
     trials = [r for r in plan["trials"] if r["status"] == "planned"]
     ids = [r["chunk_id"] for r in trials]
     if len(ids) != expected_pairs or len(set(ids)) != len(ids):
@@ -74,7 +83,7 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8) -> P
         group = []
         for side, arm in zip(("A", "B"), arms):
             wav, r = verified[cid, arm]
-            name = f"ALG02-{n:02d}_{side}.wav"
+            name = f"{prefix}-{n:02d}_{side}.wav"
             dest = out / name
             shutil.copyfile(wav, dest)
             if sha(dest.read_bytes()) != r["wav_sha256"]:
@@ -92,7 +101,8 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8) -> P
         json.dump({"page_id": pid, "plan_sha256": sha(plan_bytes), "items": keys},
                   f, ensure_ascii=False, indent=2)
     page = out / "review.html"
-    page.write_text(review.render("ALG-02 — проверка ударений", "golden", groups, pid),
+    title = "ALG-03 — проверка ритма" if rhythm else "ALG-02 — проверка ударений"
+    page.write_text(review.render(title, "golden", groups, pid),
                     encoding="utf-8")
     return page
 
@@ -103,8 +113,10 @@ def main():
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--private-key", type=Path, required=True)
     p.add_argument("--expected-pairs", type=int, default=8)
+    p.add_argument("--policy", choices=["uppercase-occurrence-pilot-v1",
+                   "single-stream-comma-semicolon-v1"], default="uppercase-occurrence-pilot-v1")
     a = p.parse_args()
-    print(build(a.source, a.out, a.private_key, a.expected_pairs))
+    print(build(a.source, a.out, a.private_key, a.expected_pairs, policy=a.policy))
     return 0
 
 
