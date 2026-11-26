@@ -32,6 +32,8 @@ def build_trials(rows: list[dict], gold: dict, targets: list[dict],
     trials = []
     for target in targets:
         cid = target["chunk_id"]
+        if not isinstance(cid, str) or len(cid) != 4 or not cid.isascii() or not cid.isdigit():
+            raise ValueError("INVALID_CHUNK_ID")
         if cid not in by_id or cid not in annotations:
             raise ValueError("UNKNOWN_TARGET")
         annotation = annotations[cid]
@@ -71,9 +73,12 @@ def main() -> int:
     p.add_argument("--manifest-sha256", required=True)
     p.add_argument("--canonical-out", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--plan-sha256", help="Required for execution: digest of prior dry-run plan")
     p.add_argument("--execute", action="store_true")
     a = p.parse_args()
     if a.execute:
+        if not a.plan_sha256:
+            raise ValueError("FROZEN_PLAN_DIGEST_REQUIRED")
         from audiobook.gamebox import require_gamebox
         require_gamebox()
 
@@ -121,10 +126,12 @@ def main() -> int:
                        gold_sha256=a.gold_sha256, targets_sha256=a.targets_sha256,
                        generation=generation, trials=trials)
         plan_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        if a.execute and digest(plan_bytes) != a.plan_sha256:
+            raise ValueError("FROZEN_PLAN_MISMATCH")
         out.mkdir(mode=0o700, exist_ok=False)
         (out / "plan_PRIVATE.json").write_bytes(plan_bytes)
         if not a.execute:
-            print("PLANNED_ONLY: 4 pairs; no TTS")
+            print("PLANNED_ONLY: 4 pairs; no TTS; plan_sha256=" + digest(plan_bytes))
             return 0
 
         import numpy as np
