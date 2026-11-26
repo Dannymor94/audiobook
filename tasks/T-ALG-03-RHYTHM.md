@@ -80,3 +80,9 @@ runtime prerequisite, not only documentation. No production promotion or merge.
   independent fragments also need evaluation.
 - New synthetic tests added. Final commit CI not yet confirmed at checkpoint.
   No private manifest audit performed by lead because the file remains local.
+
+## Follow-up
+
+CI run 45781915089: 757 passed, 3 failed, 3 deselected. Two failures were legacy stub/missing-model tests requiring narrowly scoped guard mocks; one was the read-only audit test assuming the fixture did not create fake_home. Fixed all three fixtures without weakening the runtime guard. Existing worker_config already rejects nonzero enum_pause_ms; extend the same rejection to direct _synth_one_chunk before any engine call. No new legacy hash format or migration; unsafe old split remains disabled. New rhythm pilot will not use this path. Exact HEAD CI must be green before local checkout.
+
+Local dry-run only: on Mac use the frozen CH1 manifest (historical SHA256 12fee1084bf728fc3828b379f4aa29523cc9fdcf498b2f6a359a3658bb299b90; verify actual identity, do not overwrite if differs). Run rhythm_audit once, keep rows and manuscript private. Report aggregate chunk counts, number of legacy/protected conflicts and unhashed risks, and for reviewed IDs 0042/0087/0019/0225/0043/0080/0045/0062 whether each has valid candidate comma offsets; manually classify missed boundaries locally by syntax, not audio editing. Confirm historical enum_pause_ms=0 and unchanged manifest/audio. No model calls or synthesis. Use report to select next conservative single-stream punctuation/prosody pilot; no automatic promotion.
