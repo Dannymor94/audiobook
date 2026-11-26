@@ -48,6 +48,34 @@ def build_trials(rows: list[dict], gold: dict, targets: list[dict],
     return trials
 
 
+def verify_pilot_freshness(rows: list[dict], fresh: list[dict],
+                           targets: list[dict]) -> list[dict]:
+    """Full source inventory must match; only four selected inputs are rendered.
+
+    Historical non-target cache hashes may differ. Record every mismatch in
+    the frozen private plan. Never permit a stale selected row or change the
+    production freshness guard.
+    """
+    if [(r["id"], r["n"], r["text"]) for r in rows] != [
+            (r["id"], r["n"], r["text"]) for r in fresh]:
+        raise ValueError("PILOT_SOURCE_INVENTORY_MISMATCH")
+    selected = {t["chunk_id"] for t in targets}
+    if len(selected) != 4 or not selected <= {r["id"] for r in rows}:
+        raise ValueError("PILOT_TARGET_INVENTORY_MISMATCH")
+    fields = ("hash", "leadin", "open_end", "cont")
+    mismatches = []
+    for old, new in zip(rows, fresh):
+        different = [k for k in fields if k not in old or k not in new
+                     or old[k] != new[k]]
+        if not different:
+            continue
+        if old["id"] in selected:
+            raise ValueError("PILOT_TARGET_STALE:" + old["id"] + ":" + ",".join(different))
+        mismatches.append({"id": old["id"], "fields": different,
+                           "frozen_hash": old["hash"], "fresh_hash": new["hash"]})
+    return mismatches
+
+
 def preflight(parent: Path) -> None:
     from audiobook.gamebox import require_gamebox
 
@@ -115,8 +143,12 @@ def main() -> int:
         if len(rows) != 238:
             raise ValueError("CH1_INVENTORY_MISMATCH")
         config = chunker.section_config(load_config(), CH1)
-        synth.ensure_manifest_current(config, CH1)
-        trials = build_trials(rows, gold, targets, config, load_table())
+        table = load_table()
+        nn, slug = CH1.split("_", 1)
+        fresh = chunker.build_manifest(chunker.load_units(nn, slug), config,
+                                       pronounce_table=table)
+        non_target_mismatches = verify_pilot_freshness(rows, fresh, targets)
+        trials = build_trials(rows, gold, targets, config, table)
         if a.execute:
             preflight(out.parent.resolve(strict=True))
         generation = generation_identity(config)
@@ -124,7 +156,8 @@ def main() -> int:
         wcfg["device"] = "cpu"
         payload = dict(policy=POLICY, manifest_sha256=a.manifest_sha256,
                        gold_sha256=a.gold_sha256, targets_sha256=a.targets_sha256,
-                       generation=generation, trials=trials)
+                       generation=generation, trials=trials,
+                       non_target_mismatches=non_target_mismatches)
         plan_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         if a.execute and digest(plan_bytes) != a.plan_sha256:
             raise ValueError("FROZEN_PLAN_MISMATCH")
@@ -162,7 +195,14 @@ def main() -> int:
                         os.fsync(log.fileno())
                         if receipt["status"] != "generated":
                             raise RuntimeError("PILOT_ARM_FAILED_NO_RETRY")
-        if (manifest.read_bytes() != data or canonical_manifest.read_bytes() != data
+        final_config = chunker.section_config(load_config(), CH1)
+        final_table = load_table()
+        final_fresh = chunker.build_manifest(chunker.load_units(nn, slug), final_config,
+                                             pronounce_table=final_table)
+        if (verify_pilot_freshness(rows, final_fresh, targets) != non_target_mismatches
+                or build_trials(rows, gold, targets, final_config, final_table) != trials
+                or final_config != config
+                or manifest.read_bytes() != data or canonical_manifest.read_bytes() != data
                 or generation_identity(config) != generation
                 or a.gold.read_bytes() != gold_bytes or a.targets.read_bytes() != target_bytes):
             raise ValueError("PILOT_IDENTITY_CHANGED")
