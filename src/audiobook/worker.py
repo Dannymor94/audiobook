@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from audiobook.gamebox import require_gamebox
+
 
 def _worker_loop(cfg: dict, in_q, out_q) -> None:
     """Child entry point: load model+latents once, then synth tasks on demand.
@@ -24,6 +26,7 @@ def _worker_loop(cfg: dict, in_q, out_q) -> None:
     model is loaded, then for each task a {"ok": True, "wav": ndarray} or
     {"ok": False, "error": repr}. A ``None`` task ends the loop.
     """
+    require_gamebox()
     # Pin the BLAS backend's thread count BEFORE torch is imported. On macOS
     # torch uses Accelerate/vecLib, whose threading is NOT governed by
     # torch.set_num_threads but by these env vars; a spawn child otherwise picks
@@ -101,6 +104,8 @@ class TimeoutSynth:
         self._start()
 
     def _start(self) -> None:
+        if self._target is _worker_loop:
+            require_gamebox()
         self._in = self._ctx.Queue()
         self._out = self._ctx.Queue()
         self._p = self._ctx.Process(
