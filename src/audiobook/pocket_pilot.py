@@ -30,6 +30,7 @@ CASES = (
     ("04", "heldout", "ˈatlas", "atˈlas"),
 )
 SEED = 42
+CPU_THREADS = 8
 SETTINGS = dict(temp=0.3, cfg=2.0, eos_threshold=-1.0, eos_countdown=1,
                 n_steps=1, max_frames=125, voice_sec=5.0, emit_frames=2,
                 fade_in_ms=0.0)
@@ -53,7 +54,7 @@ def make_plan(tokenizer, identity: dict, reference_sha: str,
                        "target": {"split": split, "kind": "marker_responsiveness"}})
     return dict(policy=POLICY, identity=identity, reference_sha256=reference_sha,
                 upstream=UPSTREAM, sampler_sha256=upstream_sha, versions=versions,
-                settings=SETTINGS, trials=trials)
+                settings=SETTINGS, cpu_threads=CPU_THREADS, trials=trials)
 
 
 def collect_audio(engine, ipa, voice, seed, expected_ids, timeout=180):
@@ -110,11 +111,14 @@ def main() -> int:
     # network isolation for execution independently.
     if any(os.environ.get(k) != "1" for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")):
         raise ValueError("OFFLINE_FLAGS_REQUIRED")
-    from audiobook import jobqueue
+    from audiobook import jobqueue, paths
     from unittest.mock import patch
     canonical = a.canonical_out.resolve(strict=True)
     out = a.out.resolve()
     if (out.exists() or out.is_relative_to(canonical)
+            or out.is_relative_to(paths.ROOT.resolve())
+            or out.is_relative_to(a.model_dir.resolve())
+            or out.is_relative_to(a.upstream.resolve())
             or not (canonical/"queue").is_dir() or os.environ.get(jobqueue.LOCK_HELD_ENV)):
         raise ValueError("PRIVATE_OUTPUT_AND_CANONICAL_LOCK_REQUIRED")
     preflight(out.parent.resolve(strict=True))
@@ -153,7 +157,7 @@ def main() -> int:
             return 0
         import torch
         import soundfile as sf
-        torch.set_num_threads(8)
+        torch.set_num_threads(CPU_THREADS)
         torch.manual_seed(SEED)
         sys.path.insert(0, str(upstream))
         from hybrid.tts.phonemes.batch import PhonemeBatchTTS
@@ -164,6 +168,8 @@ def main() -> int:
                                       n_bins=4000, **SETTINGS)
         if engine.device.type != "cpu" or engine.sr != 24000 or "ru" not in engine.info["languages"]:
             raise ValueError("MODEL_RUNTIME_IDENTITY_MISMATCH")
+        if Path(sys.modules["hybrid.tts.phonemes.batch"].__file__).resolve() != sampler.resolve():
+            raise ValueError("UNEXPECTED_SAMPLER_MODULE")
         voice = engine.voice_latents(str(a.reference))
         with (out/"receipts_PRIVATE.jsonl").open("x", encoding="utf-8") as log:
             for t in plan["trials"]:
@@ -174,7 +180,8 @@ def main() -> int:
                     sf.write(str(path), wav, 24000, subtype="FLOAT")
                     receipt = dict(chunk_id=t["chunk_id"], arm=arm, status="generated",
                                    plan_sha256=digest(data), seed=t["seed"], carrier=None,
-                                   input_sha256=t[arm+"_sha256"], generation=plan["identity"],
+                                   input_sha256=t[arm+"_sha256"], generation={k: plan[k] for k in ("identity", "reference_sha256", "upstream",
+                                                                  "sampler_sha256", "versions", "settings", "cpu_threads")},
                                    wav=path.name, wav_sha256=sha(path), samples=len(wav),
                                    elapsed_s=perf_counter()-t0)
                     log.write(json.dumps(receipt)+"\n")
