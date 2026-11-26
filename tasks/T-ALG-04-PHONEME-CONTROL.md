@@ -99,3 +99,60 @@ compute feasibility. Defer until simpler candidate evaluation. No training.
 No dependency, download, synthesis, code integration or production change
 in this research checkpoint. Research is based on upstream declarations,
 not independent license clearance or measured engine behavior.
+
+## Source-level API audit and token-channel gate
+
+Pinned upstream code: mynah-org/mynah-s2s commit
+ a696db20e2877a080df503d9bad11f315a3429ff (public GitHub tree retrieved).
+Inspect hybrid/tts/phonemes/batch.py, server.py, labs/phoneme_tts/ipa_words.py,
+README.md and pyproject.toml at that exact revision. The stock HF quickstart
+is misleading: upstream PhonemeBatchTTS.load constructs a local YAML replacing
+weights_path, lookup_table.tokenizer_path, tokenizer format and n_bins=4000,
+removing separate fallback weights. Its stream([(ipa, voice_latents)], seed=...)
+passes raw IPA straight to the conditioner; no normal text preparation. Voice
+latents use the first 5 s of a local reference by default. Upstream sampler
+requires the trainer-compatible per-row pad state and 24-layer BOS-before-voice.
+Reference environment Python 3.12, pocket-tts 4.0.1, torch 2.13.0 (recipe CUDA
+index; CPU wheel compatibility must be verified), tokenizers 0.22.2,
+phonemizer 3.6.0 and eSpeak-ng 1.51. Do not install the whole GPU voice-agent
+stack or alter the audiobook venv. No global apt/system changes. Pin and hash
+all actual wheels in a separate research environment.
+
+Training stress tokens use byte fallback, not necessarily a dedicated token.
+Upstream admits phone/energy stress metrics failed to separate models; the
+Italian listening evidence does not establish Russian stress accuracy. A
+controlled marker-only test demonstrates responsiveness, not correct Russian
+phonetics: normative Russian evaluation must also account for vowel reduction,
+palatalization and lexical context with separately reviewed phoneme strings.
+Question/list prosody remains a known limitation; do not promote as audiobook
+engine even if stress channel passes. Default sampler temp=.3, cfg=2.0,
+voice_sec=5, max_frames=375, n_steps=1, eos_threshold=-1, eos_countdown=1 are
+upstream evaluation defaults, not measured optimum for this author.
+
+Added src/audiobook/pocket_preflight.py and five synthetic tests. It checks
+four regular local assets (model.yaml, manifest.json, tokenizer.json,
+model.safetensors), explicit full 40-hex revision and exact SHA-256 inventory,
+Russian/stress manifest declaration, lossless token round-trip without unknown/
+special IDs, distinct token sequences for four synthetic stress contrasts.
+No model import/load, no inference, no acoustic proof. Synthetic probes are not
+normative IPA for Russian words. Full artifact identity is operator-supplied;
+self-computed hashes alone do not authenticate origin. This gate intentionally
+fails closed if normalization alters probes or upstream schema differs.
+
+BLOCKER: web access could retrieve the model card, but raw model.yaml,
+manifest.json, HF model API and tree did not return usable bytes; container
+network cannot resolve huggingface.co. Exact HF revision and asset hashes not
+verified. Do not invent a revision or use rolling main for inference. No weights
+or tokenizer downloaded by lead. Before a local test, obtain full model revision
+from official HF metadata, save exact revision card, license/manifest/asset
+metadata, verify publisher LFS SHA-256 of model.safetensors where available,
+and ensure files are regular copies (not HF cache symlinks). Use pinned
+huggingface_hub model_info/files_metadata and snapshot_download(revision=...,
+allow_patterns=the four required files plus license/card) in public-only
+provisioning. Record actual filenames/digests in JSON {repo_id,revision,files:
+{filename:sha256}}; run preflight in isolated env with exact inventory SHA.
+No private manuscript/reference used in provisioning. If license/revision or
+manifest cannot be verified, stop; no substitution. Local preflight is not
+permission for TTS. Next acoustic trial requires actual token evidence and
+engine runner implementation, not just synthetic CI. Keep all existing Qwen
+artifacts. No production changes.
