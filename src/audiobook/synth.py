@@ -21,6 +21,7 @@ import torch
 
 from audiobook import leadin, paths, voicecfg
 from audiobook.device import pick_device
+from audiobook.gamebox import require_gamebox
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ def _local_snapshot(variant: str = voicecfg.DEFAULT_VARIANT) -> Path:
 def load_model(device: str | None = None,
                variant: str = voicecfg.DEFAULT_VARIANT,
                quantize: str = "none"):
+    require_gamebox()
     global _model, _model_key
     if quantize not in voicecfg.QUANTIZE_MODES:
         raise SystemExit(f"load_model: недопустимый quantize {quantize!r}")
@@ -149,6 +151,7 @@ def compute_latents(model, ref_wav: Path, ref_text: str | None = None) -> dict:
     """Precompute the reusable voice-clone prompt once (project invariant:
     reference latents are computed once and live in ref/).
     Pass ref_text for full-clone (ICL) mode; omit for x-vector-only."""
+    require_gamebox()
     if ref_text is not None:
         items = model.create_voice_clone_prompt(
             ref_audio=str(ref_wav), ref_text=ref_text, x_vector_only_mode=False
@@ -264,6 +267,7 @@ def synthesize(
     speed: float = 1.0,
     max_new_tokens: int | None = None,
 ) -> np.ndarray:
+    require_gamebox()
     # Qwen3-TTS-0.6B has no speed control; tempo is governed by the reference
     # (validated: a longer reference yields slower speech). Fail loud rather than
     # silently ignore a speed the caller expects to take effect.
