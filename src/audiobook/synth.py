@@ -348,6 +348,15 @@ def _assemble_enum_fragments(rendered: list[tuple[np.ndarray, int]]) -> np.ndarr
     return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
 
+def _require_supported_render_config(config: dict) -> None:
+    """Legacy fragment synthesis is not cache-safe; keep it disabled."""
+    if config.get("pauses_ms", {}).get("enum_pause_ms"):
+        raise SystemExit(
+            "pauses_ms.enum_pause_ms > 0 не поддерживается: разбиение на фрагменты "
+            "теряет фразовые правки pronounce.yaml и не попадает в хеш (ревью). "
+            "Оставь 0, перечисления правятся через text_prep/pronounce.")
+
+
 def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
                      engine, retries: int) -> tuple[np.ndarray | None, int]:
     """Synthesise one chunk via engine; handles enum splits internally.
@@ -356,6 +365,7 @@ def _synth_one_chunk(row: dict, config: dict, table: dict, sentinel: str,
     For enum chunks: all fragments synthesised per attempt; any fragment failure
     retries the full chunk with the next seed block.
     """
+    _require_supported_render_config(config)
     seed_ov = row.get("seed_override")
     base = seed_ov if seed_ov is not None else seed_for_chunk(row["hash"])
     frags = chunk_fragments(row["text"], config)
@@ -606,11 +616,7 @@ def worker_config(config: dict, num_workers: int = 1) -> dict:
     load the same weights and the same voice prompt."""
     v = voicecfg.variant(config)
     limit = _MAX_WORKERS.get(v)
-    if config.get("pauses_ms", {}).get("enum_pause_ms"):
-        raise SystemExit(
-            "pauses_ms.enum_pause_ms > 0 не поддерживается: разбиение на фрагменты "
-            "теряет фразовые правки pronounce.yaml и не попадает в хеш (ревью). "
-            "Оставь 0, перечисления правятся через text_prep/pronounce.")
+    _require_supported_render_config(config)
     if limit is not None and num_workers > limit:
         raise SystemExit(
             f"synth: модель {v} — не больше {limit} воркеров "
