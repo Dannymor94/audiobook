@@ -77,6 +77,9 @@ def main() -> int:
     p.add_argument("--threads", type=int, required=True)
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
+    from audiobook.gamebox import require_gamebox
+
+    require_gamebox()
     if not math.isfinite(a.temperature) or a.temperature <= 0 or not 0 <= a.seed < 2**32 or a.threads < 1:
         raise ValueError("INVALID_TRIAL_SETTINGS")
     if a.out.exists():
