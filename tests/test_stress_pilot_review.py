@@ -65,3 +65,15 @@ def test_wrong_source_or_audio_fails_before_review(tmp_path):
     with pytest.raises(ValueError, match="WAV_DIGEST_MISMATCH"):
         build(source, out, key, expected_pairs=1)
     assert not out.exists()
+
+
+def test_rhythm_requires_ready(tmp_path):
+    source = tmp_path / "run"
+    make_run(source)
+    plan_path = source / "plan_PRIVATE.json"
+    plan = json.loads(plan_path.read_bytes())
+    plan["policy"] = "single-stream-comma-semicolon-v1"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        build(source, tmp_path / "review", tmp_path / "key.json", 4,
+              policy="single-stream-comma-semicolon-v1")
