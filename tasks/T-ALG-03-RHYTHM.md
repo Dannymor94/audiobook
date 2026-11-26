@@ -150,3 +150,44 @@ heldout annotations, explicitly account for unknown/missing gold; no blanket
 accuracy claim. No further local operator task until exact HEAD CI is green
 and provenance is settled. Parser integration tests with actual weights not
 run by lead. No production promotion.
+
+## Evaluation gate and single local research handoff
+
+Public source review: spaCy model repository declares MIT and its
+LICENSES_SOURCES names Nerus with MIT; Nerus itself acknowledges ~700K
+Lenta.ru articles. https://huggingface.co/spacy/ru_core_news_sm/blob/main/LICENSES_SOURCES
+https://github.com/natasha/nerus . These are declared permissions, not a legal
+review of all underlying third-party articles. Research-only parser evaluation
+may proceed under this scope; commercial production adoption remains unapproved.
+Use official pinned ru_core_news_sm 3.8.0 and compatible spaCy 3.8.x (pin exact
+installed release and dependency lock); confirm release metadata and license
+from the actual downloaded wheel, record wheel SHA256 and local model tree
+SHA256, no rolling main URL. If exact release identity cannot be verified, stop.
+
+Added rhythm_eval.py plus three tests. CLI reads frozen manifest JSONL,
+private predictions JSON from rhythm_spacy and private gold JSON of shape
+{manifest_sha256, rows:[{id,hash,split,positive:[comma offsets],negative:[comma offsets]}]}.
+Validate full manifest and chunk identities. Count TP/FP/FN separately for
+development and heldout, preserve unknown predictions, count unresolved known
+positives as misses, count protected proposals across all rows. No claim of
+precision on unlabeled proposals. No model or text change.
+
+Single local Mac task after exact PR HEAD CI success: use separate research
+venv with pinned dependencies and local weights, no TTS project dependency
+changes. Verify full frozen CH1 manifest SHA and 238 chunk inventory. Before
+running parser, freeze independent annotations on existing reviewed chunks
+plus an additional small preselected heldout set (at least 8 distinct chunks
+including lists and negatives, chosen without inspecting parser predictions;
+existing 8 all development because already examined). Mark only confidently
+judged positive/negative comma offsets; protected quotes are excluded from
+positive scope. Run rhythm_spacy once, then rhythm_eval. Report aggregate
+metrics, unlabeled/unresolved counts, protected violations, per-split sample
+sizes, known positives found/missed, exact model/version/digest evidence and
+unchanged original files. Keep text, offsets, annotations and reports private;
+public report aggregate only. No synthesis, no production change. If parser
+produces no relevant candidates or protected violations, do not tune blindly.
+Acceptance for a subsequent isolated acoustic experiment: zero protected
+proposals, at least one confirmed positive in heldout, no known false positive
+among heldout proposed boundaries, report all unknowns; each selected pilot
+boundary still manually validated locally. These are small-pilot selection
+criteria, not production quality thresholds. No automatic promotion.
