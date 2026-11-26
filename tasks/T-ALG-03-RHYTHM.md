@@ -123,3 +123,30 @@ development boundaries plus heldout (protected quote offsets excluded);
 measure false positives/misses before selecting an isolated single-stream
 prosody experiment. Do not fit exclusively to these eight chunks.
 No TTS or gamebox required for current checkpoint. B BLOCKED, CH2/FULL_RENDER NO_GO.
+
+## Local parser adapter checkpoint
+
+Selected spaCy ru_core_news_sm as the first adapter target (not a production
+model decision): integrated POS and dependency heads with character offsets,
+CPU pipeline, public model metadata MIT. Public Natasha spaCy proposal names
+Nerus and Navec as MIT resources, but Nerus consists of Lenta.ru articles;
+underlying content/weight rights are not independently cleared. Verify the
+exact release metadata and source terms before commercial deployment. Sources:
+https://spacy.io/models/ru
+https://github.com/natasha/natasha-spacy
+https://github.com/natasha/nerus
+https://github.com/natasha/navec
+
+Added rhythm_spacy.py, four synthetic adapter tests. No new project dependency,
+model download, production configuration change, or TTS. CLI accepts only
+explicit local model directory, SHA-256 tree digest, exact spaCy/model versions;
+CPU, no NER/lemmatizer, exact token and sentence coverage, unresolved rows
+reported rather than guessed. Keep full private results local. For a later
+approved research-only parser trial, install the pinned parser in a separate
+Python environment, independently verify package/model provenance and digest,
+then run the module with frozen manifest and those exact pins. No automatic
+synthesis. Compare actual candidate offsets against local development and
+heldout annotations, explicitly account for unknown/missing gold; no blanket
+accuracy claim. No further local operator task until exact HEAD CI is green
+and provenance is settled. Parser integration tests with actual weights not
+run by lead. No production promotion.
