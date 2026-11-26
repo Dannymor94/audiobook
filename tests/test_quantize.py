@@ -85,6 +85,8 @@ class _Inner(torch.nn.Module):
 @pytest.fixture
 def fake_qwen(monkeypatch):
     import audiobook.synth as synth_mod
+    # This fixture replaces the real model with a tiny in-memory fake.
+    monkeypatch.setattr(synth_mod, "require_gamebox", lambda: None)
     monkeypatch.setattr(synth_mod, "_model", None)
     monkeypatch.setattr(synth_mod, "_model_key", None)
     monkeypatch.setattr(synth_mod, "_local_snapshot", lambda variant="0.6B": paths.ROOT)
