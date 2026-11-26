@@ -61,6 +61,9 @@ def plan(row: dict, annotation: dict, offset: int, config: dict, table: dict) ->
     if (len(differences) != 1 or body[differences[0]] != ","
             or alt_body[differences[0]] != ";"):
         return {"status": "prepared_collateral_change"}
+    if (body.count(",") != raw.count(",")
+            or body[:differences[0]].count(",") != raw[:offset].count(",")):
+        return {"status": "prepared_alignment_unproven"}
     position = len(baseline)-len(body)+differences[0]
     if candidate != baseline[:position] + ";" + baseline[position+1:]:
         return {"status": "prepared_collateral_change"}
