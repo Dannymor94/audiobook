@@ -156,3 +156,22 @@ manifest cannot be verified, stop; no substitution. Local preflight is not
 permission for TTS. Next acoustic trial requires actual token evidence and
 engine runner implementation, not just synthetic CI. Keep all existing Qwen
 artifacts. No production changes.
+
+## Public provisioning implementation
+
+Added pocket_provision.py and two synthetic tests. After exact CI green, local
+operator may run on Mac in separate research environment with exact pinned
+huggingface_hub 1.33.0 and tokenizers 0.22.2:
+`python -m audiobook.pocket_provision --out "$NEW_PUBLIC_ASSET_DIR"`.
+First resolution obtains full commit from official HF API, immediately rereads
+metadata by that immutable revision, requires declared CC-BY-4.0 and exact
+publisher metadata for five files (including README). Uses Git blob SHA1 for
+non-LFS files and publisher LFS SHA256 for weights; downloads only those files,
+verifies size/digest, checks Russian/stress manifest and tokenizer before weights.
+No automatic alternative model or revision, no private files, no inference,
+no dependency changes to production, no gamebox needed. Record publisher.json,
+inventory.json, revision and inventory SHA, actual tokenizer results from
+pocket_preflight CLI with PyYAML 6.0.3. On failure preserve partial artifacts;
+report exact blocker; do not silently loosen checks. This resolves metadata
+locally only; synthetic tests do not establish actual HF API compatibility,
+license provenance or Russian acoustic quality. Do not start TTS yet.
