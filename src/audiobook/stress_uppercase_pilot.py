@@ -46,8 +46,8 @@ def candidate(raw: str, body: str, baseline: str, occurrence: dict) -> dict:
     if len(target) != 1:
         return {"status": "not_whole_word"}
     # Exclude compounds and adjacent digits/Latin letters/underscore.
-    if (start and (raw[start - 1].isalnum() or raw[start - 1] in "_-‑–"))
-            or (end < len(raw) and (raw[end].isalnum() or raw[end] in "_-‑–")):
+    if ((start and (raw[start - 1].isalnum() or raw[start - 1] in "_-‑–"))
+            or (end < len(raw) and (raw[end].isalnum() or raw[end] in "_-‑–"))):
         return {"status": "compound_or_mixed"}
     words = list(WORD.finditer(body))
     if ([m.group() for m in source] != [m.group() for m in words]
