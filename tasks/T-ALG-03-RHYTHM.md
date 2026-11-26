@@ -85,4 +85,41 @@ runtime prerequisite, not only documentation. No production promotion or merge.
 
 CI run 45781915089: 757 passed, 3 failed, 3 deselected. Two failures were legacy stub/missing-model tests requiring narrowly scoped guard mocks; one was the read-only audit test assuming the fixture did not create fake_home. Fixed all three fixtures without weakening the runtime guard. Existing worker_config already rejects nonzero enum_pause_ms; extend the same rejection to direct _synth_one_chunk before any engine call. No new legacy hash format or migration; unsafe old split remains disabled. New rhythm pilot will not use this path. Exact HEAD CI must be green before local checkout.
 
-Local dry-run only: on Mac use the frozen CH1 manifest (historical SHA256 12fee1084bf728fc3828b379f4aa29523cc9fdcf498b2f6a359a3658bb299b90; verify actual identity, do not overwrite if differs). Run rhythm_audit once, keep rows and manuscript private. Report aggregate chunk counts, number of legacy/protected conflicts and unhashed risks, and for reviewed IDs 0042/0087/0019/0225/0043/0080/0045/0062 whether each has valid candidate comma offsets; manually classify missed boundaries locally by syntax, not audio editing. Confirm historical enum_pause_ms=0 and unchanged manifest/audio. No model calls or synthesis. Use report to select next conservative single-stream punctuation/prosody pilot; no automatic promotion.
+Local dry-run only: on Mac use the frozen CH1 manifest (actual audit manifest SHA256 prefix db6ec668, operator verified eight reviewed chunk hashes; previous 12fee108… reference was MP3 digest, not manifest; use full local digest, never infer from prefix). Run rhythm_audit once, keep rows and manuscript private. Report aggregate chunk counts, number of legacy/protected conflicts and unhashed risks, and for reviewed IDs 0042/0087/0019/0225/0043/0080/0045/0062 whether each has valid candidate comma offsets; manually classify missed boundaries locally by syntax, not audio editing. Confirm historical enum_pause_ms=0 and unchanged manifest/audio. No model calls or synthesis. Use report to select next conservative single-stream punctuation/prosody pilot; no automatic promotion.
+
+
+## CH1 dry-run received / syntax planner checkpoint
+
+Operator report: exact prior HEAD 65be3c854e865446b75a4b8b39eeca66d6820435
+CI green (run 45783071959 verified by lead). Local report: 238 chunks;
+legacy 50 chunks/81 offsets; conservative planner 3/9; protected legacy
+conflicts 0; unhashed multi-sentence risk 62; enum_pause_ms=0. None of eight
+reviewed chunks have automatic candidates. Manual syntax review found 13
+comma offsets across five chunks, three inside protected quotation (excluded
+from automatic candidates); two legacy false-positive constructions in
+0019 and 0225. 45/45 control files unchanged; 759 passed/5 skipped reported.
+Exact manuscript and offsets remain private. No render authorization.
+
+New rhythm_syntax.py: parser-independent UD coordination boundary proposals
+using ordered exact token spans, full source coverage, rooted acyclic tree,
+contiguous nominal/adjectival/adverbial component spans and exact comma gaps.
+Conservative quote/bracket/decimal guards. No punctuation changes, no waveform
+edits, no cache writes. Six synthetic tests. This is a candidate generator
+only; no parser adapter or real CH1 evaluation yet. Recall and precision
+are unmeasured. Do not treat tree evidence as acoustic pause proof.
+
+Parser research: Natasha/Slovnet is compact and CPU-oriented, trained for news;
+test on book style, pin library/model/embedding versions and weights hashes,
+verify model and training-data terms before deployment.
+https://github.com/natasha/slovnet
+https://github.com/natasha/natasha
+Stanza has a UD dependency API but Russian SynTagRus corpus is CC BY-NC-SA 4.0;
+do not infer commercial clearance from model repository Apache-2.0 alone.
+https://stanfordnlp.github.io/stanza/depparse.html
+https://universaldependencies.org/treebanks/ru_syntagrus/index.html
+No downloads/install yet. Select a parser only after provenance review.
+Next: private exact-span adapter dry-run and evaluate against owner-reviewed
+development boundaries plus heldout (protected quote offsets excluded);
+measure false positives/misses before selecting an isolated single-stream
+prosody experiment. Do not fit exclusively to these eight chunks.
+No TTS or gamebox required for current checkpoint. B BLOCKED, CH2/FULL_RENDER NO_GO.
