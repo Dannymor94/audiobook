@@ -50,3 +50,33 @@ acoustic stress verification by dictionaries or Whisper.
 
 Chapter 2 / FULL_RENDER remain NO_GO. GAMEBOX-FIRST enforcement is a mandatory
 runtime prerequisite, not only documentation. No production promotion or merge.
+
+
+## Implementation checkpoint
+
+- `gamebox.py`: require Linux and the actual OS hostname danny-serv; no env bypass.
+  Enforced at normal worker spawn/child entry, model loading (including cache
+  hits), voice prompt computation, direct synthesize, and isolated stock pilot.
+  Mock-only tests have explicit scoped patches; real tests do not.
+  This is accidental-host prevention, not hardware attestation; custom external
+  Qwen scripts outside the repository cannot be prevented by this Python guard.
+  RAM/disk/queue lock preflight remains mandatory separately; do not treat host
+  check alone as authorization to render. Audit other direct external adapter
+  scripts before any future execution.
+- `rhythm_audit.py`: read-only manifest JSONL audit, exact comma offsets from
+  sequential consumption, legacy rule coverage, nested and numeric comma
+  conflicts, conservative colon-led list candidates. Candidate boundaries are
+  advisory, not verified syntax. Existing quote depth covers «», (), [];
+  broader quote handling and clitic groups need further work. No synthesis,
+  config, cache or text modification. Command on a private local machine:
+  `uv run --no-sync python -m audiobook.rhythm_audit /path/to/manifest.jsonl`.
+- Code finding: with enum_pause_ms > 0, chunk_fragments splits multiple
+  sentences even if no enumeration is found; build_manifest hashes the enum
+  option only when an enumeration is found. This risks stale cache identity.
+  Checked repository config enum_pause_ms=0, not private runtime config.
+  Do not enable enum_pause_ms or modify legacy caches. Before any rhythm pilot,
+  resolve this mismatch and explicitly bind candidate input, segmentation,
+  pause and seed to identity. Existing question-tail removal and short
+  independent fragments also need evaluation.
+- New synthetic tests added. Final commit CI not yet confirmed at checkpoint.
+  No private manifest audit performed by lead because the file remains local.
