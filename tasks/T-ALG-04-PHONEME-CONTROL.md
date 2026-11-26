@@ -175,3 +175,56 @@ pocket_preflight CLI with PyYAML 6.0.3. On failure preserve partial artifacts;
 report exact blocker; do not silently loosen checks. This resolves metadata
 locally only; synthetic tests do not establish actual HF API compatibility,
 license provenance or Russian acoustic quality. Do not start TTS yet.
+
+
+## Bounded acoustic executor — implemented, not yet approved for inference
+
+pocket_pilot.py and five synthetic tests implement four synthetic stress
+contrasts (two development, two heldout, eight WAV maximum). Same segmental
+IPA sequence with different primary-stress marks; the strings deliberately
+are not normative phonetic transcriptions. This is a control-channel
+responsiveness diagnostic, not pronunciation correctness or an engine
+comparison. "baseline"/"candidate" receipt fields are legacy A/B transport
+names, not a correct/incorrect or stock Qwen condition. Do not rank the two
+arms by general quality alone. Use a qualified local listener to independently
+mark heard vowel ordinal (1 / 2 / unclear), lexical integrity, author voice
+similarity and artifacts for each clip. No owner relistening required until
+useful evidence. To advance: both stress positions correctly realized in both
+heldout pairs, no lexical corruption, acceptable author voice; unresolved
+ratings do not pass. No rhythm or book-wide accuracy claim.
+
+Prerequisites: exact latest CI; successful public-only provisioning and
+actual preflight results first; separate Python3.12 environment with pinned
+CPU torch 2.13.0, pocket-tts 4.0.1, tokenizers 0.22.2, full lock/hashes.
+Exact upstream clean checkout a696db20e2877a080df503d9bad11f315a3429ff;
+record SHA256 of hybrid/tts/phonemes/batch.py and verify against that
+revision. No upstream shell setup, remote custom code or entire GPU stack.
+Review imports and dependencies, confirm local/offline loader and compatible
+pad-state support. If version unavailable, BLOCKED; no substitutions.
+Reference: existing authorized local author WAV, hash pin and confirm first
+5 seconds clean. No manuscript input. No network during reference/model
+execution; HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 plus independent
+network isolation (flags alone are not a sandbox). Gamebox-only identity,
+15 GiB available RAM, persistent filesystem with >=2 GiB free, canonical
+heavy lock and idle queue; one CPU worker, 8 threads, no retries.
+
+After separate acoustic GO, on gamebox, with private paths and verified
+digests, run dry-run without model loading:
+`python -m audiobook.pocket_pilot --model-dir "$MODEL" --inventory "$INVENTORY" --inventory-sha256 "$INV_SHA" --reference "$REF" --reference-sha256 "$REF_SHA" --upstream "$UPSTREAM" --sampler-sha256 "$SAMPLER_SHA" --canonical-out "$CANONICAL_OUT" --out "$NEW_PLAN"`.
+Then same arguments with distinct new output and `--execute --plan-sha256
+"$PLAN_SHA"`. Detached persistent job, verified PID/log/exit; external
+hard time limit required (internal per-arm 180s check is cooperative, not
+a hung-model kill). Record actual started/finished/duration and measured
+RTF; no assumed ETA for this unmeasured model. Guard rejects output under
+production/source/model roots, token mismatch against real conditioner,
+capped/stopped/invalid stream and wrong frame length. All eight arms must
+complete; verify READY and immutable inputs, preserve production controls.
+No automatic fallback or retries. Existing blind review generator now
+supports --policy pocket-ipa-control-v1 --expected-pairs 4; same local HTML
+and separate key, eight verified WAVs. Synthetic review test added. No
+promotion or proof of acoustic behavior from mocked tests.
+
+Immediate local work is PUBLIC PROVISIONING ONLY after latest exact green
+CI, per preceding section. Do not run acoustic pilot before reporting actual
+model metadata/token channel, CPU dependency availability, and lead decision.
+No local code development. No full render or chapter 2.
