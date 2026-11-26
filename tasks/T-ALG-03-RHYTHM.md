@@ -252,3 +252,22 @@ After exact latest PR #47 HEAD CI green, local operator:
 Operator report: independent second-agent review agrees on all 14 comma labels, not human validation; frozen four targets and gold exist privately. SSH to Linux danny-serv restored and preflight passed. Prior exact HEAD 83daaa7 CI success run 45812019733, 781 passed/5 skipped reported; 300/300 production controls unchanged. Dry run stopped at section freshness (six differing chunk identities); no audio or plan. The exact six IDs and reasons are not available to lead. Production guard remains unchanged.
 
 For this isolated four-pair pilot only, verify full ordered source ID/ordinal/text inventory against a fresh in-memory build using the same table snapshot. Require all four selected rows to match fresh hash, leadin, open_end and cont exactly. Non-target differences in those fields are recorded in the frozen private plan, never overwritten or rendered. Keep canonical/isolated manifest byte equality, frozen gold/targets hashes, independent review and existing runtime guards. Rebuild and recheck config, table, source inventory and trials after execution. Any selected drift or global source inventory mismatch remains BLOCKED: restore exact historical inputs in isolated workspace only, prove parity, or report blocker; do not change targets or production files. This is safe because no production cache writes are made by the pilot. Full chapter rendering still requires original strict whole-section freshness. No bypass flag. After exact new HEAD CI green, resume same frozen four targets, dry-run once then execute only if selected parity succeeds. Report six mismatch IDs/fields and whether selected intersection is empty (no manuscript content), actual timing and eight WAV/HTML review on success. No new annotation cycle, no retries, no new TTS scope. B BLOCKED; CH2/FULL_RENDER NO_GO.
+
+## Final close — NO PROMOTION
+
+Operator verified page c883d1fbe7b0beaf, all 8 owner labels, blind key, frozen
+plan, READY and WAV receipts. Candidate overall wins/ties/losses 2/1/1;
+development 1/1/0, heldout 1/0/1. Baseline 0 OK/2 unsure/2 bad; candidate
+2 OK/0 unsure/2 bad. Explicit stress complaints baseline/candidate 2/1 dev,
+0/1 heldout, 2/2 total; these are complaints, not accuracy denominators.
+Owner generally prefers B voice, but B includes both conditions; one heldout
+baseline had explicit voice instability. No direct rhythm ratings in either
+split. Acoustic rhythm gate NOT DEMONSTRATED. Candidate heldout loss also
+violates no-regression criterion. Close actuator and syntax planner as research
+only; do not promote punctuation changes. No repeated listening or tuning.
+Operator-reported run 17:04:09–17:18:22 UTC, 14m12.4s; 300/300 production
+controls unchanged; 787 passed/5 skipped locally. Exact prior HEAD 842b5f54
+CI success independently confirmed by lead. Private files not directly
+accessible to lead; do not label audio independently verified by lead.
+Next ALG-04 capability research, no new TTS authorized. Preserve all artifacts
+and stress map. B remains BLOCKED; CH2/FULL_RENDER NO_GO.
