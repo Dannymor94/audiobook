@@ -36,8 +36,9 @@ def test_manifest_readonly(tmp_path):
     data = json.dumps({"id": "0001", "hash": "test",
                        "text": "Список: один, два, три."}, ensure_ascii=False)
     p.write_text(data, encoding="utf-8")
+    before = set(tmp_path.iterdir())
     result = audit(p)
     assert result["candidate_chunks"] == 1
     assert result["chunk_count"] == 1
     assert p.read_text(encoding="utf-8") == data
-    assert list(tmp_path.iterdir()) == [p]
+    assert set(tmp_path.iterdir()) == before
