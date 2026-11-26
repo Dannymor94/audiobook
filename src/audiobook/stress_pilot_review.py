@@ -26,16 +26,17 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
         raise ValueError("NEW_REVIEW_AND_SEPARATE_KEY_REQUIRED")
     plan_bytes = (source / "plan_PRIVATE.json").read_bytes()
     plan = json.loads(plan_bytes)
-    if policy not in {"uppercase-occurrence-pilot-v1", "single-stream-comma-semicolon-v1"} or plan.get("policy") != policy:
+    if policy not in {"uppercase-occurrence-pilot-v1", "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1"} or plan.get("policy") != policy:
         raise ValueError("WRONG_PILOT")
     rhythm = policy == "single-stream-comma-semicolon-v1"
-    if rhythm:
+    pocket = policy == "pocket-ipa-control-v1"
+    if rhythm or pocket:
         ready = json.loads((source / "READY_PRIVATE.json").read_bytes())
         if (expected_pairs != 4 or ready["pairs"] != 4
                 or ready["plan_sha256"] != sha(plan_bytes)
                 or ready["receipts_sha256"] != sha((source / "receipts_PRIVATE.jsonl").read_bytes())):
             raise ValueError("RHYTHM_READY_MISMATCH")
-    prefix = "ALG03" if rhythm else "ALG02"
+    prefix = "ALG04" if pocket else ("ALG03" if rhythm else "ALG02")
     trials = [r for r in plan["trials"] if r["status"] == "planned"]
     ids = [r["chunk_id"] for r in trials]
     if len(ids) != expected_pairs or len(set(ids)) != len(ids):
@@ -101,7 +102,8 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
         json.dump({"page_id": pid, "plan_sha256": sha(plan_bytes), "items": keys},
                   f, ensure_ascii=False, indent=2)
     page = out / "review.html"
-    title = "ALG-03 — проверка ритма" if rhythm else "ALG-02 — проверка ударений"
+    title = ("ALG-04 — проверка фонемных ударений" if pocket else
+             ("ALG-03 — проверка ритма" if rhythm else "ALG-02 — проверка ударений"))
     page.write_text(review.render(title, "golden", groups, pid),
                     encoding="utf-8")
     return page
@@ -114,7 +116,7 @@ def main():
     p.add_argument("--private-key", type=Path, required=True)
     p.add_argument("--expected-pairs", type=int, default=8)
     p.add_argument("--policy", choices=["uppercase-occurrence-pilot-v1",
-                   "single-stream-comma-semicolon-v1"], default="uppercase-occurrence-pilot-v1")
+                   "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1"], default="uppercase-occurrence-pilot-v1")
     a = p.parse_args()
     print(build(a.source, a.out, a.private_key, a.expected_pairs, policy=a.policy))
     return 0
