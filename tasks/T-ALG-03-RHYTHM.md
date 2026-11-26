@@ -199,3 +199,50 @@ Operator report at HEAD 679021b7bf00898d27aff0b40d9f4aa0176b2d1f: verified GitHu
 Separate actuator feasibility from boundary detection: before investing in another parser, establish whether stock Qwen can obey a single safe stronger punctuation mark in a continuous input. Added rhythm_actuator.py dry-run only: requires exact annotated positive comma with matching chunk hash/split, excludes protected, locked, numeric and terminal boundaries; same carrier, seed, dictionary, sentinel and open_end; both arms use normal preparation, only one comma-to-semicolon difference permitted, exact comma ordinal checked, input SHA256 recorded. Semicolon is a hypothesis, not a proven pause instruction. Never mutate manuscript, production hashes or audio. Synthetic tests added; no acoustic execution implementation yet.
 
 Next acoustic feasibility pilot (distinct from failed parser gate, requires explicit scope approval and CI): use at most four pairs, two development and two fresh heldout, with independently validated linguistic boundaries (not parser predictions), one internal comma each. Freeze before inference. Same actual generation identity and seed/carrier, one worker on verified gamebox, existing canonical heavy lock, resource/disk checks, private new output, no production write. Render one continuous string per arm, no fragment joins or waveform pause insertion. Compare rhythm at the exact boundary, lexical integrity, target and other stress, voice, overall acceptability. Offline HTML paired review with exact receipt identities. Gate: heldout improvement at least one, no heldout regression, no new lexical/stress/voice defects among any accepted candidates. No acoustic claim until evidence. If fail, retire punctuation actuator; prioritize model capability research instead of more parser iterations. Successful actuator alone does not authorize automatic boundary selection or production deployment. Keep source annotations and audio local. No new TTS now; B BLOCKED, CH2/FULL_RENDER NO_GO.
+
+
+## Owner GO — bounded actuator feasibility only
+
+Prior actuator planner HEAD 19ba39b02510865ab56cf5de77ba6c850ecdd7a3 CI
+success, run 45811164080 verified. Owner approved four-pair scope, not any
+production render. Added rhythm_pilot.py, exact four distinct targets with
+two development/two heldout, independently reviewed positive boundaries,
+pinned full manifest/gold/targets and dry-run plan SHA256, same historical
+config, one continuous input per arm, fixed seed/carrier, one CPU worker,
+no retries, gamebox OS host check, 15 GiB available RAM, 2 GiB free persistent
+local filesystem, canonical heavy lock and idle queue. New private output
+outside project/production roots, per-arm WAV receipt, final READY only
+after all eight succeed and identity recheck. Uses existing generation_identity
+(snapshot name and reference/latents digests, not full hardware attestation
+or model-weight byte verification); operator must verify pinned model snapshot
+and actual runtime identity independently. Tests added; no real TTS tested by lead.
+
+After exact latest PR #47 HEAD CI green, local operator:
+1. Freeze four reviewed comma boundaries (two prior development chunks, two
+   fresh heldout not in prior reviewed/gold sets); independently review syntax
+   without exposing candidate audio, do not invent independent review.
+   Use gold schema from rhythm_eval with independently_reviewed=true only
+   for actually independently verified rows; targets JSON list of
+   {chunk_id,offset}. Retain full source and annotations privately.
+2. On gamebox danny-serv, use isolated historical CH1 workspace and actual
+   canonical out. Verify full manifest digest, both copies byte identical,
+   all current hashes, production controls, model/reference/latents, free RAM,
+   persistent local path, no active tasks. No Mac TTS. 
+3. Run `uv run --no-sync python -m audiobook.rhythm_pilot --gold "$GOLD" --gold-sha256 "$GOLD_SHA" --targets "$TARGETS" --targets-sha256 "$TARGETS_SHA" --manifest-sha256 "$MANIFEST_SHA" --canonical-out "$CANONICAL_OUT" --out "$NEW_DRY_RUN"`.
+   Dry-run produces only private plan. Verify all four exactly one punctuation
+   edit, same baseline/candidate seed and carrier. Do not substitute targets
+   after observing audio. If any preflight fails, BLOCKED.
+4. Same args with a different new private output directory, add
+   `--execute --plan-sha256 "$DRY_PLAN_SHA"`. Detached persistent log with
+   verified PID/start/exit; report actual STARTED_AT, ETA based on prior measured
+   RTF and input lengths, FINISHED_AT and DURATION. Never run retries or a
+   second experiment without approval. On failure retain all artifacts.
+5. Only if READY and all eight receipts verified, privately copy run to Mac,
+   generate `uv run --no-sync python -m audiobook.stress_pilot_review --source "$COPIED_RUN" --out "$NEW_REVIEW" --private-key "$SEPARATE_KEY" --expected-pairs 4 --policy single-stream-comma-semicolon-v1`.
+   Verify offline playback, correct UTF-8, four pairs, eight WAVs, autosave,
+   JSON export, no unblind. Return exact local review.html and WAV paths.
+   Prompt owner to rate boundary pause/continuity, stress, words, voice and
+   overall separately in comments; no new UI. Do not upload audio/text.
+6. No production changes or chapter 2/full render. Report aggregate technical
+   evidence only, retain private receipts and gold. If independent boundaries,
+   CI, runtime or plan parity unavailable, stop rather than approximate.
