@@ -22,6 +22,8 @@ def sha(path: Path) -> str:
 
 
 def verify_assets(root: Path, inventory: dict) -> dict:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("REGULAR_MODEL_DIRECTORY_REQUIRED")
     if inventory.get("repo_id") != "gabrione/pocket-tts-phonemes-multilang":
         raise ValueError("WRONG_MODEL_REPO")
     revision = inventory.get("revision")
@@ -85,14 +87,17 @@ def main() -> int:
     import yaml
     from tokenizers import Tokenizer
     config = yaml.safe_load((a.model_dir / "model.yaml").read_bytes())
+    if not isinstance(config, dict):
+        raise ValueError("INVALID_BASE_CONFIG")
     # Upstream model_config intentionally overrides the base text lookup with
     # a 4000-bin IPA vocabulary; base YAML's original bin count is not evidence.
     tok = Tokenizer.from_file(str(a.model_dir / "tokenizer.json"))
     probes = verify_token_channel(tok)
-    if verify_assets(a.model_dir, inventory) != identity:
+    if (verify_assets(a.model_dir, inventory) != identity
+            or sha(a.inventory) != a.inventory_sha256):
         raise ValueError("ASSETS_CHANGED")
     print(json.dumps({"identity": identity, "token_channel": probes,
-                      "base_config_is_mapping": isinstance(config, dict),
+                      "base_config_is_mapping": True,
                       "status": "TOKEN_CHANNEL_ONLY_NO_ACOUSTIC_CLAIM"},
                      ensure_ascii=False, indent=2))
     return 0
