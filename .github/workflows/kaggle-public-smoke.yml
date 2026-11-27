@@ -1,0 +1,43 @@
+name: CLOUD-03 Kaggle public smoke
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ['.github/workflows/kaggle-public-smoke.yml']
+permissions:
+  contents: read
+concurrency:
+  group: audiobook-kaggle-public-smoke
+  cancel-in-progress: false
+jobs:
+  kaggle-smoke:
+    if: github.head_ref == 'task/stress-map-r1' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - id: gate
+        run: |
+          if [ "$(git log -1 --format=%s)" = 'ci(cloud): launch one Kaggle public GPU smoke' ] && [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install pinned public CLI
+        if: steps.gate.outputs.run == 'true'
+        run: python -m pip install kaggle==2.2.5
+      - name: Quota, GPU render, verified outputs
+        if: steps.gate.outputs.run == 'true'
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          PYTHONUTF8: '1'
+        run: python cloud/kaggle/submit_smoke.py
+      - uses: actions/upload-artifact@v6
+        if: success() && steps.gate.outputs.run == 'true'
+        with:
+          name: kaggle-public-silero-smoke
+          path: ${{ runner.temp }}/public-output/public_smoke/
+          retention-days: 3
+          if-no-files-found: error
