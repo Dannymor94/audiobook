@@ -108,3 +108,23 @@ def test_rhythm_measurement_is_not_human_rating():
     assert summary["rhythm_measured_chunks"] == 1
     assert rows[0]["priority"] == "unverified"
     assert summary["human_coverage"]["rhythm"] == {"unmeasured":3}
+
+
+def test_voice_metric_diagnostic_not_human_verdict():
+    from audiobook.chapter_quality import verify_voice
+    from audiobook.voice_similarity import POLICY,MODEL_SHA
+    m=manifest()
+    audio={"01":"a"*64}
+    r=dict(id="01",hash="h1",wav_sha256=audio["01"],status="measured",
+           cosine=.4,diagnostic_only=True,below_observed_reference_range=True)
+    s=dict(policy=POLICY,model_sha256=MODEL_SHA,manifest_sha256=digest(m),
+           candidates=1,measured=1,uncertain=0,median_cosine=.4,
+           below_observed_reference_range=1,release_ready=False)
+    voice=verify_voice(digest(m),chapter_rows(m),audio,[r],s)
+    report,rows=build(m,audio,voice=voice)
+    assert rows[0]["priority"]=="review"
+    assert report["voice_measured_chunks"]==1
+    assert report["human_coverage"]["voice"]=={"unmeasured":3}
+    r["wav_sha256"]="b"*64
+    with pytest.raises(ValueError,match="VOICE_IDENTITY_MISMATCH"):
+        verify_voice(digest(m),chapter_rows(m),audio,[r],s)
