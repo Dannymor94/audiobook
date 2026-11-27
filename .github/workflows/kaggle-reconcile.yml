@@ -35,4 +35,13 @@ jobs:
           PYTHONUTF8: '1'
         run: python cloud/kaggle/reconcile_smoke.py
 
+      - uses: actions/upload-artifact@v6
+        if: success() && steps.gate.outputs.run == 'true'
+        with:
+          name: kaggle-reconciled-public-smoke
+          path: ${{ runner.temp }}/reconciled-output/public_smoke/
+          retention-days: 3
+          if-no-files-found: ignore
+
+# Reconciliation checkpoint 03: export verified existing outputs when available.
 # Reconciliation checkpoint 02: inspect the same remote version only.
