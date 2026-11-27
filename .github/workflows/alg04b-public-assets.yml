@@ -1,0 +1,35 @@
+name: ALG-04B public asset smoke
+# One-shot research job: only changes to this file on the research branch.
+# Public weights are hashed, never imported, synthesized, cached or uploaded.
+on:
+  push:
+    branches: [task/stress-map-r1]
+    paths: ['.github/workflows/alg04b-public-assets.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-assets:
+    if: github.ref == 'refs/heads/task/stress-map-r1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      HF_HUB_OFFLINE: '0'
+      HF_HUB_DISABLE_XET: '1'
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - name: Verify real publisher metadata and public asset bytes
+        run: |
+          uv run --no-project --python 3.11 --with huggingface_hub==1.33.0 python -m audiobook.silero_openvoice_provision --out "$RUNNER_TEMP/alg04b-public"
+          python -m json.tool "$RUNNER_TEMP/alg04b-public/inventory.json"
+          python -m json.tool "$RUNNER_TEMP/alg04b-public/publisher.json"
