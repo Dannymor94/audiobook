@@ -70,6 +70,20 @@ def replay(events):
         if not KEY.fullmatch(key):
             raise ValueError("INVALID_JOB_KEY")
         if key not in jobs:
+            if state == "LEGACY_QUEUED":
+                # One historical job predates frozen plans. Preserve its hold;
+                # never invent plan/code hashes or treat it as new admission.
+                data = event["job"]
+                if (jobs or key != "legacy-46019695614" or data["provider"] != "kaggle"
+                        or data["account"] != "dannymorozov"
+                        or data["slug"] != "audiobook-public-smoke-46019695614"
+                        or event.get("remote_ref") != "dannymorozov/audiobook-public-smoke-46019695614/1"
+                        or data["reserved_seconds"] != 1200
+                        or data.get("plan_sha256") is not None):
+                    raise ValueError("INVALID_LEGACY_HOLD")
+                jobs[key] = dict(data,state="QUEUED",remote_ref=event["remote_ref"])
+                prev = event_hash(event)
+                continue
             if state != "RESERVED" or any(j["state"] in ACTIVE for j in jobs.values()):
                 raise ValueError("RESERVATION_CONFLICT")
             data = event["job"]
