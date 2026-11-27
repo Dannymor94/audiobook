@@ -26,17 +26,18 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
         raise ValueError("NEW_REVIEW_AND_SEPARATE_KEY_REQUIRED")
     plan_bytes = (source / "plan_PRIVATE.json").read_bytes()
     plan = json.loads(plan_bytes)
-    if policy not in {"uppercase-occurrence-pilot-v1", "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1"} or plan.get("policy") != policy:
+    if policy not in {"uppercase-occurrence-pilot-v1", "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1", "silero-openvoice-control-v1"} or plan.get("policy") != policy:
         raise ValueError("WRONG_PILOT")
     rhythm = policy == "single-stream-comma-semicolon-v1"
     pocket = policy == "pocket-ipa-control-v1"
-    if rhythm or pocket:
+    transfer = policy == "silero-openvoice-control-v1"
+    if rhythm or pocket or transfer:
         ready = json.loads((source / "READY_PRIVATE.json").read_bytes())
         if (expected_pairs != 4 or ready["pairs"] != 4
                 or ready["plan_sha256"] != sha(plan_bytes)
                 or ready["receipts_sha256"] != sha((source / "receipts_PRIVATE.jsonl").read_bytes())):
             raise ValueError("RHYTHM_READY_MISMATCH")
-    prefix = "ALG04" if pocket else ("ALG03" if rhythm else "ALG02")
+    prefix = "ALG04B" if transfer else ("ALG04" if pocket else ("ALG03" if rhythm else "ALG02"))
     trials = [r for r in plan["trials"] if r["status"] == "planned"]
     ids = [r["chunk_id"] for r in trials]
     if len(ids) != expected_pairs or len(set(ids)) != len(ids):
@@ -71,6 +72,12 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
             if info.frames != r["samples"]:
                 raise ValueError("WAV_LENGTH_MISMATCH")
             verified[cid, arm] = (wav, r)
+        if transfer:
+            raw = source / f"{cid}_silero_raw.wav"
+            if raw.is_symlink() or not raw.is_file() or any(
+                    by_key[cid, arm]["source_wav_sha256"] != sha(raw.read_bytes())
+                    for arm in ("baseline", "candidate")):
+                raise ValueError("TRANSFER_SOURCE_MISMATCH")
         if by_key[cid, "baseline"]["generation"] != by_key[cid, "candidate"]["generation"]:
             raise ValueError("PAIR_GENERATION_MISMATCH")
 
@@ -92,6 +99,9 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
             group.append({"file": name, "name": f"Пара {n} · {side}",
                           "meta": {"chunk": cid, "pair": str(n), "side": side,
                                    "hash": t["chunk_hash"], "wav_sha256": r["wav_sha256"]}})
+            if transfer:
+                group[-1]["meta"].update(control_ratings=True, target_word=t["target"]["word"],
+                                         text=t["text"].replace("+", ""))
             keys.append({"file": name, "chunk_id": cid, "arm": arm,
                          "wav_sha256": r["wav_sha256"], "target": t["target"]})
         groups.append(group)
@@ -104,6 +114,8 @@ def build(source: Path, out: Path, key_path: Path, expected_pairs: int = 8,
     page = out / "review.html"
     title = ("ALG-04 — проверка фонемных ударений" if pocket else
              ("ALG-03 — проверка ритма" if rhythm else "ALG-02 — проверка ударений"))
+    if transfer:
+        title = "ALG-04B — произношение и голос"
     page.write_text(review.render(title, "golden", groups, pid),
                     encoding="utf-8")
     return page
@@ -116,7 +128,7 @@ def main():
     p.add_argument("--private-key", type=Path, required=True)
     p.add_argument("--expected-pairs", type=int, default=8)
     p.add_argument("--policy", choices=["uppercase-occurrence-pilot-v1",
-                   "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1"], default="uppercase-occurrence-pilot-v1")
+                   "single-stream-comma-semicolon-v1", "pocket-ipa-control-v1", "silero-openvoice-control-v1"], default="uppercase-occurrence-pilot-v1")
     a = p.parse_args()
     print(build(a.source, a.out, a.private_key, a.expected_pairs, policy=a.policy))
     return 0
