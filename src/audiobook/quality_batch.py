@@ -18,6 +18,7 @@ from time import perf_counter
 from audiobook.chapter_quality import POLICY as CHAPTER_POLICY, chapter_rows
 from audiobook.rhythm_acoustic_measure import frozen
 from audiobook import review
+from audiobook.pocket_preflight import sha
 
 POLICY = "chapter-quality-batch-v1"
 EVIDENCE = {"findings", "human", "ctc-controls", "ctc-results", "ctc-summary",
@@ -119,7 +120,7 @@ def ranked_priorities():
     return ("human_defect","review")
 
 
-def execute(plan,out):
+def execute(plan,out, *, plan_source=None):
     limit=validate_plan(plan)
     m=plan["manifest"]
     manifest=frozen(Path(m["path"]),m["sha256"])
@@ -155,6 +156,16 @@ def execute(plan,out):
         frozen(Path(m["path"]),m["sha256"])
         for e in plan["evidence"].values():
             frozen(Path(e["path"]),e["sha256"])
+        # Recheck the complete chapter, not just copied listening samples.
+        for r in report:
+            p=chunks/f"{r['id']}.wav"
+            if p.is_symlink() or (p.exists() and not p.is_file()):
+                raise ValueError("AUDIO_INVENTORY_CHANGED")
+            actual=sha(p) if p.is_file() else None
+            if actual!=r["wav_sha256"]:
+                raise ValueError("AUDIO_INVENTORY_CHANGED")
+        if plan_source is not None:
+            frozen(*plan_source)
         receipt["status"]="REPORT_READY"
         receipt["summary_sha256"]=digest((out/"report"/"summary.json").read_bytes())
         receipt["evidence_included"]=sorted(plan["evidence"])
@@ -173,8 +184,7 @@ def main():
     p.add_argument("--out",type=Path,required=True)
     a=p.parse_args()
     data=frozen(a.plan,a.plan_sha256)
-    result=execute(json.loads(data),a.out)
-    frozen(a.plan,a.plan_sha256)
+    result=execute(json.loads(data),a.out,plan_source=(a.plan,a.plan_sha256))
     print(json.dumps(result))
     return 0
 
