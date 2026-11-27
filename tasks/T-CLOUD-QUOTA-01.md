@@ -106,3 +106,23 @@ existing outputs if complete. No new kernel, no credentials logged.
   and account billing/GPU accounting must be verified before enabling
   submissions. A hash chain is not independent proof of provider receipts.
   No automatic fallback, retry or new GPU job. Latest CI pending.
+
+
+## Owner-approved disposable notebook deletion
+- Exact HEAD 73711f2158ffe80d83a23fabd94c5fc34dd478e8 CI 46042314039:
+  891 passed, 3 deselected.
+- Official SDK cancellation attempt 46043839229: exact /1 queued,
+  session ID not exposed, no cancel request sent.
+- Owner explicitly authorized deleting the disposable notebook only.
+  Run 46044963641 / job 140661799351 on 2026-11-27T17:50:48Z:
+  Kaggle confirmed notebook deletion, exact version inaccessible afterward.
+  This does not independently prove worker termination.
+- Ledger appended UNKNOWN observation with evidence; 1200 GPU-seconds
+  hold retained. One-shot destructive/cancel workflows retired.
+  New GPU submission remains locked; no retry or fallback until provider
+  confirms terminal state or owner approves a separately specified,
+  bounded risk policy after reconciliation. No claim quota consumed.
+- Next: verify current quota and active-session evidence through supported
+  provider interfaces, not an inaccessible deleted notebook status.
+  Prepare public CPU and Colab packaging without submitting GPU jobs.
+  Do not repeat deletion. No private inputs, paid resource, or merge.
