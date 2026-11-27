@@ -55,3 +55,50 @@ Exact commit, observed CI status, actual commands/elapsed where executed,
 artifact hashes, blocked items and next actionable dependency. No claim
 of completion from plan alone. No agent dispatch unless a real local
 execution channel is available.
+
+
+## Release-first operating rules — owner directive 2026-11-27
+
+Primary deliverable: complete clean Russian audiobook in the author's voice,
+with correct lexical content, stress, pronunciation, meaningful pauses and
+natural intonation. No music or effects in this release. Infrastructure,
+CI counts and experiment counts are not delivery metrics.
+
+- Work on the shortest critical path to usable audio. Each experiment
+  must state the suspected failure boundary, measurable decision and
+  next action for pass/fail before running. Reuse earlier evidence.
+- If blocked, record the exact blocker once, identify a safe independent
+  route and proceed with the next useful task. Do not retry unchanged
+  unavailable jobs or spend entire work cycles reporting the same blocker.
+  Never bypass rights, privacy, resource limits or release gates.
+- Stop failed hypotheses unless materially new evidence changes them.
+  One bounded experiment per hypothesis initially; additional runs only
+  if they discriminate a documented unresolved question. No endless
+  punctuation, case, seed or dictionary permutations.
+- No new library, detector or infrastructure unless it fixes a measured
+  defect or removes an actual critical-path dependency. Prefer existing
+  implemented components, actual audio, and a production-ready solution.
+- Report actual progress in source tokens resolved, verified audio duration,
+  defects fixed/remaining, uncertainty and chapters accepted; distinguish
+  text coverage from acoustic verification. Track elapsed time and measured
+  throughput only, not invented completion dates.
+- Cloud short public tests and local preparation/production are separate
+  lanes. Prefer the fastest qualified available route. A cloud outage
+  must not freeze local work, and local unavailability must not prevent
+  permissible public diagnostics. No unauthorized transfers or GPU retry.
+- Lead executes all accessible consecutive tasks in a batch. Agents only
+  for actual inaccessible execution or necessary independent review.
+  Owner receives actionable exceptions and a compact result, not repeated
+  intermediate confirmations. Listening is limited to useful calibration
+  and release acceptance; uncertain cases must still be resolved by
+  reliable independent review, not silently passed.
+- Definition of done: full source accounted for, no known uncorrected
+  pronunciation/lexical defects, verified intended stress and acceptable
+  intonation evidence with explicit uncertainty/coverage, stable author
+  voice, clean assembly and final accepted MP3/M4B. Never claim perfect
+  accuracy solely from dictionary agreement or absence of ASR flags.
+  First chapter accepted and explicit full-book GO remain mandatory.
+- Next batch: actual known-error input trace and local map/manifest recovery
+  plus short public CPU stress probe if admitted. Prioritize a verified
+  playable result over another theoretical plan. No SFX or unrelated work.
+
