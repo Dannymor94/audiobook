@@ -102,7 +102,7 @@ def replay(events):
                 raise ValueError("INVALID_TRANSITION")
             ref = event.get("remote_ref")
             if ref is not None:
-                if not re.fullmatch(re.escape(j["account"]+"/"+j["slug"])+r"/[1-9][0-9]*",ref):
+                if not re.fullmatch(re.escape("{}/{}".format(j["account"], j["slug"])) + r"/[1-9][0-9]*",ref):
                     raise ValueError("REMOTE_IDENTITY_MISMATCH")
                 if j["remote_ref"] is not None and ref != j["remote_ref"]:
                     raise ValueError("REMOTE_VERSION_CHANGED")
