@@ -61,7 +61,39 @@ def verify_ctc(manifest_digest, rows, findings, controls, results, summary, audi
     return [(expected[k], r["signal"]) for k,r in idx.items()]
 
 
-def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=None):
+def verify_voice(manifest_digest, rows, audio, results, summary):
+    from audiobook.voice_similarity import POLICY as VOICE_POLICY, MODEL_SHA
+    if (summary["policy"] != VOICE_POLICY or summary["model_sha256"] != MODEL_SHA
+            or summary["manifest_sha256"] != manifest_digest
+            or summary.get("release_ready") is not False
+            or summary["candidates"] != len(results)
+            or len({r["id"] for r in results}) != len(results)):
+        raise ValueError("VOICE_PROVENANCE_MISMATCH")
+    measured = []
+    for r in results:
+        cid = r["id"]
+        if (cid not in rows or rows[cid]["status"] != "done"
+                or rows[cid]["hash"] != r["hash"] or cid not in audio
+                or audio[cid] != r["wav_sha256"]
+                or r["status"] not in ("measured", "uncertain")):
+            raise ValueError("VOICE_IDENTITY_MISMATCH")
+        if r["status"] == "measured":
+            v = r["cosine"]
+            if (type(v) not in (int,float) or not math.isfinite(v) or not -1 <= v <= 1
+                    or r.get("diagnostic_only") is not True
+                    or type(r.get("below_observed_reference_range")) is not bool):
+                raise ValueError("INVALID_VOICE_METRIC")
+            measured.append(r)
+    import statistics
+    if (summary["measured"] != len(measured)
+            or summary["uncertain"] != len(results)-len(measured)
+            or summary["median_cosine"] != (statistics.median(r["cosine"] for r in measured) if measured else None)
+            or summary["below_observed_reference_range"] != sum(r["below_observed_reference_range"] for r in measured)):
+        raise ValueError("VOICE_SUMMARY_MISMATCH")
+    return results
+
+
+def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=None, voice=None):
     rows = chapter_rows(manifest_bytes)
     digest = hashlib.sha256(manifest_bytes).hexdigest()
     if not set(audio) <= set(rows):
@@ -126,6 +158,13 @@ def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=
             item["measurements"]["rhythm"] = comp
             if comp["status"] != "measured":
                 item["issues"].append("rhythm_unmeasured")
+    if voice is not None:
+        for r in voice:
+            item = reports[r["id"]]
+            item["measurements"]["experimental_voice"] = {
+                k:v for k,v in r.items() if k not in ("id","hash","wav_sha256")}
+            if r["status"] == "measured" and r["below_observed_reference_range"]:
+                item["issues"].append("experimental_voice_outside_reference_range")
     priorities = Counter()
     for item in reports.values():
         issues = sorted(set(item["issues"]))
@@ -149,6 +188,7 @@ def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=
                                    for dim in DIMENSIONS},
                    experimental_stress_chunks=sum("experimental_stress" in r["measurements"] for r in reports.values()),
                    rhythm_measured_chunks=sum(r["measurements"].get("rhythm",{}).get("status")=="measured" for r in reports.values()),
+                   voice_measured_chunks=sum(r["measurements"].get("experimental_voice",{}).get("status")=="measured" for r in reports.values()),
                    release_ready=False)
     return summary,list(reports.values())
 
@@ -159,7 +199,7 @@ def main():
         p.add_argument("--"+name,type=Path,required=True)
     p.add_argument("--manifest-sha256",required=True)
     # Optional evidence bundle paths must come with externally frozen digests.
-    names = ("findings","human","ctc-controls","ctc-results","ctc-summary","rhythm-plan")
+    names = ("findings","human","ctc-controls","ctc-results","ctc-summary","rhythm-plan","voice-results","voice-summary")
     for name in names:
         p.add_argument("--"+name,type=Path)
         p.add_argument("--"+name+"-sha256")
@@ -215,9 +255,15 @@ def main():
         _,rhythm = evaluate(manifest,plan,a.rhythm_audio_root)
     elif a.rhythm_audio_root is not None:
         raise ValueError("RHYTHM_PLAN_REQUIRED")
+    voice = None
+    if "voice_results" in raw or "voice_summary" in raw:
+        if not {"voice_results","voice_summary"} <= raw.keys():
+            raise ValueError("COMPLETE_VOICE_BUNDLE_REQUIRED")
+        voice = verify_voice(a.manifest_sha256,rows,audio,
+                             json.loads(raw["voice_results"]),json.loads(raw["voice_summary"]))
     summary,report = build(manifest,audio,findings=findings,
                            human=json.loads(raw["human"]) if "human" in raw else None,
-                           ctc=ctc,rhythm=rhythm)
+                           ctc=ctc,rhythm=rhythm,voice=voice)
     if frozen(a.manifest,a.manifest_sha256)!=manifest or read_evidence()!=raw or audio_inventory()!=audio:
         raise ValueError("INPUTS_CHANGED")
     summary["evidence_sha256"] = {k:hashlib.sha256(v).hexdigest() for k,v in raw.items()}
