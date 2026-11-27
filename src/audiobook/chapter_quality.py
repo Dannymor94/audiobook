@@ -113,7 +113,7 @@ def verify_voice(manifest_digest, rows, audio, results, summary):
     return results
 
 
-def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=None, voice=None):
+def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=None, voice=None, waveforms=None):
     rows = chapter_rows(manifest_bytes)
     digest = hashlib.sha256(manifest_bytes).hexdigest()
     if not set(audio) <= set(rows):
@@ -131,6 +131,18 @@ def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=
             item["issues"].append("historical_qc_flag")
         if type(r.get("cer")) in (float,int) and math.isfinite(r["cer"]) and 0 <= r["cer"] <= 1:
             item["measurements"]["historical_cer"] = r["cer"]
+    if waveforms is not None:
+        if set(waveforms)!=set(audio):
+            raise ValueError("WAVEFORM_INVENTORY_MISMATCH")
+        for cid,m in waveforms.items():
+            item=reports[cid]
+            item["measurements"]["waveform"]=m
+            if m["status"]=="invalid":
+                item["issues"].extend(("render_incomplete","waveform_invalid"))
+            elif m["status"]=="measured":
+                item["issues"].extend("waveform_"+signal for signal in m["signals"])
+            else:
+                raise ValueError("INVALID_WAVEFORM_STATUS")
     text_summary = None
     if findings is not None:
         _,text_summary = build_ledger(list(rows.values()), findings)
@@ -209,6 +221,8 @@ def build(manifest_bytes, audio, *, findings=None, human=None, ctc=None, rhythm=
                    experimental_stress_chunks=sum("experimental_stress" in r["measurements"] for r in reports.values()),
                    rhythm_measured_chunks=sum(r["measurements"].get("rhythm",{}).get("status")=="measured" for r in reports.values()),
                    voice_measured_chunks=sum(r["measurements"].get("experimental_voice",{}).get("status")=="measured" for r in reports.values()),
+                   waveform_status=dict(Counter(r["measurements"].get("waveform",{}).get("status","unmeasured")
+                                                 for r in reports.values())),
                    release_ready=False)
     return summary,list(reports.values())
 
@@ -253,6 +267,14 @@ def main():
                 result[cid] = sha(path)
         return result
     audio = audio_inventory()
+    from audiobook.waveform_screen import screen
+    waveforms={}
+    for cid,d in audio.items():
+        path=a.chunks_dir/f"{cid}.wav"
+        if path.stat().st_size>128*1024**2:
+            waveforms[cid]=dict(status="invalid",reason="audio_size_limit")
+        else:
+            waveforms[cid]=screen(frozen(path,d))
     findings = [json.loads(l) for l in raw["findings"].splitlines() if l.strip()] if "findings" in raw else None
     ctc = None
     if any(k.startswith("ctc_") for k in raw):
@@ -283,7 +305,7 @@ def main():
                              json.loads(raw["voice_results"]),json.loads(raw["voice_summary"]))
     summary,report = build(manifest,audio,findings=findings,
                            human=json.loads(raw["human"]) if "human" in raw else None,
-                           ctc=ctc,rhythm=rhythm,voice=voice)
+                           ctc=ctc,rhythm=rhythm,voice=voice,waveforms=waveforms)
     if frozen(a.manifest,a.manifest_sha256)!=manifest or read_evidence()!=raw or audio_inventory()!=audio:
         raise ValueError("INPUTS_CHANGED")
     summary["evidence_sha256"] = {k:hashlib.sha256(v).hexdigest() for k,v in raw.items()}
