@@ -136,3 +136,8 @@ CLOUD-06: actual private chapter scope requires explicit owner data
 Owner need only connect Kaggle initially, then Colab if necessary; lead
 does code, packaging, GitHub and analysis. Cloud account access is not
 currently verified. No paid resource has been purchased or cloud TTS run.
+
+
+## Binding quota amendment
+
+`T-CLOUD-QUOTA-01.md` supersedes less restrictive scheduling clauses above. New GPU submissions disabled until tested durable reservation and reconciliation. Existing exact-version job is reconciled without resubmission.
