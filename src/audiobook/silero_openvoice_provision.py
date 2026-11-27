@@ -22,12 +22,52 @@ OV_SOURCE = "74a1d147b17a8c3092dd5430504bd83ef6c7eb23"
 SILERO_SOURCE = "e382298387332f2bf461fe6eadfde99104611b0c"
 NAMES = ("silero.pt", "config.json", "checkpoint.pth")
 
+# Lead-reviewed publisher evidence (2026-11-27). Only this immutable release
+# and published checkpoint digest are covered. Not an assertion of training
+# data clearance. Do not extend this record to another revision.
+OV_LICENSE_EVIDENCE = {
+    "repo": "myshell-ai/OpenVoiceV2",
+    "revision": "fd981100305a0e4291f93a9ad169c6d9f7bed54a",
+    "checkpoint_sha256": "9652c27e92b6b2a91632590ac9962ef7ae2b712e5c5b7f4c34ec55ee2b37ab9e",
+    "license": "mit",
+    "revision_page": "https://huggingface.co/myshell-ai/OpenVoiceV2/tree/fd981100305a0e4291f93a9ad169c6d9f7bed54a",
+    "checkpoint_page": "https://huggingface.co/myshell-ai/OpenVoiceV2/blob/fd981100305a0e4291f93a9ad169c6d9f7bed54a/converter/checkpoint.pth",
+    "publisher_readme": "https://github.com/myshell-ai/OpenVoice/blob/74a1d147b17a8c3092dd5430504bd83ef6c7eb23/README.md",
+    "publisher_readme_git_blob": "a720f28d4b8735e57f3d42514a2d054e18aeb62f",
+}
+
+
+def converter_license_evidence(info) -> dict:
+    if info.id != OV_REPO or info.sha != OV_REV:
+        raise ValueError("CONVERTER_REVISION_MISMATCH")
+    card_license = info.card_data.get("license") if info.card_data is not None else None
+    if card_license is not None and card_license != "mit":
+        raise ValueError("CONVERTER_LICENSE_CONFLICT")
+    checkpoint = next((s for s in info.siblings or []
+                       if s.rfilename == "converter/checkpoint.pth"), None)
+    if getattr(getattr(checkpoint, "lfs", None), "sha256", None) != OV_SHA:
+        raise ValueError("PUBLISHER_WEIGHT_DIGEST_MISMATCH")
+    evidence = OV_LICENSE_EVIDENCE
+    if (evidence["repo"], evidence["revision"], evidence["checkpoint_sha256"],
+            evidence["license"]) != (info.id, info.sha, OV_SHA, "mit"):
+        raise ValueError("NO_REVIEWED_LICENSE_FOR_EXACT_RELEASE")
+    return dict(evidence, api_license=card_license,
+                method="api+reviewed-release" if card_license == "mit"
+                else "reviewed-exact-release")
+
 
 def verify_inventory(root: Path, inv: dict) -> dict:
     if (inv.get("silero_url") != SILERO_URL or inv.get("openvoice_revision") != OV_REV
             or inv.get("openvoice_source") != OV_SOURCE
             or inv.get("silero_source") != SILERO_SOURCE):
         raise ValueError("WRONG_MODEL_PROVENANCE")
+    evidence = inv.get("license_evidence", {})
+    if (any(evidence.get(k) != v for k, v in OV_LICENSE_EVIDENCE.items())
+            or evidence.get("api_license") not in (None, "mit")
+            or evidence.get("method") != ("api+reviewed-release"
+                                          if evidence.get("api_license") == "mit"
+                                          else "reviewed-exact-release")):
+        raise ValueError("MISSING_OR_INVALID_LICENSE_EVIDENCE")
     files = inv["files"]
     if set(files) != set(NAMES) or files["checkpoint.pth"] != OV_SHA:
         raise ValueError("WRONG_ASSET_INVENTORY")
@@ -54,11 +94,10 @@ def main() -> int:
         raise ValueError("INSUFFICIENT_DISK")
     info = HfApi(endpoint="https://huggingface.co", token=False).model_info(
         OV_REPO, revision=OV_REV, files_metadata=True, token=False)
-    if info.sha != OV_REV or info.card_data is None or info.card_data.get("license") != "mit":
-        raise ValueError("CONVERTER_REVISION_OR_LICENSE_MISMATCH")
+    license_evidence = converter_license_evidence(info)
     siblings = {s.rfilename: s for s in info.siblings or []}
     a.out.mkdir(mode=0o700)
-    publisher = {}
+    publisher = {"license_evidence": license_evidence}
     for name in ("config.json", "checkpoint.pth"):
         remote = f"converter/{name}"
         s = siblings[remote]
@@ -94,7 +133,8 @@ def main() -> int:
                 raise ValueError("SILERO_LENGTH_MISMATCH")
     inv = dict(silero_url=SILERO_URL, openvoice_revision=OV_REV,
                openvoice_source=OV_SOURCE, silero_source=SILERO_SOURCE,
-               files={name: sha(a.out/name) for name in NAMES})
+               files={name: sha(a.out/name) for name in NAMES},
+               license_evidence=license_evidence)
     verify_inventory(a.out, inv)
     (a.out/"publisher.json").write_text(json.dumps(publisher, indent=2), encoding="utf-8")
     path = a.out/"inventory.json"
