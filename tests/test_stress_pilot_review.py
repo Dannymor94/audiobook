@@ -108,3 +108,43 @@ def test_pocket_verified_four_pair_review(tmp_path):
     assert html.count("<audio controls") == 8
     assert "ALG-04" in html
     assert len(list(page.parent.glob("ALG04-*.wav"))) == 8
+
+
+def test_transfer_review_explicit_ratings(tmp_path):
+    import shutil
+
+    source = tmp_path / "run"
+    records = make_run(source)
+    base = json.loads((source / "plan_PRIVATE.json").read_bytes())["trials"][0]
+    trials, receipts = [], []
+    for i in range(1, 5):
+        cid = f"{i:02d}"
+        trials.append(dict(base, chunk_id=cid, text="З+амок.",
+                           target={"word": "замок", "vowel_ordinal": 1}))
+        raw = source / f"{cid}_silero_raw.wav"
+        shutil.copyfile(source / records[0]["wav"], raw)
+        for r in records:
+            name = f"{cid}_{r['arm']}.wav"
+            shutil.copyfile(source / r["wav"], source / name)
+            receipts.append(dict(r, chunk_id=cid, wav=name,
+                                 source_wav_sha256=sha(raw.read_bytes())))
+    plan = json.dumps({"policy": "silero-openvoice-control-v1", "trials": trials}).encode()
+    (source / "plan_PRIVATE.json").write_bytes(plan)
+    log = source / "receipts_PRIVATE.jsonl"
+    log.write_text("\n".join(json.dumps(dict(r, plan_sha256=sha(plan)))
+                             for r in receipts), encoding="utf-8")
+    (source / "READY_PRIVATE.json").write_text(json.dumps({
+        "pairs": 4, "plan_sha256": sha(plan),
+        "receipts_sha256": sha(log.read_bytes())}), encoding="utf-8")
+    page = build(source, tmp_path / "review", tmp_path / "key.json", 4,
+                 policy="silero-openvoice-control-v1")
+    html = page.read_text(encoding="utf-8")
+    assert html.count("<audio controls") == 8
+    for field in ("heard_stress", "lexical", "voice", "rhythm"):
+        assert html.count(f'data-rating="{field}"') == 8
+    assert "З+амок" not in html
+    assert "Замок" in html
+    raw.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="TRANSFER_SOURCE_MISMATCH"):
+        build(source, tmp_path / "second", tmp_path / "second-key.json", 4,
+              policy="silero-openvoice-control-v1")
