@@ -97,3 +97,23 @@ for eight players, structured fields and changed source rejection. These
 are synthetic tests, not actual inference/CPU verification. Fixed single
 speaker and sample cases are lead choices, not owner-approved production
 settings. No download or TTS performed by lead.
+
+## License evidence correction (2026-11-27)
+
+Operator reported public provisioning BLOCKED: pinned HF model_info returns
+card_data null, no files downloaded. Exact prior HEAD cce34ae CI success
+independently verified. Official exact-revision HF tree and converter checkpoint
+pages both display MIT; the checkpoint page explicitly lists our pinned SHA256.
+Pinned publisher GitHub README blob a720f28d4b8735e57f3d42514a2d054e18aeb62f
+at OV_SOURCE explicitly declares V1/V2 MIT and commercial use. Public publisher
+release evidence is accepted for this exact repository/revision/checkpoint only.
+This is not independent training-data rights clearance. New provisioner
+requires exact API model ID, revision, publisher checkpoint SHA256, and
+reviewed evidence record; missing API license uses that reviewed record,
+explicit contradictory license always rejects. Evidence persisted in both
+publisher and inventory JSON and checked before model load. No generic
+missing-license exception or operator override. Existing Silero source trust
+and mutable URL limitations unchanged. After latest exact green CI, SOL may
+resume public provisioning in new output directory; no TTS/model loading.
+Gamebox SSH timeout remains separate blocker. CPU dependency resolution is
+not proof of native imports. No code change by operator.
