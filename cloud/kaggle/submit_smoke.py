@@ -17,6 +17,7 @@ def cli(*args):
     return result.stdout
 
 def main():
+    raise RuntimeError("SUBMISSION_LOCKED_CLOUD_QUOTA_01")
     if not os.environ.get("KAGGLE_API_TOKEN"):
         raise RuntimeError("KAGGLE_API_TOKEN_NOT_CONFIGURED")
     config = cli("config", "view")
