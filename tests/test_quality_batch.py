@@ -2,6 +2,8 @@ import hashlib
 import json
 
 import pytest
+import numpy as np
+import soundfile as sf
 
 from audiobook.quality_batch import POLICY, validate_plan, choose_review, execute
 
@@ -18,7 +20,7 @@ def fixture(tmp_path):
         cid=f"{i:02d}"
         rows.append(dict(id=cid,hash=f"hash{i}",text="Мама.",status="done",
                          suspect=i==2))
-        (chunks/f"{cid}.wav").write_bytes(f"synthetic fixture {i}".encode())
+        sf.write(chunks/f"{cid}.wav", .1*np.sin(2*np.pi*(200+i)*np.arange(16000)/16000), 16000, subtype="FLOAT")
     manifest=tmp_path/"manifest.jsonl"
     data="\n".join(json.dumps(r,ensure_ascii=False) for r in rows).encode()
     manifest.write_bytes(data)
