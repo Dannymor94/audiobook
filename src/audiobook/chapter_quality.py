@@ -42,6 +42,26 @@ def verify_ctc(manifest_digest, rows, findings, controls, results, summary, audi
     idx = {r["id"]: r for r in results}
     if len(idx) != len(results) or set(idx) != set(expected):
         raise ValueError("CTC_INVENTORY_MISMATCH")
+    # JSON object keys are strings; CTC ranks use integer vowel ordinals.
+    # Normalize only canonical decimal ordinal keys, reject collisions.
+    results = [dict(r, evidence=dict(r["evidence"])) for r in results]
+    for r in results:
+        e = r["evidence"]
+        if e["status"] == "ranked":
+            scores = e["scores"]
+            normalized = {}
+            for k, v in scores.items():
+                if type(k) is int:
+                    ordinal = k
+                elif isinstance(k, str) and k in tuple(str(i) for i in range(1, 9)):
+                    ordinal = int(k)
+                else:
+                    raise ValueError("INVALID_CTC_SCORE_KEY")
+                if not 1 <= ordinal <= 8 or ordinal in normalized:
+                    raise ValueError("INVALID_CTC_SCORE_KEY")
+                normalized[ordinal] = v
+            e["scores"] = normalized
+    idx = {r["id"]: r for r in results}
     thresholds = calibrate(results)
     if thresholds != summary["thresholds"]:
         raise ValueError("CTC_THRESHOLD_MISMATCH")
