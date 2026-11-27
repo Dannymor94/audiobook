@@ -6,6 +6,9 @@ T-CLOUD-QUOTA-01.md and T-ALG-09-QUALITY-BATCH-RECOVERY.md. Original
 CLOUD-05 remains optional Modal; no reuse of existing task IDs.
 No private transfer, full book render, paid resources or GPU submission.
 
+## Owner priority override — 2026-11-27
+VOICE FIRST. SFX-01, music, asset acquisition and mixing are HOLD until the clean narrated book is completed. No further SFX work. Existing draft artifacts remain isolated and must not be merged as part of voice delivery. Cloud preparation is a means, not a release prerequisite: prioritize the existing local chapter evidence, complete stress map, actual pronunciation and targeted repairs. No speculative detectors or new infrastructure unless they unblock measurable audio quality. The existing GPU hold and full-book owner listening gate remain binding.
+
 | Order | Work | Status / exit |
 |---|---|---|
 | 1 | CLOUD-04 CPU preparation | Draft Colab notebook, fixed public cases and pinned Silero asset; offline contract tests; no actual runtime yet |
@@ -14,7 +17,7 @@ No private transfer, full book render, paid resources or GPU submission.
 | 4 | CH1-RECOVERY | Local gamebox availability/idle check, canonical manifest/WAV identity, run existing ALG09 quality batch read-only, inventory genuine author controls; report exact missing/stale chunks and aggregate counts |
 | 5 | STRESS-100 | Reuse existing map, lexical evidence, exact occurrence binding and owner overrides; report all tokens, conflicts and unresolved independently of actual acoustic quality; no auto-acceptance |
 | 6 | CH1-AUDIO | Use actual ALG09 report and owner confirmed defects to choose limited repair cases; natural pause A/B on existing WAVs, then targeted authorized TTS only if necessary. Full chapter requires owner authorization where existing scope does not cover it |
-| parallel | SFX-01 | Public source/license inventory, schema for scene/chapter/chunk/time-anchor, cue type, asset SHA, gain/fade/ducking, revision; exact private placement and mixing local; no asset selection without license evidence |
+| deferred | SFX-01 | HOLD until clean narrated book is complete; no acquisition, placement or mix |
 | last | RELEASE | Owner listening of complete CH1, then explicit full book GO; resumable render and MP3/M4B export |
 
 ## CPU admission / routing
