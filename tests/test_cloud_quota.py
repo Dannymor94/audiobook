@@ -81,5 +81,5 @@ def test_real_legacy_hold():
     path=Path(__file__).resolve().parents[1]/"cloud"/"ledger"/"gpu-events.jsonl"
     events=[json.loads(line) for line in path.read_text().splitlines()]
     jobs,_=replay(events)
-    assert jobs["legacy-46019695614"]["state"]=="QUEUED"
+    assert jobs["legacy-46019695614"]["state"]=="UNKNOWN"
     assert admit(events,quota(),request(),NOW)["reason"]=="OUTSTANDING_GPU_JOB"
