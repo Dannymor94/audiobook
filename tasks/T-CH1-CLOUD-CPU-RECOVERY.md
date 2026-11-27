@@ -9,16 +9,38 @@ No private transfer, full book render, paid resources or GPU submission.
 ## Owner priority override — 2026-11-27
 VOICE FIRST. SFX-01, music, asset acquisition and mixing are HOLD until the clean narrated book is completed. No further SFX work. Existing draft artifacts remain isolated and must not be merged as part of voice delivery. Cloud preparation is a means, not a release prerequisite: prioritize the existing local chapter evidence, complete stress map, actual pronunciation and targeted repairs. No speculative detectors or new infrastructure unless they unblock measurable audio quality. The existing GPU hold and full-book owner listening gate remain binding.
 
-| Order | Work | Status / exit |
+## Binding hybrid execution plan — owner clarification 2026-11-27
+
+Cloud = short experiments and rapid evidence, not the production pipeline.
+Local = complete book, private voice, long calculations and persistent cache.
+Run independent cloud and local CPU tracks in parallel when resources and
+access permit; neither waits for the other unless there is a real dependency.
+Choose cloud only when expected queue + setup + inference + export is shorter
+than the qualified local alternative. Reuse existing evidence and weights.
+Do not spend cloud quota on ordinary CI, repeated downloads or full chapters.
+
+| Order | Work | Execution location / exit |
 |---|---|---|
-| 1 | CLOUD-04 CPU preparation | Draft Colab notebook, fixed public cases and pinned Silero asset; offline contract tests; no actual runtime yet |
-| 2 | CPU-ROUTE-01 | Route pure hashing/manifest/lexical replay/waveform/report tests to bounded CPU; real private text/audio local only; use existing implementations, no speculative new detector |
-| 3 | CLOUD-QUOTA-01 | Retain 1200 GPU-s UNKNOWN hold; no repeated deletion; no provider failover. Obtain independent active-session/terminal evidence, fresh quota and verified billing. Durable store CAS and bounded submission controller remain unfinished |
-| 4 | CH1-RECOVERY | Local gamebox availability/idle check, canonical manifest/WAV identity, run existing ALG09 quality batch read-only, inventory genuine author controls; report exact missing/stale chunks and aggregate counts |
-| 5 | STRESS-100 | Reuse existing map, lexical evidence, exact occurrence binding and owner overrides; report all tokens, conflicts and unresolved independently of actual acoustic quality; no auto-acceptance |
-| 6 | CH1-AUDIO | Use actual ALG09 report and owner confirmed defects to choose limited repair cases; natural pause A/B on existing WAVs, then targeted authorized TTS only if necessary. Full chapter requires owner authorization where existing scope does not cover it |
-| deferred | SFX-01 | HOLD until clean narrated book is complete; no acquisition, placement or mix |
-| last | RELEASE | Owner listening of complete CH1, then explicit full book GO; resumable render and MP3/M4B export |
+| 1A | ROOT-01/02 | Local Mac CPU: trace exact known-error source, map, final synthesis input and tokenizer identity; gamebox if existing WAV/runtime required. No new TTS for boundary audit. |
+| 1B | STRESS-100 | Local Mac CPU: complete existing occurrence map, resolve conflicts and unknowns, bind exact manifest; parallel with 1A/2A where possible. |
+| 2A | Short public acoustic probes | Colab CPU first for explicit-stress Silero; Kaggle/Colab GPU only after GPU hold and admission resolved. Fixed public synthetic cases and non-author voices, 4–8 short clips, initial <=10 min compute, existing stricter quota rules prevail. Deliver small phone-playable MP3/HTML via authorized private artifact, not public manuscript. |
+| 2B | CH1-RECOVERY | Local gamebox: verify reachability/resources/idle lock, reconcile existing manifest/WAVs, run ALG09 baseline and inventory independent gold controls. Can proceed without cloud. |
+| 3 | ROOT-03 | Local gamebox: existing bounded Silero + OpenVoice author-voice pilot if ready; compare qualified cloud public evidence and stock baseline; qualify one engine, no blind promotion. CF rights HOLD. |
+| 4 | ROOT-04/05 | Local: calibrate existing acoustic verifier on independent controls; public short benchmark may run in cloud, private and large-scale inference on gamebox. Measure recall, false accepts, abstention; no CER-only approval. Bounded repair, preserve cache. |
+| 5 | CH1-AUDIO | Local gamebox: qualified targeted repairs and contiguous chapter preview. Use existing WAVs; check lexical/stress/voice/rhythm/artifacts. No full book render yet. |
+| 6 | RELEASE | Owner accepts first chapter, then explicitly authorizes full book. Long synthesis, all chapters, full acoustic QC, assembly/mastering/export on gamebox; Mac light management and listening. |
+| ongoing | CLOUD-QUOTA-01 | Retain 1200 GPU-s UNKNOWN hold; no repeat deletion, GPU retry or failover; fresh quota/terminal evidence/verified billing and durable admission before enabling. Not a blocker for local work. |
+| deferred | SFX-01 | HOLD until clean narrated book completed; no acquisition, placement or mix. |
+
+Cloud transfer rule: no private manuscript, voice, latents, private WAVs or
+labels unless separately and explicitly authorized for the exact provider
+and data class. Public test output cannot establish author-voice quality.
+Phone delivery of private audio must use an existing authorized private
+channel; do not infer permission to upload from the request for listening.
+Owner listens to useful calibration evidence and final chapter, not every
+test. Short public runs are diagnostic only. Local production remains
+Gamebox-only; Mac does no heavy TTS. Zero spend, 20% quota reserve and
+one outstanding GPU job across providers remain binding.
 
 ## CPU admission / routing
 - No external CPU job without verified account quota, cost and reserve, or documented free manual bounded session under existing policy. No automated Colab login or session keepalive.
