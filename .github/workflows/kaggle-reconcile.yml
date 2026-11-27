@@ -1,0 +1,36 @@
+name: CLOUD-QUOTA-01 reconcile existing Kaggle job
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ['.github/workflows/kaggle-reconcile.yml']
+permissions:
+  contents: read
+concurrency:
+  group: audiobook-kaggle-public-smoke
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    if: github.head_ref == 'task/stress-map-r1' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - id: gate
+        run: |
+          if [ "$(git log -1 --format=%s)" = 'ci(cloud): reconcile existing Kaggle job without submission' ] && [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install pinned public CLI
+        if: steps.gate.outputs.run == 'true'
+        run: python -m pip install kaggle==2.2.5
+      - name: Read existing job and verify output if complete
+        if: steps.gate.outputs.run == 'true'
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          PYTHONUTF8: '1'
+        run: python cloud/kaggle/reconcile_smoke.py
