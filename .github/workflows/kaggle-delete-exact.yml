@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: audiobook-kaggle-public-smoke
+  group: audiobook-kaggle-delete-approved-exact-46019695614
   cancel-in-progress: false
 jobs:
   delete-exact:
