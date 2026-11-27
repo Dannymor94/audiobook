@@ -22,6 +22,11 @@ OV_SOURCE = "74a1d147b17a8c3092dd5430504bd83ef6c7eb23"
 SILERO_SOURCE = "e382298387332f2bf461fe6eadfde99104611b0c"
 NAMES = ("silero.pt", "config.json", "checkpoint.pth")
 
+# Observed byte identities: successful public-only CI run 45957660226.
+# Silero SHA is our observed content pin, not a publisher-signed digest.
+SILERO_SHA = "ba41b18f6a707ad93605a162998865e7c087153d2e010a26dd02229dab0e672a"
+OV_CONFIG_SHA = "9dfff60350b8c63f2c664efd92a61b2516efb22671466960f0e5dfebd881fa47"
+
 # Lead-reviewed publisher evidence (2026-11-27). Only this immutable release
 # and published checkpoint digest are covered. Not an assertion of training
 # data clearance. Do not extend this record to another revision.
@@ -69,7 +74,8 @@ def verify_inventory(root: Path, inv: dict) -> dict:
                                           else "reviewed-exact-release")):
         raise ValueError("MISSING_OR_INVALID_LICENSE_EVIDENCE")
     files = inv["files"]
-    if set(files) != set(NAMES) or files["checkpoint.pth"] != OV_SHA:
+    if files != {"silero.pt": SILERO_SHA, "config.json": OV_CONFIG_SHA,
+                 "checkpoint.pth": OV_SHA}:
         raise ValueError("WRONG_ASSET_INVENTORY")
     for name in NAMES:
         p = root/name
