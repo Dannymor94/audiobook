@@ -34,3 +34,5 @@ jobs:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           PYTHONUTF8: '1'
         run: python cloud/kaggle/reconcile_smoke.py
+
+# Reconciliation checkpoint 02: inspect the same remote version only.
