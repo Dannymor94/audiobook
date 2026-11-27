@@ -74,3 +74,35 @@ remote version, no new GPU work. Until durable admission/ledger is
 implemented and tested, all subsequent submissions blocked.
 Read-only monitor can query quota, exact version status and retrieve
 existing outputs if complete. No new kernel, no credentials logged.
+
+
+## Implementation checkpoint — 2026-11-27
+- Prior exact CI 46036247958: 875 passed, 3 deselected.
+- Read-only reconcile run 46039132028 / job 140642052419 at 17:06:30 UTC:
+  exact version still queued, 0.00h used, 30.00h remaining, refresh
+  2026-11-28 00:00 UTC. Queue age >2h14m. No render result.
+- Official pinned Kaggle CLI v2.2.5 docs and implementation inspected:
+  no separate kernel execution cancellation command; kernels delete is
+  destructive, not equivalent to cancellation. Do not delete the notebook.
+  If a stop/cancel control exists in the exact notebook UI, owner can
+  cancel that execution; reconcile terminal state before releasing hold.
+- cloud/ledger/gpu-events.jsonl stores the exact legacy queued job and
+  provider observation. Original job predates frozen plan digest; preserve
+  null instead of inventing one. Reserve 1200 GPU-seconds (600s runtime
+  times conservative 2 GPUs), because actual accounting multiplier has
+  not been established. This is a conservative planning hold, not actual
+  provider consumption or a proven provider limit.
+- src/audiobook/cloud_quota.py: pure deterministic admission, five-minute
+  quota freshness, exact reset horizon, reserve 20%, conservative rounding
+  allowance, qualified one-GPU <=600s public route, zero-spend gate,
+  append-only hash-linked event replay, expected-tip CAS and terminal
+  receipt checks. Active/unknown states block another GPU route. 16 test
+  cases including real legacy hold. No new provider call in this module.
+- Original submit workflow and direct legacy entrypoint disabled; obsolete
+  unreserved push path removed. Read-only reconciliation remains usable.
+- This is not yet a live atomic remote scheduler: actual durable store
+  revision CAS and authenticated provider state verification must be wired
+  to admission/submission, cancellation/queue deadline must be enforceable,
+  and account billing/GPU accounting must be verified before enabling
+  submissions. A hash chain is not independent proof of provider receipts.
+  No automatic fallback, retry or new GPU job. Latest CI pending.
