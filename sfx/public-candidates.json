@@ -1,0 +1,27 @@
+{
+  "schema": "sfx-candidate-inventory-v1",
+  "reviewed_on": "2026-11-27",
+  "status": "candidate_only",
+  "assets": [
+    {
+      "id": "birds-garden",
+      "kind": "ambience",
+      "author": "Akum20",
+      "license": "CC0-1.0",
+      "source": "https://commons.wikimedia.org/w/index.php?title=File:Birds_chirping_in_a_garden.ogg&oldid=1087214085",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Birds_chirping_in_a_garden.ogg",
+      "bytes": 2637897,
+      "source_sha1": "53e7cac9a45f2d680f5ead2e4a42892c21a69ac0"
+    },
+    {
+      "id": "wind-building",
+      "kind": "ambience",
+      "author": "Tvabutzku1234",
+      "license": "CC0-1.0",
+      "source": "https://commons.wikimedia.org/w/index.php?title=File:Howling_wind.ogg&oldid=1304325871",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Howling_wind.ogg",
+      "bytes": 1112243,
+      "source_sha1": "90958205859310a279d03cd0d77e4d467f4805d5"
+    }
+  ]
+}
