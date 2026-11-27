@@ -60,7 +60,7 @@ def main() -> int:
     a.out.mkdir(mode=0o700)
     publisher = {}
     for name in ("config.json", "checkpoint.pth"):
-        remote = "converter/"+name
+        remote = f"converter/{name}"
         s = siblings[remote]
         if name == "checkpoint.pth":
             if getattr(s.lfs, "sha256", None) != OV_SHA:
@@ -80,7 +80,9 @@ def main() -> int:
         length = int(response.headers.get("Content-Length", "0"))
         if not 0 < length < 1024**3:
             raise ValueError("UNEXPECTED_SILERO_SIZE")
-        with (a.out/"silero.pt").open("xb") as f:
+        target = a.out / "silero.pt"
+        target.touch(exist_ok=False)
+        with target.open("wb") as f:
             remaining = length
             while remaining:
                 block = response.read(min(1024*1024, remaining))
