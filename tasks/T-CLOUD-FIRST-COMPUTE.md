@@ -9,9 +9,9 @@ No full book render or production config/merge authorized. Mac no heavy TTS.
 
 | Provider | Advertised allowance / constraints | Route |
 |---|---|---|
-| Kaggle | Up to 30 GPU hours/week in official GPU tips; floating account quota, tips say 9h/session, other docs may differ; actual account/session limits authoritative. Plan 1h max initial job, later <=4h and below confirmed session limit. T4 x2 or L4 may be selectable, not guaranteed. Verify account and phone if required. | Primary public GPU batch; official CLI kernels push/status/output; private notebook by default |
+| Kaggle | Up to 30 GPU hours/week in official GPU tips; floating account quota, current notebook docs and official runtime update say 12h CPU/GPU (older tips say 9h), 20GB saved output, 4 CPU cores and ~29–30GB RAM; actual account/session limits authoritative. Plan 1h max initial job, later <=4h and below confirmed session limit. T4 x2 or L4 may be selectable, not guaranteed. Verify account and phone if required. | Primary public GPU batch; official CLI kernels push/status/output; private notebook by default |
 | Colab free | Dynamic GPU/idle/VM limits, max 12h session, hardware not guaranteed; SSH/remote-control bypass prohibited on free managed runtime. | Manual notebook fallback; public short trials only, no keepalive hacks |
-| Modal Starter | $30 monthly eligible compute; T4 $0.000164/s, L4 $0.000222/s, A10 $0.000306/s, CPU $0.0000131/core/s, RAM $0.00000222/GiB/s; network egress separately priced. Payment method may be required for GPU; verify out-of-pocket spend cap before enabling. | Automated bounded public GPU/CPU jobs; not active until billing safety confirmed |
+| Modal Starter | $30 monthly eligible compute; T4 $0.000164/s, L4 $0.000222/s, A10 $0.000306/s, CPU $0.0000131/core/s, RAM $0.00000222/GiB/s; network egress separately priced. Payment method may be required for GPU; official budgets docs describe separate net spend limit that stops workloads incurring extra charges; verify $0 net spend limit and <=$24 gross workspace budget in actual dashboard before enabling. | Automated bounded public GPU/CPU jobs; not active until billing safety confirmed |
 | GitHub Actions | Standard hosted public-repo compute free, private Free $12/month included compute, Pro $18, storage 500MB/1GB respectively. Current account plan/balance unknown; larger GPU runners not assumed free. | CI, public CPU smoke and hash/manifest/report tests; small public test outputs only if allowance confirmed |
 | Lightning AI | 1 free 4-CPU Studio, 4h restarts, first 10GB storage free per billing docs; up to $30 promotional starting credits, not recurring guaranteed, actual grant may differ. | Persistent development/prep; CPU tests, optional GPU one-off |
 | HF ZeroGPU | 5 min/day authenticated free, 2min anonymous, 48GB large /96GB xlarge (2x quota), 60s default call; Gradio only, supported Python3.10/3.12 and Torch >=2.8; free hosting up to 2 spaces eligible verified account age >30d. | Single short public demo, not batch worker |
@@ -26,7 +26,7 @@ No full book render or production config/merge authorized. Mac no heavy TTS.
 
 Official sources:
 - https://www.kaggle.com/page/GPU-tips-and-tricks
-- https://www.kaggle.com/docs/notebooks
+- https://www.kaggle.com/docs/notebooks ; https://www.kaggle.com/product-feedback/302908
 - https://github.com/Kaggle/kaggle-cli/blob/main/docs/kernels.md
 - https://research.google.com/colaboratory/faq.html
 - https://modal.com/pricing ; https://modal.com/docs/guide/budgets
