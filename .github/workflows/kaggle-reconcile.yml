@@ -45,3 +45,5 @@ jobs:
 
 # Reconciliation checkpoint 03: export verified existing outputs when available.
 # Reconciliation checkpoint 02: inspect the same remote version only.
+
+# Reconciliation checkpoint 04: owner status request, same exact remote version.
