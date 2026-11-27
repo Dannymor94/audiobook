@@ -43,12 +43,17 @@ def test_inventory_rejects_modified_file(tmp_path, monkeypatch):
         "model": {"zero_g": True}}))
     files = {n: sha(tmp_path/n) for n in provision.NAMES}
     monkeypatch.setattr(provision, "OV_SHA", files["checkpoint.pth"])
+    monkeypatch.setattr(provision, "SILERO_SHA", files["silero.pt"])
+    monkeypatch.setattr(provision, "OV_CONFIG_SHA", files["config.json"])
     evidence = dict(provision.OV_LICENSE_EVIDENCE, api_license=None,
                     method="reviewed-exact-release")
     inv = dict(silero_url=provision.SILERO_URL, openvoice_revision=provision.OV_REV,
                openvoice_source=provision.OV_SOURCE, silero_source=provision.SILERO_SOURCE,
                files=files, license_evidence=evidence)
     assert provision.verify_inventory(tmp_path, inv) == inv
+    changed = dict(inv, files=dict(files, **{"silero.pt": "b"*64}))
+    with pytest.raises(ValueError, match="WRONG_ASSET_INVENTORY"):
+        provision.verify_inventory(tmp_path, changed)
     (tmp_path/"silero.pt").write_bytes(b"different")
     with pytest.raises(ValueError, match="ASSET_DIGEST_MISMATCH"):
         provision.verify_inventory(tmp_path, inv)
