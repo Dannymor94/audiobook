@@ -128,3 +128,27 @@ def test_voice_metric_diagnostic_not_human_verdict():
     r["wav_sha256"]="b"*64
     with pytest.raises(ValueError,match="VOICE_IDENTITY_MISMATCH"):
         verify_voice(digest(m),chapter_rows(m),audio,[r],s)
+
+
+def test_ctc_json_ordinal_keys_roundtrip():
+    from audiobook.stress_ctc_calibration import calibrate
+    from audiobook.stress_ctc_evidence import decide
+    m=manifest()
+    rows=chapter_rows(m)
+    fs=findings()
+    controls=[dict(f,expected_index=1,wav_sha256=d,split=s,gold=g)
+              for f,d,s,g in [(fs[0],"a"*64,"development","wrong_stress"),
+                              (fs[1],"b"*64,"heldout","correct")]]
+    results=[dict(id=f"{c['id']}:1",split=c["split"],gold=c["gold"],
+                  expected_ordinal=1,evidence=dict(status="ranked",scores={1:-5.,2:-1.},
+                      best_ordinal=2,margin_per_frame=1.,fit_per_frame=-.5))
+             for c in controls]
+    thresholds=calibrate(results)
+    assert thresholds is not None
+    for r in results:
+        r["signal"]=decide(r["evidence"],expected_ordinal=1,**thresholds)
+    s=dict(summarize_gold(results),diagnostic_only=True,thresholds=thresholds,
+           input_sha256={"manifest":digest(m),"controls":"control-digest"})
+    loaded=json.loads(json.dumps(results))
+    assert len(verify_ctc(digest(m),rows,fs,controls,loaded,s,
+                         {"01":"a"*64,"02":"b"*64},"control-digest"))==2
