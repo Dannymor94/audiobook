@@ -117,3 +117,35 @@ and mutable URL limitations unchanged. After latest exact green CI, SOL may
 resume public provisioning in new output directory; no TTS/model loading.
 Gamebox SSH timeout remains separate blocker. CPU dependency resolution is
 not proof of native imports. No code change by operator.
+
+## Power-outage progress: actual public provisioning PASS (2026-11-27)
+
+GitHub Actions PR-triggered smoke run 45957660226 at 8d0a5bbfa26b18e559f7008bffc674a8aed5627b,
+job 140367790948: actual provisioner executed successfully with HF hub 1.33.0.
+All three public files downloaded; actual OpenVoice checkpoint publisher
+SHA and config Git blob verified. No private data, model loading or TTS.
+Observed exact SHA256:
+- silero.pt ba41b18f6a707ad93605a162998865e7c087153d2e010a26dd02229dab0e672a
+- config.json 9dfff60350b8c63f2c664efd92a61b2516efb22671466960f0e5dfebd881fa47
+- checkpoint.pth 9652c27e92b6b2a91632590ac9962ef7ae2b712e5c5b7f4c34ec55ee2b37ab9e
+Inventory SHA256 7955e05acf8188bf4d19c40510d885bf5eaf8333319f53ca5c21d6759a4f4165.
+Silero and config hashes are now frozen in source; changed byte identities
+reject even if local inventory rewritten. Silero observed SHA is not
+publisher-signed. Cloud runner ephemeral, weights not persisted or uploaded;
+local machine must still download same bytes. No repeated cloud downloads
+on subsequent commits (explicit smoke commit gate).
+
+Added silero_openvoice_score.py with nine synthetic tests. Local read-only
+unblinding verifies READY/plan/receipts, page/key, all labels and source/review
+WAV digests, arm identity and target. Explicit categorical stress/lexical/
+voice/rhythm ratings only. Development counts separate; heldout gate requires
+both baseline and converted correct stress and lexical integrity, candidate
+voice yes, no rhythm regression and candidate overall OK. Blank fields on
+any clip prevent diagnostic pass. Unclear heldout required measurements
+fail; no automatic production authorization. Score command after local review:
+`python -m audiobook.silero_openvoice_score --source "$COPIED_RUN" --review-dir "$REVIEW" --private-key "$KEY" --labels "$LABELS"`.
+Outputs aggregate counts and case IDs/reasons, not private comments or audio.
+This automates evidence checking/scoring, NOT machine listening or acoustic
+stress recognition. Existing energy-based detector remains unreliable; no
+new detector claimed. Latest CI must pass before local dispatch. Native
+runtime, offline sandbox, voice and rhythm remain unverified. No new TTS.
