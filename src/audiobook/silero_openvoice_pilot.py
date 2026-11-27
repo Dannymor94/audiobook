@@ -138,7 +138,7 @@ def main():
         return verify_inventory(a.assets, json.loads(a.inventory.read_bytes()))
     inv = verify()
     versions = {n: importlib.metadata.version(n) for n in
-                ("torch", "numpy", "scipy", "soundfile", "librosa")}
+                ("torch", "numpy", "scipy", "soundfile")}
     versions["python"] = sys.version
     plan = make_plan(inv, a.reference_sha256, versions)
     data = json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()
