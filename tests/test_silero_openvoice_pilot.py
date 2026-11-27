@@ -43,10 +43,36 @@ def test_inventory_rejects_modified_file(tmp_path, monkeypatch):
         "model": {"zero_g": True}}))
     files = {n: sha(tmp_path/n) for n in provision.NAMES}
     monkeypatch.setattr(provision, "OV_SHA", files["checkpoint.pth"])
+    evidence = dict(provision.OV_LICENSE_EVIDENCE, api_license=None,
+                    method="reviewed-exact-release")
     inv = dict(silero_url=provision.SILERO_URL, openvoice_revision=provision.OV_REV,
                openvoice_source=provision.OV_SOURCE, silero_source=provision.SILERO_SOURCE,
-               files=files)
+               files=files, license_evidence=evidence)
     assert provision.verify_inventory(tmp_path, inv) == inv
     (tmp_path/"silero.pt").write_bytes(b"different")
     with pytest.raises(ValueError, match="ASSET_DIGEST_MISMATCH"):
         provision.verify_inventory(tmp_path, inv)
+
+
+def test_converter_license_evidence():
+    from types import SimpleNamespace
+    sibling = SimpleNamespace(rfilename="converter/checkpoint.pth",
+                              lfs=SimpleNamespace(sha256=provision.OV_SHA))
+    info = SimpleNamespace(id=provision.OV_REPO, sha=provision.OV_REV,
+                           card_data=None, siblings=[sibling])
+    ev = provision.converter_license_evidence(info)
+    assert ev["method"] == "reviewed-exact-release"
+    assert ev["api_license"] is None
+    info.card_data = {"license": "mit"}
+    assert provision.converter_license_evidence(info)["method"] == "api+reviewed-release"
+    info.card_data = {"license": "cc-by-nc-4.0"}
+    with pytest.raises(ValueError, match="LICENSE_CONFLICT"):
+        provision.converter_license_evidence(info)
+    info.card_data = None
+    info.sha = "b"*40
+    with pytest.raises(ValueError, match="REVISION_MISMATCH"):
+        provision.converter_license_evidence(info)
+    info.sha = provision.OV_REV
+    sibling.lfs.sha256 = "b"*64
+    with pytest.raises(ValueError, match="WEIGHT_DIGEST_MISMATCH"):
+        provision.converter_license_evidence(info)
