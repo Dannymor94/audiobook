@@ -243,6 +243,11 @@ def render_stage(a, plan):
             if stage == "design":
                 generate_once(a, a.out / "references" / (voice+".wav"), model,
                     "voice_design", plan["reference_text"], plan["reference_max_new_tokens"], instruct=DESIGNS[voice])
+                transcript = a.out / "references" / (voice+".txt")
+                if transcript.exists() and transcript.read_text(encoding="utf-8") != plan["reference_text"]:
+                    raise RuntimeError("REFERENCE_TRANSCRIPT_CHANGED")
+                if not transcript.exists():
+                    transcript.write_text(plan["reference_text"], encoding="utf-8")
                 continue
             extra = dict(speaker=voice, instruct=STYLE) if stage == "custom" else {}
             if stage == "base":
