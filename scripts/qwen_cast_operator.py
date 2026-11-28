@@ -304,6 +304,10 @@ def finish_stage(a, plan):
                     rec = read(src.with_suffix(".receipt.json"))
                     if sha(src) != rec["sha256"]:
                         raise RuntimeError("RAW_WAV_CHANGED")
+                    # Candidate index provenance must never inherit the cached
+                    # author's seed/hash/acceptance metadata.
+                    row.update(seed=42, seed_override=None, locked=False,
+                        hash=hashlib.sha256((voice+cid+sha(a.out / "plan_PRIVATE.json")+rec["sha256"]).encode()).hexdigest())
                     if not dest.exists():
                         wav, sr = sf.read(src, dtype="float32")
                         if item["phrase"]:
