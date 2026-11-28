@@ -11,6 +11,7 @@ from audiobook.pocket_preflight import sha
 def test_contextual_stress_cases():
     validate_cases()
     plan = make_plan({}, "reference", {})
+    assert plan["speaker"] == "ru_dmitriy"
     assert len(plan["trials"]) == len(CASES) == 4
     assert [t["target"]["vowel_ordinal"] for t in plan["trials"]] == [1, 2, 2, 1]
     assert all(t["baseline_sha256"] == t["candidate_sha256"] for t in plan["trials"])
