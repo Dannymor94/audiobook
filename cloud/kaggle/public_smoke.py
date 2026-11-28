@@ -15,7 +15,7 @@ CASES = (
     "На стол+е леж+али хл+еб, с+ыр и мук+а.",
     "+Это был+а насто+ящая м+ука.",
 )
-SPEAKER = "ru_bel_dmitriy"
+SPEAKER = "ru_dmitriy"
 
 def main():
     root = Path("/kaggle/working")
