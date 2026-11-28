@@ -823,6 +823,8 @@ def test_synthesize_flags_cap_saturation(monkeypatch):
     import numpy as np
 
     import audiobook.synth as synth_mod
+    # This test cannot load a real model (stub or empty snapshot).
+    monkeypatch.setattr(synth_mod, "require_gamebox", lambda: None)
     from audiobook.synth import CapExceeded, synthesize, _CODEC_HZ, _SAMPLE_RATE
 
     # Skip the qwen_tts import in _dict_to_items (pulls onnxruntime); the stub
@@ -900,6 +902,8 @@ def test_synth_offline_no_download(monkeypatch, tmp_path):
     FileNotFoundError from the local-snapshot lookup, before any network or
     qwen_tts import. Guards the offline load-by-path fix."""
     import audiobook.synth as synth_mod
+    # This test cannot load a real model (stub or empty snapshot).
+    monkeypatch.setattr(synth_mod, "require_gamebox", lambda: None)
     monkeypatch.setattr(synth_mod, "_model", None)
     from audiobook import paths
     monkeypatch.setattr(paths, "MODELS", tmp_path / "models")

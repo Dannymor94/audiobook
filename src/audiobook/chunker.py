@@ -821,9 +821,8 @@ def _read_manifest(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def run(config: dict, section: str | None = None) -> int:
-    """Re-chunk every section, or only ``section`` (NN_slug). A single-section
-    re-chunk touches only that section's manifest and wavs (orphans → _orphan/)."""
+def run(config: dict, section: str | None = None, *, missing_only: bool = False) -> int:
+    """Create/re-chunk sections; missing_only never rewrites existing manifests or WAVs."""
     import glob
     out_root = paths.OUT / "sections"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -836,15 +835,23 @@ def run(config: dict, section: str | None = None) -> int:
         if section and f"{nn}_{slug}" != section:
             continue
         normf = paths.TEXT / f"{nn}_{slug}.norm.txt"
+        if missing_only and not normf.exists():
+            raise SystemExit(f"chunk: missing normalized source for {nn}_{slug}")
         if not normf.exists() or normf.stat().st_size < 50:
             continue  # empty/skipped section
-        units = load_units(nn, slug)
-        new_manifest = build_manifest(units, section_config(config, f"{nn}_{slug}"))
-
         sec_dir = out_root / f"{nn}_{slug}"
-        sec_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = sec_dir / "manifest.jsonl"
         chunks_dir = sec_dir / "chunks"
+        if missing_only and manifest_path.exists():
+            n = len(_read_manifest(manifest_path))
+            total += n
+            per_section.append((f"{nn}_{slug}", n, "existing manifest preserved"))
+            continue
+        if missing_only and chunks_dir.exists() and any(chunks_dir.iterdir()):
+            raise SystemExit(f"chunk: {nn}_{slug} has audio/artifacts without manifest; refusing")
+        units = load_units(nn, slug)
+        new_manifest = build_manifest(units, section_config(config, f"{nn}_{slug}"))
+        sec_dir.mkdir(parents=True, exist_ok=True)
 
         note = ""
         if manifest_path.exists():

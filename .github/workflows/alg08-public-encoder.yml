@@ -1,0 +1,40 @@
+name: ALG-08 public encoder smoke
+# One-shot public ONNX contract check, never private voice data or TTS.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ['.github/workflows/alg08-public-encoder.yml']
+permissions:
+  contents: read
+jobs:
+  public-encoder:
+    if: github.head_ref == 'task/stress-map-r1' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PYTHONUTF8: '1'
+      PYTHONPATH: src
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      HF_HUB_DISABLE_XET: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: gate
+        run: |
+          if [ "$(git log -1 --format=%s)" = 'ci(ALG-08): verify public encoder and ONNX feature contract' ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.gate.outputs.run == 'true'
+        with:
+          enable-cache: false
+      - name: Public asset and synthetic feature matrix only
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          uv run --no-project --python 3.11 --with huggingface_hub==1.33.0 --with numpy==1.26.4 --with onnxruntime==1.23.2 python -m audiobook.voice_similarity --provision "$RUNNER_TEMP/alg08-public"
+          uv run --no-project --python 3.11 --with huggingface_hub==1.33.0 --with numpy==1.26.4 --with onnxruntime==1.23.2 python -c 'import os,numpy as np; from pathlib import Path; from audiobook.voice_similarity import load_encoder,MODEL_NAME,unit; session=load_encoder(Path(os.environ["RUNNER_TEMP"])/"alg08-public"/MODEL_NAME); x=np.random.default_rng(42).normal(size=(1,200,80)).astype(np.float32); v=session.run(["embs"],{"feats":x})[0]; assert v.shape==(1,256); unit(v[0]); print("PUBLIC_ENCODER_CONTRACT_PASS")'

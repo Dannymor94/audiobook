@@ -342,6 +342,18 @@ def _render_item(i: int, it: dict) -> str:
         text += f'<p class="text">{html.escape(meta["text"])}</p>'
     if meta.get("synth_text") and meta.get("synth_text") != meta.get("text"):
         text += f'<p class="text synth"><b>модели:</b> {html.escape(meta["synth_text"])}</p>'
+    ratings = ""
+    if meta.get("control_ratings"):
+        fields = (
+            ("heard_stress", "Ударение в слове " + str(meta["target_word"]), (("1", "Первый слог"), ("2", "Второй слог"), ("unclear", "Не разобрать"))),
+            ("lexical", "Все слова разборчивы?", (("yes", "Да"), ("no", "Нет"), ("unclear", "Не уверен"))),
+            ("voice", "Похож на голос автора?", (("yes", "Да"), ("no", "Нет"), ("unclear", "Не уверен"))),
+            ("rhythm", "Естественность ритма", (("ok", "Хорошо"), ("bad", "Плохо"), ("unclear", "Не уверен"))),
+        )
+        for key, label, opts in fields:
+            choices = "".join(f'<option value="{v}">{html.escape(t)}</option>' for v, t in opts)
+            ratings += (f'<label>{html.escape(label)}<select data-rating="{key}">'
+                        f'<option value="">—</option>{choices}</select></label>')
     options = "".join(f'<option value="{o}">{o}</option>' for o in ISSUES)
     return (
         f'<article class="item" data-i="{i}">'
@@ -355,6 +367,7 @@ def _render_item(i: int, it: dict) -> str:
         '<button type="button" data-l="unsure">?</button></div>'
         f'<select class="issue" aria-label="что не так"><option value="">что не так: —</option>'
         f'{options}</select>'
+        f'{ratings}'
         '<textarea class="note" rows="2" placeholder="комментарий"></textarea>'
         '</article>'
     )
@@ -611,12 +624,18 @@ __ITEMS__
       b.setAttribute("aria-pressed", b.getAttribute("data-l") === s.label ? "true" : "false");
     });
     card.querySelector(".issue").value = s.issue || "";
+    Array.prototype.forEach.call(card.querySelectorAll("[data-rating]"), function (el) {
+      el.value = s[el.getAttribute("data-rating")] || "";
+    });
     var note = card.querySelector(".note");
     if (note.value !== (s.comment || "")) { note.value = s.comment || ""; }
   }
   function count() {
     var n = 0;
-    DATA.items.forEach(function (it) { if ((state[it.file] || {}).label) { n++; } });
+    DATA.items.forEach(function (it) {
+      var s = state[it.file] || {};
+      if (s.label && (!it.meta.control_ratings || (s.heard_stress && s.lexical && s.voice && s.rhythm))) { n++; }
+    });
     document.getElementById("count").textContent = n + " из " + DATA.items.length;
   }
   function patch(card, key, val) {
@@ -637,6 +656,9 @@ __ITEMS__
         var cur = (state[f] || {}).label;
         patch(card, "label", cur === b.getAttribute("data-l") ? "" : b.getAttribute("data-l"));
       });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll("[data-rating]"), function (el) {
+      el.addEventListener("change", function () { patch(card, el.getAttribute("data-rating"), el.value); });
     });
     card.querySelector(".issue").addEventListener("change", function (e) {
       patch(card, "issue", e.target.value);
@@ -661,9 +683,13 @@ __ITEMS__
   function build() {
     var items = DATA.items.map(function (it) {
       var s = state[it.file] || {};
-      return {file: it.file, section: it.section || "", chunk: it.chunk || "",
+      var item = {file: it.file, section: it.section || "", chunk: it.chunk || "",
               hash: it.hash || "", label: s.label || "", issue: s.issue || "",
               comment: s.comment || "", meta: it.meta};
+      if (it.meta.control_ratings) {
+        ["heard_stress", "lexical", "voice", "rhythm"].forEach(function (k) { item[k] = s[k] || ""; });
+      }
+      return item;
     });
     return JSON.stringify({title: DATA.title, page_id: DATA.page_id || "", kind: DATA.kind,
                            items: items}, null, 2);

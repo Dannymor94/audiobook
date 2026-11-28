@@ -1,0 +1,14 @@
+name: CLOUD-03 Kaggle public smoke (submission locked)
+# New submissions disabled until durable quota admission is implemented.
+# Existing remote jobs are reconciled via the separate read-only workflow.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ['.github/workflows/kaggle-public-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  submission-locked:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "SUBMISSION_LOCKED -- CLOUD-QUOTA-01"

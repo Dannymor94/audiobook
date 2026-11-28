@@ -51,6 +51,8 @@ def test_hub_dir_per_variant(monkeypatch, tmp_path):
 
 def test_load_model_1_7b_missing_weights_offline(monkeypatch, tmp_path):
     import audiobook.synth as synth_mod
+    # Missing-weight branch: no model can load from this empty temp directory.
+    monkeypatch.setattr(synth_mod, "require_gamebox", lambda: None)
     monkeypatch.setattr(synth_mod, "_model", None)
     monkeypatch.setattr(paths, "MODELS", tmp_path / "models")
     with pytest.raises(FileNotFoundError, match="1.7B-Base"):
