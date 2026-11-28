@@ -78,6 +78,7 @@ def main():
             versions=plan["versions"], requested_runtime=dict(device="cpu", dtype="float32", cpu_threads=8),
             api_non_streaming_mode=dict(custom_voice=True, voice_design=True, voice_clone=False),
             custom_instruction=plan["custom_instruction"], design_instructions=plan["designs"],
+            synthetic_reference_text_overlaps_audition_chunk_ids=["0003"],
             params=plan["params"], seeds=dict(new_candidates=42, author="cached original per-chunk seeds; see frozen plan"),
             comparison=plan["comparison"], models=models, references=refs, voices=voices,
             batch_started_at=start, batch_finished_at=end,
