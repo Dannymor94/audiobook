@@ -92,6 +92,8 @@ def configure(a):
     from audiobook import paths
     paths.MODELS = a.production / "models"
     paths.BIN = a.production / "bin"
+    paths.TEXT = a.production / "text"
+    paths.REF = a.production / "ref"
     paths.OUT = a.out / "work"
     paths.apply_env_defaults()
 
@@ -102,6 +104,8 @@ def inputs(a):
              p / "ref" / "ref_ch1.wav", p / "ref" / "ref_ch1.txt",
              p / "ref" / "ref_ch1.latents_1.7b.pt",
              p / "out" / "sections" / SECTION / "manifest.jsonl"]
+    # Text preparation uses the existing book-derived ё map, without changing it.
+    files.extend(sorted((p / "text").glob("*.norm.txt")))
     return {str(f.relative_to(p)): sha(f) for f in files}
 
 
