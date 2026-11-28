@@ -11,8 +11,9 @@ production, chapter 2, full-book render or automatic promotion.
   https://github.com/snakers4/silero-models/blob/e382298387332f2bf461fe6eadfde99104611b0c/LICENSE_CIS
   v5_cis_base MIT declaration, explicit + before stressed vowel, no auto
   stress/homographs, 24 kHz and SSML support. Fixed Russian speaker
-  ru_bel_dmitriy chosen from documented ru_ prefixed speaker list; actual
-  presence checked at load, no speaker shopping. Russian-only V5 and
+  ru_dmitriy selected from exact package inspection after ROOT-LOCAL-02;
+  actual presence checked at load, no speaker shopping. The original
+  ru_bel_dmitriy pin was absent; the earlier plan is not reusable. Russian-only V5 and
   CIS Ext noncommercial licenses excluded.
 - Official asset https://models.silero.ai/models/tts/ru/v5_cis_base.pt
   mutable URL, no independent publisher SHA-256 found. Local downloaded
@@ -149,3 +150,14 @@ This automates evidence checking/scoring, NOT machine listening or acoustic
 stress recognition. Existing energy-based detector remains unreliable; no
 new detector claimed. Latest CI must pass before local dispatch. Native
 runtime, offline sandbox, voice and rhythm remain unverified. No new TTS.
+
+## Speaker correction — 2026-11-28
+
+ROOT-LOCAL-02 (issue #26 comment 7235630868) reports zero TTS after the
+original speaker membership check failed. The exact already pinned package
+contains ru_dmitriy and bel_dmitriy strings, not ru_bel_dmitriy. Select only
+ru_dmitriy for Russian; actual runtime membership still required. Reuse
+verified assets, 14.065 s local reference and native sandbox. Generate a new
+plan digest; do not reuse old plan. One revised bounded execute only after
+exact CI success and chapter-render priority permits. No fallback or extra
+download. No acoustic success implied. Existing GPU submission lock unchanged.
