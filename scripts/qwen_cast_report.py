@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import json
 from pathlib import Path
 import subprocess
 
@@ -20,7 +21,7 @@ def main():
     plan = read(a.out / "plan_PRIVATE.json")
     delivery = read(a.out / "delivery_PRIVATE.json")
     with admission(a):
-        from audiobook import qc
+        from audiobook import paths, qc
         from faster_whisper import WhisperModel
         whisper = WhisperModel(str(a.production / "models" / "whisper" / "small"),
                                device="cpu", compute_type="int8", cpu_threads=8)
@@ -47,7 +48,15 @@ def main():
             receipts = [read(f) for f in sorted((a.out / "voices" / voice / "raw").glob("*.receipt.json"))]
             elapsed = sum(r["elapsed_s"] for r in receipts)
             raw_s = sum(r["duration_s"] for r in receipts)
+            target = plan["config"]["master"]
+            af = (f"loudnorm=I={target['lufs']}:TP={target['true_peak']}:"
+                  f"LRA={target.get('lra', 11)}:print_format=json")
+            loudness = subprocess.run([str(paths.ffmpeg()), "-hide_banner", "-i",
+                str(a.out / "voices" / voice / "section.mp3"), "-af", af,
+                "-f", "null", "-"], text=True, capture_output=True, check=True).stderr
+            measured = json.loads(loudness[loudness.rfind("{"):loudness.rfind("}")+1])
             voices.append(dict(voice=voice, duration_s=result["duration_s"], mp3_sha256=result["sha256"],
+                final_mp3_loudness_measurement=measured,
                 synthesized_chunks=len(receipts), reused_chunks=len(result["chunks"]) if voice == "Author" else 0,
                 synthesis_elapsed_s=elapsed, generated_raw_audio_s=raw_s,
                 raw_synth_rtf=elapsed/raw_s if raw_s else None,
