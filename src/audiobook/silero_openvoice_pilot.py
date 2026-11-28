@@ -21,7 +21,9 @@ from audiobook.rhythm_pilot import preflight
 from audiobook.silero_openvoice_provision import OV_SOURCE, verify_inventory
 
 POLICY = "silero-openvoice-control-v1"
-SPEAKER = "ru_bel_dmitriy"
+# Exact pinned package inspected on Gamebox in ROOT-LOCAL-02.
+# Retain the runtime membership guard; no speaker fallback.
+SPEAKER = "ru_dmitriy"
 SEED = 42
 CASES = (
     ("01", "development", "На холм+е сто+ял з+амок.", "замок", 1),
